@@ -1,0 +1,215 @@
+"""
+Moteur de matching. Trois entrées, deux cas d'usage :
+
+  amplify(note)   — cas A : houblons qui PROLONGENT un ajout (molécules + descripteurs)
+  contrast(note)  — cas A : houblons qui CONTRASTENT bien (affinités descripteurs)
+  combine(note)   — cas B : COMBINAISON de houblons recomposant un profil (NNLS)
+
+Choix de conception (cf. discussion) : pas d'OAV quantitatif (pas de concentration
+fiable). Le seuil sert de prior de puissance, la couche descripteurs est primaire,
+et la couche moléculaire tourne en similarité normalisée-par-composé (TF-IDF), pas
+en cosinus pseudo-OAV. Le cas B rapporte le RÉSIDU irréductible (molécules qu'aucune
+combinaison ne peut fournir) — la quantification honnête du « à quel point on approche ».
+"""
+from __future__ import annotations
+import math
+import sqlite3
+
+from . import reference
+
+REFERENCE_THRESHOLD_PPB = 30.0
+
+
+# --------------------------------------------------------------------------- #
+# Chargement + réconciliation multi-sources
+# --------------------------------------------------------------------------- #
+def _mid(lo, hi):
+    xs = [x for x in (lo, hi) if x is not None]
+    return sum(xs) / len(xs) if xs else None
+
+
+def load(con: sqlite3.Connection):
+    hops = {r["variety"]: dict(r) for r in con.execute("SELECT * FROM hops")}
+    raw: dict = {}
+    for r in con.execute("SELECT * FROM hop_composition WHERE confidence != 'suspect'"):
+        raw.setdefault(r["variety"], {}).setdefault(r["compound"], []).append(
+            (_mid(r["vmin"], r["vmax"]), r["unit"], r["source"]))
+    comp = {}
+    for v, cmap in raw.items():
+        comp[v] = {}
+        for compound, recs in cmap.items():
+            mids = [m for m, _, _ in recs if m is not None]
+            comp[v][compound] = {
+                "mid": sum(mids) / len(mids) if mids else None,
+                "unit": recs[0][1],
+                "sources": sorted({s for _, _, s in recs}),
+            }
+    hop_desc: dict = {}
+    for r in con.execute("SELECT variety, descriptor FROM hop_descriptors"):
+        hop_desc.setdefault(r["variety"], set()).add(r["descriptor"])
+    mols = {r["compound"]: dict(r) for r in con.execute("SELECT * FROM molecules")}
+    return hops, comp, hop_desc, mols
+
+
+def hop_compound(m: str) -> str:
+    return reference.ALIASES.get(m, m)
+
+
+def amount(variety: str, molecule: str, comp) -> float:
+    rec = comp.get(variety, {}).get(hop_compound(molecule))
+    if not rec or rec["mid"] is None:
+        return 0.0
+    if rec["unit"] == "pct_oil":
+        oil = comp.get(variety, {}).get("total_oil")
+        return (rec["mid"] / 100.0) * ((oil["mid"] if oil else 1.0) or 1.0)
+    return rec["mid"]
+
+
+def specificity(molecule: str, comp) -> float:
+    c = hop_compound(molecule)
+    n = len(comp)
+    n_with = sum(1 for h in comp if comp[h].get(c) and comp[h][c]["mid"])
+    return math.log(n / (1 + n_with)) + 1.0
+
+
+def get_note(con, note: str) -> dict[str, float]:
+    rows = con.execute("SELECT molecule, weight FROM aroma_notes WHERE note=?", (note,)).fetchall()
+    if not rows:
+        avail = [r[0] for r in con.execute("SELECT DISTINCT note FROM aroma_notes")]
+        raise KeyError(f"Note inconnue : {note!r}. Dispo : {', '.join(sorted(avail))}")
+    return {r["molecule"]: r["weight"] for r in rows}
+
+
+def get_note_descriptors(con, note: str) -> set[str]:
+    return {r[0] for r in con.execute(
+        "SELECT descriptor FROM note_descriptors WHERE note=?", (note,))}
+
+
+# --------------------------------------------------------------------------- #
+# Couches de score
+# --------------------------------------------------------------------------- #
+def molecular_scores(note_profile, comp, use_oav=False, mols=None):
+    """Similarité moléculaire normalisée-par-composé (TF-IDF). -> {variety: (score, contribs)}."""
+    max_amt = {m: max((amount(h, m, comp) for h in comp), default=0.0) for m in note_profile}
+    out = {}
+    for h in comp:
+        contribs = {}
+        for m, w in note_profile.items():
+            a = amount(h, m, comp)
+            if a <= 0 or not max_amt[m]:
+                continue
+            s = w * (a / max_amt[m]) * specificity(m, comp)
+            if use_oav and mols:
+                thr = mols.get(hop_compound(m), {}).get("threshold_ppb")
+                s *= (REFERENCE_THRESHOLD_PPB / thr) if thr else 1.0
+            contribs[m] = s
+        if contribs:
+            out[h] = (sum(contribs.values()), sorted(contribs, key=lambda x: -contribs[x]))
+    return out
+
+
+def descriptor_overlap(note_desc: set[str], hop_desc: set[str]) -> float:
+    """Fraction des descripteurs de la note présents dans le houblon (rappel)."""
+    return len(note_desc & hop_desc) / len(note_desc) if note_desc else 0.0
+
+
+def coverage(note_profile, comp):
+    """Molécules de la note couvrables par ≥1 houblon, et orphelines."""
+    producible = {m for m in note_profile if any(comp[h].get(hop_compound(m)) for h in comp)}
+    orphan = [m for m in note_profile if m not in producible]
+    tot = sum(note_profile.values()) or 1
+    cov = sum(w for m, w in note_profile.items() if m in producible) / tot
+    return producible, orphan, cov
+
+
+# --------------------------------------------------------------------------- #
+# CAS A — amplify
+# --------------------------------------------------------------------------- #
+def amplify(con, note: str, w_mol: float = 0.5, w_desc: float = 0.5, use_oav=False, top=8):
+    hops, comp, hop_desc, mols = load(con)
+    profile = get_note(con, note)
+    ndesc = get_note_descriptors(con, note)
+
+    mol = molecular_scores(profile, comp, use_oav=use_oav, mols=mols)
+    mmax = max((s for s, _ in mol.values()), default=1.0) or 1.0
+
+    ranked = []
+    for h in hops:
+        ms = (mol.get(h, (0, []))[0] / mmax)
+        ds = descriptor_overlap(ndesc, hop_desc.get(h, set()))
+        score = w_mol * ms + w_desc * ds
+        if score > 0:
+            ranked.append({"variety": h, "name": hops[h]["name"], "score": round(100 * score, 1),
+                           "mol": round(ms, 2), "desc": round(ds, 2),
+                           "why": mol.get(h, (0, []))[1][:4], "sources": hops[h]["sources"]})
+    ranked.sort(key=lambda r: -r["score"])
+    _, orphan, cov = coverage(profile, comp)
+    return {"mode": "amplify", "note": note, "coverage": cov, "orphan": orphan, "ranked": ranked[:top]}
+
+
+# --------------------------------------------------------------------------- #
+# CAS A — contrast (piloté par les affinités descripteurs, pas les molécules)
+# --------------------------------------------------------------------------- #
+def contrast(con, note: str, top=8):
+    hops, comp, hop_desc, _ = load(con)
+    ndesc = get_note_descriptors(con, note)
+    # descripteurs qui contrastent bien avec ceux de la note
+    target = set()
+    for d in ndesc:
+        target.update(reference.CONTRAST_AFFINITY.get(d, []))
+    ranked = []
+    for h in hops:
+        hd = hop_desc.get(h, set())
+        hit = hd & target
+        if hit:
+            ranked.append({"variety": h, "name": hops[h]["name"],
+                           "score": round(100 * len(hit) / max(len(target), 1), 1),
+                           "contrast_via": sorted(hit), "sources": hops[h]["sources"]})
+    ranked.sort(key=lambda r: -r["score"])
+    return {"mode": "contrast", "note": note, "affinity_target": sorted(target), "ranked": ranked[:top]}
+
+
+# --------------------------------------------------------------------------- #
+# CAS B — combine (NNLS + parcimonie + résidu irréductible)
+# --------------------------------------------------------------------------- #
+def combine(con, note: str, max_hops: int = 3):
+    import numpy as np
+    from scipy.optimize import nnls
+
+    hops, comp, _, _ = load(con)
+    profile = get_note(con, note)
+    producible, orphan, cov = coverage(profile, comp)
+    mols = sorted(producible)
+    varieties = list(comp.keys())
+    if not mols or not varieties:
+        return {"mode": "combine", "note": note, "coverage": cov, "orphan": orphan,
+                "blend": [], "residual": None}
+
+    # matrice A (molécules × houblons), normalisée par molécule ; cible t = poids note
+    A = np.zeros((len(mols), len(varieties)))
+    for j, h in enumerate(varieties):
+        for i, m in enumerate(mols):
+            A[i, j] = amount(h, m, comp)
+    row_max = A.max(axis=1, keepdims=True)
+    row_max[row_max == 0] = 1.0
+    A = A / row_max
+    t = np.array([profile[m] for m in mols], dtype=float)
+    t = t / (t.max() or 1.0)
+
+    w, _ = nnls(A, t)
+    # parcimonie : garder les max_hops meilleurs, re-résoudre sur ce sous-ensemble
+    idx = list(np.argsort(-w)[:max_hops])
+    idx = [j for j in idx if w[j] > 1e-9]
+    if idx:
+        w2, res = nnls(A[:, idx], t)
+        blend_w = {varieties[idx[k]]: float(w2[k]) for k in range(len(idx)) if w2[k] > 1e-6}
+    else:
+        blend_w, res = {}, float(np.linalg.norm(t))
+
+    total = sum(blend_w.values()) or 1.0
+    blend = sorted(({"variety": v, "name": hops[v]["name"],
+                     "proportion": round(w / total, 3)} for v, w in blend_w.items()),
+                   key=lambda r: -r["proportion"])
+    return {"mode": "combine", "note": note, "coverage": cov, "orphan": orphan,
+            "blend": blend, "residual": round(float(res), 3),
+            "note": note, "n_molecules": len(mols)}

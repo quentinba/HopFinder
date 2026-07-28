@@ -1,0 +1,37 @@
+# Notes de fonctionnalités (backlog)
+
+Idées capturées en conception, à implémenter (probablement via Claude Code).
+
+## Découverte par descripteurs  *(demandé par l'utilisateur)*
+
+**But UX.** Présenter à l'utilisateur une liste curée de descripteurs de goût
+(le vocabulaire d'arôme). Il en sélectionne un ou plusieurs → l'app liste les
+houblons correspondants, chacun avec **ses descripteurs d'arôme ET ses molécules**.
+
+**Pourquoi c'est solide (et différent du mode contraste).** Le vocabulaire et les
+correspondances viennent des roues d'arôme réelles (`hop_descriptors`, données
+BarthHaas/Yakima), PAS du prior `CONTRAST_AFFINITY` que j'ai inventé. Donc cette
+feature est **grounded** et n'a besoin ni de la carte d'affinités ni de FooDB. Elle
+est implémentable dès maintenant sur la base existante.
+
+**Comportement.**
+1. Vocabulaire proposé = `SELECT DISTINCT descriptor FROM hop_descriptors ORDER BY 1`
+   (la liste réelle des descripteurs présents dans la base).
+2. L'utilisateur choisit 1..n descripteurs.
+3. Résultat = houblons dont `hop_descriptors` recoupe la sélection, classés par nombre
+   de descripteurs recoupés (puis, en cas d'égalité, par total oil ou pertinence).
+4. Pour chaque houblon affiché : ses descripteurs + ses composés (`hop_composition`,
+   valeur réconciliée + sources), pour donner « arômes ET molécules ».
+
+**Interface proposée.**
+- CLI : `hopmatch by-descriptor citrus,tropical`
+  et `hopmatch descriptors` pour lister le vocabulaire disponible.
+- Fonction : `matching.by_descriptor(con, selected: list[str], top=10)` renvoyant
+  `[{variety, name, matched_descriptors, all_descriptors, compounds, sources}]`.
+- Nouveau mode, plus SIMPLE que amplify/contrast/combine (pas de note requise).
+
+**Notes.**
+- Idéal pour une future UI (cases à cocher sur le vocabulaire).
+- Ne dépend pas des scaffolds (FooDB, Yakima crawl) : bon premier ticket Claude Code.
+- Pense à normaliser les descripteurs à l'ingestion (minuscules, singulier) pour que
+  BarthHaas et Yakima parlent le même vocabulaire (« stone fruit » vs « stonefruit »).
