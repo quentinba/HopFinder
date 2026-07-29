@@ -218,8 +218,8 @@ def resolve_pubchem_cids(out_db: str, sleep: float = 0.25, timeout: float = 15.0
         print("PubChem : rien à résoudre (déjà fait, ou flavornet_compounds vide)."); con.close(); return
     print(f"PubChem : résolution de {len(targets)} CAS -> CID")
 
-    found, via_name = 0, 0
-    for cas, compound in targets:
+    found, via_name, errors = 0, 0, 0
+    for i, (cas, compound) in enumerate(targets, 1):
         cid = None
         try:
             cid = _lookup(cas)
@@ -230,14 +230,23 @@ def resolve_pubchem_cids(out_db: str, sleep: float = 0.25, timeout: float = 15.0
                     if cid:
                         via_name += 1
                         break
-            if cid:
-                found += 1
         except Exception as e:  # noqa
+            # Erreur réseau transitoire : NE PAS enregistrer ce CAS comme "traité"
+            # (cid NULL) — sinon plus jamais retenté au prochain run. On le laisse
+            # simplement hors de `pubchem_cids` pour cette exécution.
             print(f"  !! {cas} ({compound}): {e}")
+            errors += 1
+            time.sleep(sleep)
+            continue
+        if cid:
+            found += 1
         con.execute("INSERT OR REPLACE INTO pubchem_cids VALUES (?,?)", (cas, cid))
+        if i % 25 == 0:
+            con.commit()
         time.sleep(sleep)
     con.commit(); con.close()
-    print(f"PubChem : {found}/{len(targets)} CAS résolus en CID ({via_name} via repli sur le nom).")
+    print(f"PubChem : {found}/{len(targets)} CAS résolus en CID ({via_name} via repli sur le nom)"
+          + (f", {errors} erreurs réseau (à retenter)." if errors else "."))
 
 
 # --------------------------------------------------------------------------- #
@@ -281,46 +290,69 @@ def ingest_flavordb2(out_db: str, sleep: float = 0.3, timeout: float = 30.0) -> 
     if not con.execute("SELECT name FROM sqlite_master WHERE name='hops'").fetchone():
         init_db(con); seed_reference(con)
 
-    targets = con.execute("SELECT cas, compound FROM flavornet_compounds").fetchall()
-    if not targets:
+    known = {r[0] for r in con.execute("SELECT cas FROM flavordb2_thresholds")}
+    targets = [r for r in con.execute("SELECT cas, compound FROM flavornet_compounds")
+              if r["cas"] not in known]
+    if not con.execute("SELECT 1 FROM flavornet_compounds LIMIT 1").fetchone():
         con.close()
         raise RuntimeError(
             "flavornet_compounds est vide : lancer ingest_flavornet avant ingest_flavordb2.")
+    if not targets:
+        print("FlavorDB2 : rien à traiter (déjà fait pour toute la whitelist Flavornet).")
+        con.close(); return
     cids = {r["cas"]: r["cid"] for r in
            con.execute("SELECT cas, cid FROM pubchem_cids WHERE cid IS NOT NULL")}
-    print(f"FlavorDB2 : recherche de seuils pour {len(targets)} composés (whitelist Flavornet)"
+    print(f"FlavorDB2 : recherche de seuils pour {len(targets)} composés restants "
+          f"(sur {len(known) + len(targets)} au total)"
           + (f", {len(cids)} CID PubChem déjà résolus (accès direct)" if cids else
              " — resolve_pubchem_cids n'a pas tourné, repli 100% recherche par nom"))
 
-    found, via_cid, no_match, no_threshold = 0, 0, [], []
-    for row in targets:
+    found, via_cid, no_match, no_threshold, errors = 0, 0, 0, 0, 0
+    for i, row in enumerate(targets, 1):
         cas, compound = row["cas"], row["compound"]
+        threshold = None
+        cid = cids.get(cas)
+        if cid is not None:
+            via_cid += 1
         try:
-            cid = cids.get(cas)
-            if cid is not None:
-                via_cid += 1
-            else:
+            if cid is None:
                 html = requests.get(f"{BASE}/molecules", params={"common_name": compound, "page": 1},
                                     timeout=timeout, headers=HEADERS).text
                 cid = next((c for name, c in parsers.parse_flavordb2_search(html)
                            if name.lower() == compound.lower()), None)
-                if cid is None:
-                    no_match.append(compound); continue
-            time.sleep(sleep)
-            detail_html = requests.get(f"{BASE}/molecules_details", params={"id": cid},
-                                       timeout=timeout, headers=HEADERS).text
-            _, threshold = parsers.parse_flavordb2_detail(detail_html)
-            if threshold is None:
-                no_threshold.append(compound); continue
-            con.execute("INSERT OR REPLACE INTO flavordb2_thresholds VALUES (?,?,?)",
-                        (cas, compound, threshold))
-            found += 1
+            if cid is not None:
+                time.sleep(sleep)
+                detail_html = requests.get(f"{BASE}/molecules_details", params={"id": cid},
+                                           timeout=timeout, headers=HEADERS).text
+                _, threshold = parsers.parse_flavordb2_detail(detail_html)
         except Exception as e:  # noqa
+            # Erreur réseau transitoire (timeout, etc.) : NE PAS enregistrer comme
+            # "traité" — sinon ce CAS ne serait plus jamais retenté au prochain run.
             print(f"  !! {compound}: {e}")
+            errors += 1
+            time.sleep(sleep)
+            continue
+
+        # Toujours enregistrer une tentative aboutie (seuil trouvé ou NULL confirmé) :
+        # marque le CAS comme traité pour ne pas le refaire à la prochaine exécution,
+        # et le commit périodique ci-dessous évite de perdre le travail déjà fait si
+        # le commit final échoue (ex. coupure disque/réseau, synchronisation cloud —
+        # observé en usage réel).
+        con.execute("INSERT OR REPLACE INTO flavordb2_thresholds VALUES (?,?,?)",
+                    (cas, compound, threshold))
+        if threshold is not None:
+            found += 1
+        elif cid is None:
+            no_match += 1
+        else:
+            no_threshold += 1
+        if i % 25 == 0:
+            con.commit()
         time.sleep(sleep)
     con.commit(); con.close()
     print(f"FlavorDB2 : {found} seuils trouvés ({via_cid} via CID PubChem direct) "
-          f"| {len(no_match)} sans correspondance | {len(no_threshold)} sans seuil publié.")
+          f"| {no_match} sans correspondance | {no_threshold} sans seuil publié"
+          + (f" | {errors} erreurs réseau (à retenter)." if errors else "."))
 
 
 # --------------------------------------------------------------------------- #
@@ -545,9 +577,12 @@ def ingest_foodb(out_db: str, foodb_csv_dir: str,
     # Seuils : uniquement flavordb2_thresholds (source sourcée), JAMAIS l'amorce
     # manuelle reference.MOLECULES — voir ingest_flavordb2 et le README pour le
     # pourquoi (mélanger un seuil réel et un seuil deviné casserait la
-    # traçabilité du palier de poids).
+    # traçabilité du palier de poids). WHERE explicite : la table contient aussi
+    # des lignes à seuil NULL (CAS traités par ingest_flavordb2 sans seuil publié,
+    # pour ne pas les retenter à chaque run) — pas des seuils à utiliser.
     thresholds = {r["compound"]: r["threshold_ppb"] for r in
-                 con.execute("SELECT compound, threshold_ppb FROM flavordb2_thresholds")}
+                 con.execute("SELECT compound, threshold_ppb FROM flavordb2_thresholds "
+                             "WHERE threshold_ppb IS NOT NULL")}
 
     fdf = pd.read_csv(_find_csv(foodb_csv_dir, "food"), usecols=["id", "name"])
     food_id_to_note = {}
