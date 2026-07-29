@@ -102,7 +102,7 @@ def crawl_barthhaas(out_db: str, sleep: float = 1.5, limit: int | None = None) -
     BASE = "https://www.barthhaas.com"
     con = connect(out_db)
     if not con.execute("SELECT name FROM sqlite_master WHERE name='hops'").fetchone():
-        init_db(con); seed_reference(con)
+        init_db(con); seed_reference(con); con.commit()
     ov = requests.get(f"{BASE}/hops-and-products/hop-varieties-overview",
                       timeout=30, headers={"User-Agent": "hopmatch/0.1 (research)"}).text
     seen, slugs = set(), []
@@ -113,7 +113,7 @@ def crawl_barthhaas(out_db: str, sleep: float = 1.5, limit: int | None = None) -
     if limit:
         slugs = slugs[:limit]
     print(f"BarthHaas : {len(slugs)} variétés")
-    for slug, url in slugs:
+    for i, (slug, url) in enumerate(slugs, 1):
         try:
             html = requests.get(url, timeout=30,
                                 headers={"User-Agent": "hopmatch/0.1 (research)"}).text
@@ -126,6 +126,8 @@ def crawl_barthhaas(out_db: str, sleep: float = 1.5, limit: int | None = None) -
                 print(f"  ok {slug} ({len(comp)})")
         except Exception as e:  # noqa
             print(f"  !! {slug}: {e}")
+        if i % 10 == 0:
+            con.commit()
         time.sleep(sleep)
     con.commit(); con.close()
 
@@ -145,7 +147,7 @@ def ingest_flavornet(out_db: str, timeout: float = 30.0) -> None:
     URL = "http://www.flavornet.org/d_kovats_ov101.html"
     con = connect(out_db)
     if not con.execute("SELECT name FROM sqlite_master WHERE name='hops'").fetchone():
-        init_db(con); seed_reference(con)
+        init_db(con); seed_reference(con); con.commit()
     html = requests.get(URL, timeout=timeout,
                         headers={"User-Agent": "hopmatch/0.1 (research)"}).text
     rows = parsers.parse_flavornet(html)
@@ -208,7 +210,7 @@ def resolve_pubchem_cids(out_db: str, sleep: float = 0.25, timeout: float = 15.0
 
     con = connect(out_db)
     if not con.execute("SELECT name FROM sqlite_master WHERE name='hops'").fetchone():
-        init_db(con); seed_reference(con)
+        init_db(con); seed_reference(con); con.commit()
 
     known = {r[0] for r in con.execute("SELECT cas FROM pubchem_cids")}
     targets = [(r["cas"], r["compound"]) for r in
@@ -288,7 +290,7 @@ def ingest_flavordb2(out_db: str, sleep: float = 0.3, timeout: float = 30.0) -> 
     HEADERS = {"User-Agent": "hopmatch/0.1 (research)"}
     con = connect(out_db)
     if not con.execute("SELECT name FROM sqlite_master WHERE name='hops'").fetchone():
-        init_db(con); seed_reference(con)
+        init_db(con); seed_reference(con); con.commit()
 
     known = {r[0] for r in con.execute("SELECT cas FROM flavordb2_thresholds")}
     targets = [r for r in con.execute("SELECT cas, compound FROM flavornet_compounds")
@@ -392,7 +394,7 @@ def crawl_yakima(out_db: str, limit: int | None = None, timeout: float = 30.0) -
     }]}
     con = connect(out_db)
     if not con.execute("SELECT name FROM sqlite_master WHERE name='hops'").fetchone():
-        init_db(con); seed_reference(con)
+        init_db(con); seed_reference(con); con.commit()
 
     resp = requests.post(ALGOLIA_URL, params=ALGOLIA_PARAMS, json=BODY,
                          timeout=timeout, headers={"User-Agent": "hopmatch/0.1 (research)"})
@@ -562,7 +564,7 @@ def ingest_foodb(out_db: str, foodb_csv_dir: str,
     notes = notes or reference.NOTE_TO_FOODB
     con = connect(out_db)
     if not con.execute("SELECT name FROM sqlite_master WHERE name='hops'").fetchone():
-        init_db(con); seed_reference(con)
+        init_db(con); seed_reference(con); con.commit()
 
     cas_to_hop_name = _build_cas_to_hop_name(con)
     flavornet = {r["cas"]: (_canonical_compound(r["cas"], r["compound"], cas_to_hop_name), r["descriptors"])
