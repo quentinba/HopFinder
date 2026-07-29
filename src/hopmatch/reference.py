@@ -29,11 +29,15 @@ MOLECULES: dict[str, tuple[str, float | None, int | None]] = {
     "methyl-chavicol": ("anis, estragon, basilic", None, 8815),
 }
 
-# molécule côté note -> composé mesuré côté houblon (thiols agrégés, synonymes
-# FooDB/Flavornet à normaliser vers le vocabulaire houblon existant, etc.)
+# molécule côté note -> composé mesuré côté houblon. Réservé aux AGRÉGATIONS
+# (plusieurs molécules mesurées ensemble côté houblon sous un même composé,
+# ex. les thiols) : ce n'est pas un fait d'identité chimique résoluble par CID
+# PubChem (le composé cible n'a pas de CID propre), donc ça reste manuel.
+# Les synonymes de nommage purs (estragole/methyl-chavicol, même CAS) sont
+# désormais résolus structuralement via ingest._canonical_compound + le CID
+# PubChem (ingest.resolve_pubchem_cids) — ne pas les remettre ici.
 ALIASES: dict[str, str] = {
     "3-mercaptohexanol": "thiols", "4mmp": "thiols",
-    "estragole": "methyl-chavicol",  # même composé (CAS 140-67-0), nom Flavornet/FooDB
 }
 
 # note -> {molécule: poids de contribution au caractère (0-1)}

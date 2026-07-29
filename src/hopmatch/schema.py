@@ -35,6 +35,12 @@ CREATE TABLE flavornet_compounds (
 CREATE TABLE flavordb2_thresholds (
     cas TEXT PRIMARY KEY, compound TEXT, threshold_ppb REAL
 );
+-- Résolution CAS -> PubChem CID (le "liant" entre les mondes note/houblon/
+-- molécule). cid NULL = résolution tentée mais échouée (pour ne pas
+-- re-solliciter PubChem inutilement à chaque run).
+CREATE TABLE pubchem_cids (
+    cas TEXT PRIMARY KEY, cid INTEGER
+);
 """
 
 DROP_COMPOUNDS = {"alpha_acid", "beta_acid", "polyphenols"}  # non aromatiques
@@ -51,7 +57,8 @@ def init_db(con: sqlite3.Connection) -> None:
         "DROP TABLE IF EXISTS hops; DROP TABLE IF EXISTS hop_composition;"
         "DROP TABLE IF EXISTS hop_descriptors; DROP TABLE IF EXISTS molecules;"
         "DROP TABLE IF EXISTS aroma_notes; DROP TABLE IF EXISTS note_descriptors;"
-        "DROP TABLE IF EXISTS flavornet_compounds; DROP TABLE IF EXISTS flavordb2_thresholds;")
+        "DROP TABLE IF EXISTS flavornet_compounds; DROP TABLE IF EXISTS flavordb2_thresholds;"
+        "DROP TABLE IF EXISTS pubchem_cids;")
     con.executescript(SCHEMA)
 
 

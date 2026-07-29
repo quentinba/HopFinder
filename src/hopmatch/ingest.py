@@ -6,10 +6,13 @@ RÉEL (tourne ici) :
   - seed_reference       : charge molécules + amorce note→molécule/descripteur
   - crawl_barthhaas      : moissonne barthhaas.com (réseau ; requests+bs4)
   - ingest_flavornet     : moissonne flavornet.org (réseau ; requests+bs4)
+  - resolve_pubchem_cids : résout CAS->CID PubChem pour la whitelist Flavornet (réseau ;
+                           requests), le "liant" structural entre les 3 mondes
   - ingest_foodb         : ingère un dump bulk FooDB local, filtré par la whitelist
                            Flavornet (nécessite ingest_flavornet au préalable)
   - ingest_flavordb2     : moissonne cosylab.iiitd.edu.in/flavordb2 (réseau ; requests+bs4),
-                           seuils olfactifs bornés à la whitelist Flavornet
+                           seuils olfactifs bornés à la whitelist Flavornet, accès direct
+                           par CID si resolve_pubchem_cids a tourné
   - crawl_yakima         : moissonne yakimachief.com via son index Algolia (réseau ;
                            requests seul, pas de navigateur — voir docstring)
 """
@@ -158,15 +161,80 @@ def ingest_flavornet(out_db: str, timeout: float = 30.0) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# PubChem (réseau réel) — le "liant" : résolution CAS -> CID structurale
+# --------------------------------------------------------------------------- #
+def resolve_pubchem_cids(out_db: str, sleep: float = 0.25, timeout: float = 15.0) -> None:
+    """
+    Résout le PubChem CID de chaque composé de la whitelist Flavornet (table
+    pubchem_cids : cas -> cid), via l'endpoint PUG-REST 'name' (qui accepte un
+    CAS comme synonyme — vérifié : '78-70-6' -> 6549 pour le linalol,
+    '140-67-0' -> 8815 pour l'estragole, exactement le CID déjà connu de
+    methyl-chavicol dans reference.MOLECULES).
+
+    C'est la clé structurale qui remplace deux mécanismes texte/heuristique :
+      1. `_canonical_compound` peut fusionner un synonyme Flavornet/FooDB avec
+         le vocabulaire houblon PAR IDENTITÉ CHIMIQUE (même CID), plutôt que
+         par une table d'alias manuelle ou un dépréfixage grec ;
+      2. `ingest_flavordb2` peut aller directement à la fiche FlavorDB2 par
+         CID (`/molecules_details?id=<cid>`, endpoint natif du site) sans
+         recherche par nom exact (qui ratait 488/734 composés sur un run réel,
+         les synonymes/casse ne matchant pas toujours).
+
+    Idempotent : ne resollicite PubChem que pour les CAS pas encore en base
+    (cid NULL inclus, pour ne pas re-tenter en boucle une résolution échouée).
+    Respecte la limite d'usage PubChem (5 req/s conseillées) via `sleep`.
+    """
+    import requests
+    import time
+    from .schema import connect
+    URL = "https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/{}/cids/JSON"
+    con = connect(out_db)
+    if not con.execute("SELECT name FROM sqlite_master WHERE name='hops'").fetchone():
+        init_db(con); seed_reference(con)
+
+    known = {r[0] for r in con.execute("SELECT cas FROM pubchem_cids")}
+    targets = [r["cas"] for r in con.execute("SELECT cas FROM flavornet_compounds")
+              if r["cas"] not in known]
+    if not targets:
+        print("PubChem : rien à résoudre (déjà fait, ou flavornet_compounds vide)."); con.close(); return
+    print(f"PubChem : résolution de {len(targets)} CAS -> CID")
+
+    found = 0
+    for cas in targets:
+        cid = None
+        try:
+            resp = requests.get(URL.format(cas), timeout=timeout,
+                                headers={"User-Agent": "hopmatch/0.1 (research)"})
+            if resp.status_code == 200:
+                cids = resp.json().get("IdentifierList", {}).get("CID", [])
+                if cids:
+                    cid = cids[0]
+                    found += 1
+        except Exception as e:  # noqa
+            print(f"  !! {cas}: {e}")
+        con.execute("INSERT OR REPLACE INTO pubchem_cids VALUES (?,?)", (cas, cid))
+        time.sleep(sleep)
+    con.commit(); con.close()
+    print(f"PubChem : {found}/{len(targets)} CAS résolus en CID.")
+
+
+# --------------------------------------------------------------------------- #
 # FlavorDB2 (réseau réel) — seuils olfactifs, bornés à la whitelist Flavornet
 # --------------------------------------------------------------------------- #
 def ingest_flavordb2(out_db: str, sleep: float = 0.3, timeout: float = 30.0) -> None:
     """
     FlavorDB2 (cosylab.iiitd.edu.in/flavordb2) : seuils olfactifs par molécule.
     Pas de dump bulk ni d'API JSON stable pour les seuils (le seul JSON bulk du
-    site est un graphe d'imports entre aliments, sans rapport) : on suit le même
-    chemin que le site lui-même — recherche par nom (`/molecules?common_name=`)
-    puis fiche détail AJAX (`/molecules_details?id=<pubchem_cid>`), qui contient
+    site est un graphe d'imports entre aliments, sans rapport).
+
+    PRIORITÉ AU CID DIRECT (resolve_pubchem_cids doit avoir tourné avant, sinon
+    dégrade gracieusement) : `/molecules_details?id=<cid>` est l'endpoint natif
+    du site — si on connaît déjà le CID PubChem du composé (table
+    pubchem_cids, résolu depuis son CAS Flavornet), on saute directement la
+    fiche détail, sans recherche par nom. Repli sur la recherche par nom
+    (`/molecules?common_name=`) uniquement pour les CAS sans CID résolu — c'est
+    ce repli, utilisé seul avant, qui ratait 488/734 composés sur un run réel
+    (synonymes/casse qui ne matchent pas exactement). La fiche détail contient
     le CAS et un champ 'Aroma threshold values' en texte libre.
 
     Bornée à la whitelist Flavornet (table flavornet_compounds, ~734 composés)
@@ -177,8 +245,8 @@ def ingest_flavordb2(out_db: str, sleep: float = 0.3, timeout: float = 30.0) -> 
     Écrit dans `flavordb2_thresholds`, PAS dans `molecules` : pas de repli sur
     l'amorce manuelle `reference.MOLECULES` (14 seuils saisis à la main) — soit
     FlavorDB2 confirme un seuil, soit la molécule reste sans seuil pour
-    `ingest_foodb`. Un nom sans correspondance exacte ou sans seuil publié est
-    simplement ignoré (compté, pas deviné) : voir parsers.parse_flavordb2_threshold
+    `ingest_foodb`. Une molécule sans correspondance ou sans seuil publié est
+    simplement ignorée (comptée, pas devinée) : voir parsers.parse_flavordb2_threshold
     pour le garde-fou contre les textes sans unité reconnue (ex. un pourcentage
     de composition confondu avec un seuil pour le myrcène).
     """
@@ -196,20 +264,28 @@ def ingest_flavordb2(out_db: str, sleep: float = 0.3, timeout: float = 30.0) -> 
         con.close()
         raise RuntimeError(
             "flavornet_compounds est vide : lancer ingest_flavornet avant ingest_flavordb2.")
-    print(f"FlavorDB2 : recherche de seuils pour {len(targets)} composés (whitelist Flavornet)")
+    cids = {r["cas"]: r["cid"] for r in
+           con.execute("SELECT cas, cid FROM pubchem_cids WHERE cid IS NOT NULL")}
+    print(f"FlavorDB2 : recherche de seuils pour {len(targets)} composés (whitelist Flavornet)"
+          + (f", {len(cids)} CID PubChem déjà résolus (accès direct)" if cids else
+             " — resolve_pubchem_cids n'a pas tourné, repli 100% recherche par nom"))
 
-    found, no_match, no_threshold = 0, [], []
+    found, via_cid, no_match, no_threshold = 0, 0, [], []
     for row in targets:
         cas, compound = row["cas"], row["compound"]
         try:
-            html = requests.get(f"{BASE}/molecules", params={"common_name": compound, "page": 1},
-                                timeout=timeout, headers=HEADERS).text
-            match = next((cid for name, cid in parsers.parse_flavordb2_search(html)
-                         if name.lower() == compound.lower()), None)
-            if match is None:
-                no_match.append(compound); continue
+            cid = cids.get(cas)
+            if cid is not None:
+                via_cid += 1
+            else:
+                html = requests.get(f"{BASE}/molecules", params={"common_name": compound, "page": 1},
+                                    timeout=timeout, headers=HEADERS).text
+                cid = next((c for name, c in parsers.parse_flavordb2_search(html)
+                           if name.lower() == compound.lower()), None)
+                if cid is None:
+                    no_match.append(compound); continue
             time.sleep(sleep)
-            detail_html = requests.get(f"{BASE}/molecules_details", params={"id": match},
+            detail_html = requests.get(f"{BASE}/molecules_details", params={"id": cid},
                                        timeout=timeout, headers=HEADERS).text
             _, threshold = parsers.parse_flavordb2_detail(detail_html)
             if threshold is None:
@@ -221,8 +297,8 @@ def ingest_flavordb2(out_db: str, sleep: float = 0.3, timeout: float = 30.0) -> 
             print(f"  !! {compound}: {e}")
         time.sleep(sleep)
     con.commit(); con.close()
-    print(f"FlavorDB2 : {found} seuils trouvés | {len(no_match)} sans correspondance de nom "
-          f"| {len(no_threshold)} trouvés mais sans seuil olfactif publié.")
+    print(f"FlavorDB2 : {found} seuils trouvés ({via_cid} via CID PubChem direct) "
+          f"| {len(no_match)} sans correspondance | {len(no_threshold)} sans seuil publié.")
 
 
 # --------------------------------------------------------------------------- #
@@ -316,20 +392,51 @@ _KNOWN_HOP_COMPOUNDS = ({c for c, _ in parsers.BARTHHAAS_LABELS.values()} |
                         set(reference.MOLECULES) | set(reference.ALIASES.values())) - DROP_COMPOUNDS
 
 
-def _canonical_compound(name: str) -> str:
+def _hop_cid_map() -> dict[int, str]:
+    """PubChem CID -> nom houblon canonique, pour les entrées de reference.MOLECULES
+    dont le CID est connu (identité chimique, pas un nom de compagnie)."""
+    return {cid: compound for compound, (_, _, cid) in reference.MOLECULES.items() if cid}
+
+
+def _build_cas_to_hop_name(con) -> dict[str, str]:
+    """Précalcule {cas: nom houblon} pour tous les CAS déjà résolus en CID
+    (table pubchem_cids, cf. resolve_pubchem_cids) dont le CID correspond à un
+    composé du vocabulaire houblon. Vide si resolve_pubchem_cids n'a pas tourné
+    (dégrade gracieusement vers l'heuristique de _canonical_compound)."""
+    hop_cids = _hop_cid_map()
+    if not hop_cids:
+        return {}
+    out = {}
+    for r in con.execute("SELECT cas, cid FROM pubchem_cids WHERE cid IS NOT NULL"):
+        hop_name = hop_cids.get(r["cid"])
+        if hop_name:
+            out[r["cas"]] = hop_name
+    return out
+
+
+def _canonical_compound(cas: str, name: str, cas_to_hop_name: dict[str, str]) -> str:
     """
     Aligne un nom de composé Flavornet/FooDB sur le vocabulaire houblon existant,
-    pour éviter deux pièges d'honnêteté (coverage/orphan) :
-      1. synonymes explicites connus (reference.ALIASES, ex. estragole/methyl-
-         chavicol, même CAS 140-67-0) — sinon la même molécule apparaît deux fois
-         dans aroma_notes (une fois via l'amorce, une fois via FooDB) et est
-         double-comptée ;
-      2. préfixe grec (β-caryophyllene, α-humulene) que le vocabulaire houblon
-         (parsers.BARTHHAAS_LABELS etc.) n'utilise pas (caryophyllene, humulene) —
-         sinon la molécule devient une ORPHELINE artificielle alors que le houblon
-         la fournit bien, sous son nom simple.
-    On ne renomme que vers une forme reconnue ; sinon le nom Flavornet est gardé tel quel.
+    pour éviter deux pièges d'honnêteté (coverage/orphan) : la même molécule
+    listée deux fois sous deux noms (double comptage), ou une ORPHELINE
+    artificielle alors que le houblon la fournit sous un autre nom.
+
+    PRIORITÉ À L'IDENTITÉ STRUCTURALE (cas_to_hop_name, résolu via PubChem CID
+    par resolve_pubchem_cids + _build_cas_to_hop_name) : fiable, ne repose sur
+    aucune supposition de nommage. Exemple vérifié : le CAS de l'estragole
+    (140-67-0) résout au même CID PubChem (8815) que methyl-chavicol dans
+    reference.MOLECULES — la fusion est un FAIT chimique, pas un devinage.
+
+    Repli sur les heuristiques historiques UNIQUEMENT si le CID n'est pas
+    résolu (resolve_pubchem_cids pas lancé, ou CAS introuvable sur PubChem) :
+    alias manuels restants (reference.ALIASES — n'a plus que les agrégations
+    sans CID propre comme 'thiols', qui ne sont pas une vraie molécule unique
+    mais un regroupement de composés mesurés ensemble côté houblon) puis
+    dépréfixage grec (β-caryophyllene -> caryophyllene). On ne renomme que
+    vers une forme reconnue ; sinon le nom Flavornet est gardé tel quel.
     """
+    if cas in cas_to_hop_name:
+        return cas_to_hop_name[cas]
     name = reference.ALIASES.get(name, name)
     stripped = _GREEK_PREFIX_RE.sub("", name).strip()
     return stripped if stripped != name and stripped in _KNOWN_HOP_COMPOUNDS else name
@@ -403,7 +510,8 @@ def ingest_foodb(out_db: str, foodb_csv_dir: str,
     if not con.execute("SELECT name FROM sqlite_master WHERE name='hops'").fetchone():
         init_db(con); seed_reference(con)
 
-    flavornet = {r["cas"]: (_canonical_compound(r["compound"]), r["descriptors"])
+    cas_to_hop_name = _build_cas_to_hop_name(con)
+    flavornet = {r["cas"]: (_canonical_compound(r["cas"], r["compound"], cas_to_hop_name), r["descriptors"])
                 for r in con.execute("SELECT cas, compound, descriptors FROM flavornet_compounds")}
     if not flavornet:
         con.close()

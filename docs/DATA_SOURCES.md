@@ -43,9 +43,11 @@
 - Rôle : colonne vertébrale note→molécule (+ concentration là où dispo et où l'unité est une
   masse comparable — mg/100g, mg/kg ; les autres unités FooDB (IU, ppb, µM, kcal…) ne sont pas
   interconvertibles malgré `standard_content` qui prétend les normaliser).
-- Statut : `ingest.ingest_foodb` implémenté. Jointure Flavornet↔FooDB par **CAS** (pas encore
-  PubChem CID/InChIKey — les synonymes hors CAS passent par `reference.ALIASES`, amorce
-  manuelle). `reference.NOTE_TO_FOODB` ne couvre que 4/7 notes-amorce (kumquat, basilic,
+- Statut : `ingest.ingest_foodb` implémenté. Jointure Flavornet↔FooDB par **CAS**. Les
+  synonymes de nommage restants (nommage Flavornet/FooDB vs vocabulaire houblon) sont résolus
+  en priorité par **CID PubChem** (`ingest.resolve_pubchem_cids` + `pubchem_cids`, identité
+  chimique vérifiée), `reference.ALIASES` ne gardant que les agrégations sans CID propre
+  (« thiols »). `reference.NOTE_TO_FOODB` ne couvre que 4/7 notes-amorce (kumquat, basilic,
   fruit-passion, mangue) : yuzu absent de FooDB, rose n'a que "Rose hip" (faux ami), pin-résine
   n'est pas un aliment.
 
@@ -59,10 +61,11 @@
 
 **FlavorDB2** — https://cosylab.iiitd.edu.in/flavordb2/
 - Accès : pas d'API ni de dump bulk pour les seuils (l'unique JSON bulk du site est un graphe
-  de co-occurrence ingrédient↔ingrédient, sans rapport). Recherche par nom
-  (`/molecules?common_name=`) puis fiche détail AJAX (`/molecules_details?id=<pubchem_cid>`),
-  qui contient le(s) CAS et un champ **texte libre** « Aroma threshold values » (ex. « 4 to 10
-  ppb », « Detection at 64 to 90 ppb »).
+  de co-occurrence ingrédient↔ingrédient, sans rapport). Fiche détail AJAX
+  (`/molecules_details?id=<pubchem_cid>`) — **directement accessible par CID PubChem**, sans
+  recherche par nom, une fois le CID connu (`pubchem_cids`, voir section Liant) ; recherche par
+  nom (`/molecules?common_name=`) en repli sinon. La fiche contient le(s) CAS et un champ
+  **texte libre** « Aroma threshold values » (ex. « 4 to 10 ppb », « Detection at 64 to 90 ppb »).
 - **Piège vérifié** : ce champ texte libre contient parfois autre chose qu'un seuil — la fiche
   du myrcène y liste *« Aroma characteristics at 10%; terpy, herbaceous... »* (une composition
   dans un extrait, pas un seuil). `parsers.parse_flavordb2_threshold` ne fait confiance qu'à un
@@ -72,16 +75,28 @@
 - Rôle : couche seuils (prior de puissance).
 - Statut : `ingest.ingest_flavordb2` implémenté, **borné aux ~734 composés de la whitelist
   Flavornet** (pas les 25 595 molécules — hors de portée de ce dont hopmatch se sert, et
-  inutilement lourd pour leur serveur). Run réel : 86 seuils trouvés sur 734 (488 sans
-  correspondance de nom exacte, 160 trouvés mais sans seuil publié). Écrit dans
-  `flavordb2_thresholds`, jamais dans `molecules`/`reference.MOLECULES`.
+  inutilement lourd pour leur serveur). Run réel (avec `pubchem_cids` déjà résolu, accès direct
+  par CID) : **227 seuils trouvés sur 734** (720 via CID direct, 14 sans correspondance, 493
+  trouvés mais sans seuil publié). Écrit dans `flavordb2_thresholds`, jamais dans
+  `molecules`/`reference.MOLECULES`.
 
 **The Good Scents Company** — descripteurs parfumeur fins, **pas d'API, CGU restrictives**. Optionnel.
 
 ## Liant
 
 **PubChem (PUG-REST)** — https://pubchem.ncbi.nlm.nih.gov
-- API publique robuste, domaine public. Clé InChIKey/CID pour joindre ingrédient ↔ molécule ↔ houblon.
+- Accès : `/compound/name/{cas}/cids/JSON` accepte un CAS comme synonyme et renvoie son CID.
+  Vérifié : `140-67-0` (CAS estragole) → CID **8815**, identique au CID déjà connu de
+  *methyl-chavicol* dans `reference.MOLECULES` — la fusion de synonymes est un fait chimique
+  vérifié, pas une supposition de nommage.
+- API publique robuste, domaine public. Limite d'usage : 5 requêtes/s conseillées.
+- Statut : `ingest.resolve_pubchem_cids` implémenté, écrit `pubchem_cids(cas, cid)`, borné à la
+  whitelist Flavornet (~734 composés, même périmètre que le reste du pipeline). Run réel :
+  **720/734 CAS résolus en CID (98%)**. Résolution par **CAS uniquement** pour l'instant (pas
+  encore InChIKey/SMILES — les 14 non résolus resteraient un gap). Consommé par
+  `ingest._canonical_compound` (fusion de synonymes par CID, priorité sur `reference.ALIASES`)
+  et `ingest_flavordb2` (accès direct à la fiche par CID, sans recherche par nom — fait passer
+  les seuils trouvés de 86 à 227 et les échecs de correspondance de 488 à 14, cf. ci-dessus).
 
 ## Rappel licences
 Le **code** est MIT. **FooDB et FlavorDB2 sont non commerciales.** Un usage commercial de hopmatch imposerait de retirer/renégocier ces sources.

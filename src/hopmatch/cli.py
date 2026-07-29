@@ -67,6 +67,10 @@ def main(argv=None):
     fn = sub.add_parser("ingest-flavornet", help="moissonner flavornet.org (whitelist odeur-active)")
     fn.add_argument("--db", default=DEFAULT_DB)
 
+    pc = sub.add_parser("resolve-pubchem-cids", help="résoudre CAS->CID PubChem (whitelist Flavornet)")
+    pc.add_argument("--db", default=DEFAULT_DB)
+    pc.add_argument("--sleep", type=float, default=0.25)
+
     fb = sub.add_parser("ingest-foodb", help="ingérer le dump FooDB local (filtré par la whitelist Flavornet)")
     fb.add_argument("foodb_dir", help="dossier du dump FooDB CSV")
     fb.add_argument("--db", default=DEFAULT_DB)
@@ -105,6 +109,8 @@ def main(argv=None):
         ingest.crawl_yakima(a.db, limit=a.limit); return 0
     if a.cmd == "ingest-flavornet":
         ingest.ingest_flavornet(a.db); return 0
+    if a.cmd == "resolve-pubchem-cids":
+        ingest.resolve_pubchem_cids(a.db, sleep=a.sleep); return 0
     if a.cmd == "ingest-foodb":
         ingest.ingest_foodb(a.db, a.foodb_dir); return 0
     if a.cmd == "ingest-flavordb2":

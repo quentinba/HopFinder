@@ -25,9 +25,16 @@ par composé (les unités s'annulent au sein d'un composé).
 
 `flavornet_compounds(cas, compound, descriptors)` : whitelist odeur-active, distincte
 de `molecules` (couche de matching, avec seuils). Sert uniquement à filtrer FooDB à
-l'ingestion (`ingest_foodb`), jointure par CAS (pas encore par PubChem CID/InChIKey —
-voir docs/DATA_SOURCES.md). `ingest_foodb` écrit aussi dans `molecules` en `INSERT OR
-IGNORE` (odeur/descripteur uniquement), sans jamais y écrire de seuil.
+l'ingestion (`ingest_foodb`), jointure par CAS. `ingest_foodb` écrit aussi dans
+`molecules` en `INSERT OR IGNORE` (odeur/descripteur uniquement), sans jamais y
+écrire de seuil.
+
+`pubchem_cids(cas, cid)` : résolution structurale CAS→CID PubChem
+(`ingest.resolve_pubchem_cids`), bornée à la whitelist Flavornet. Le "liant" entre
+les 3 mondes — voir docs/DATA_SOURCES.md pour le détail. Deux consommateurs :
+`ingest._canonical_compound` (fusion de synonymes par identité de CID, priorité sur
+la table d'alias manuelle) et `ingest_flavordb2` (accès direct à la fiche FlavorDB2
+par CID, sans recherche par nom).
 
 `flavordb2_thresholds(cas, compound, threshold_ppb)` : même principe que
 `flavornet_compounds` — table brute dédiée, bornée aux ~734 composés de la whitelist
@@ -39,11 +46,15 @@ deviné dans une même décision de poids automatisée. `reference.MOLECULES` re
 utilisé ailleurs (option `--oav`, indépendante de ce pipeline).
 
 **Normalisation des noms de composés à l'ingestion FooDB** (`ingest._canonical_compound`).
-Deux pièges d'honnêteté sinon : (1) synonymes explicites (`reference.ALIASES`, ex.
-estragole/methyl-chavicol, même CAS) → sans ça, double comptage dans le profil d'une
-note ; (2) préfixe grec (β-caryophyllene vs caryophyllene, vocabulaire houblon sans
-préfixe) → sinon fausse orpheline alors que le houblon fournit la molécule sous son
-autre nom. On ne renomme que vers une forme déjà connue du vocabulaire houblon.
+Deux pièges d'honnêteté sinon : synonymes de nommage (estragole/methyl-chavicol,
+β-caryophyllène/caryophyllène) → sans normalisation, double comptage dans le profil
+d'une note OU fausse orpheline alors que le houblon fournit la molécule sous un autre
+nom. Résolution en cascade : (1) **identité de CID PubChem** (`pubchem_cids`, priorité —
+fait chimique vérifié, pas une supposition de nommage) ; (2) `reference.ALIASES`, réduit
+aux agrégations sans CID propre (« thiols » regroupe plusieurs molécules mesurées
+ensemble côté houblon — pas un synonyme de nommage) ; (3) dépréfixage grec, filet pour
+les CAS non résolus par PubChem. On ne renomme que vers une forme déjà connue du
+vocabulaire houblon.
 
 ## Validation/réparation
 `schema.validate_and_repair` détecte l'inversion myrcène/caryophyllène (fréquente

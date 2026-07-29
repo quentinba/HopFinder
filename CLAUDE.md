@@ -51,9 +51,10 @@ scorings DIFFÉRENTS :
     FooDB — l'absence constatée initialement était un artefact de ce bug, pas un vrai trou.
   - synonymes entre sources (estragole/methyl-chavicol même CAS 140-67-0 ;
     β-caryophyllène/caryophyllène) → sans normalisation : double comptage note-side et
-    FAUSSE ORPHELINE côté houblon. Résolu par `ingest._canonical_compound`
-    (`reference.ALIASES` + dépréfixage grec), PAS encore par jointure PubChem CID —
-    ALIASES est une amorce manuelle, à remplacer si le vocabulaire s'élargit beaucoup.
+    FAUSSE ORPHELINE côté houblon. Résolu par `ingest._canonical_compound`, PRIORITÉ au
+    CID PubChem (`pubchem_cids`, identité chimique vérifiée : 140-67-0 → CID 8815,
+    identique à methyl-chavicol), repli sur `reference.ALIASES` (réduit aux agrégations
+    sans CID propre comme "thiols") puis dépréfixage grec si le CID n'est pas résolu.
   - le tri par concentration est dominé par du bruit NUTRITIONNEL (eau, cendres, minéraux) :
     FooDB mêle nutrition et arôme → FILTRER via whitelist odeur-active (Flavornet) AVANT.
   - seules unités « masse comparable » retenues comme concentration fiable (mg/100g,
@@ -71,15 +72,22 @@ scorings DIFFÉRENTS :
   (page HTML statique unique `d_kovats_ov101.html`, pas de pagination). Sert de whitelist
   « sensoriellement présent » (table `flavornet_compounds`, distincte de `molecules`).
   `ingest.ingest_flavornet` IMPLÉMENTÉ.
-- **FlavorDB2** : seuils par molécule. Pas d'API/dump bulk pour les seuils ; recherche par
-  nom + fiche détail AJAX (`/molecules_details?id=<pubchem_cid>`), champ seuil en TEXTE
-  LIBRE avec de vrais pièges (le myrcène y liste "10%" de composition, PAS un seuil —
+- **FlavorDB2** : seuils par molécule. Pas d'API/dump bulk pour les seuils ; fiche détail AJAX
+  (`/molecules_details?id=<pubchem_cid>`) — accessible DIRECTEMENT par CID une fois résolu via
+  `pubchem_cids` (repli sur recherche par nom sinon), champ seuil en TEXTE LIBRE avec de vrais
+  pièges (le myrcène y liste "10%" de composition, PAS un seuil —
   `parsers.parse_flavordb2_threshold` n'accepte qu'un nombre accolé à une unité reconnue
   ppb/ppm/ppt). 25 595 molécules au total, mais `ingest.ingest_flavordb2` IMPLÉMENTÉ se
   borne aux ~734 de la whitelist Flavornet (pas tout crawler : hors sujet + lourd pour leur
-  serveur). Run réel : 86/734 seuils trouvés. Écrit dans `flavordb2_thresholds` (jamais
-  dans `molecules`). Licence CC BY-NC-SA (non commercial).
-- **PubChem (PUG-REST)** : domaine public. Clé InChIKey/CID pour joindre les 3 mondes.
+  serveur). Run réel (avec CID déjà résolus) : 227/734 seuils trouvés (720 accès directs par
+  CID, 14 sans correspondance — contre 86 trouvés / 488 sans correspondance avant le CID).
+  Écrit dans `flavordb2_thresholds` (jamais dans `molecules`). Licence CC BY-NC-SA (non
+  commercial).
+- **PubChem (PUG-REST)** : `ingest.resolve_pubchem_cids` IMPLÉMENTÉ, `/compound/name/{cas}/cids/JSON`
+  (accepte un CAS comme synonyme), écrit `pubchem_cids(cas, cid)`, borné à la whitelist
+  Flavornet. Run réel : 720/734 CAS résolus (98%). C'est le "liant" structural qui remplace
+  la table d'alias manuelle et la recherche par nom exact — voir `_canonical_compound` et
+  `ingest_flavordb2` ci-dessus. Domaine public, limite 5 req/s.
 - **Licence** : le CODE est MIT ; FooDB et FlavorDB2 sont NON COMMERCIALES. Un usage
   commercial imposerait de retirer/renégocier ces sources.
 
@@ -90,13 +98,21 @@ filet de sécurité, pas une valeur active.
 
 ## Prochaines tâches (ordre d'utilité)
 Fait : `ingest.ingest_flavornet`, `ingest.ingest_foodb`, `by-descriptor`, `ingest.crawl_yakima`,
-`ingest.ingest_flavordb2` (voir `docs/FEATURE_NOTES.md` pour le détail de spec de by-descriptor).
-Reste :
+`ingest.ingest_flavordb2`, `ingest.resolve_pubchem_cids` (jointure structurale CAS->CID,
+voir `docs/FEATURE_NOTES.md` pour le détail de spec de by-descriptor). Reste :
 1. Drapeau biotransformation par souche (géraniol→citronellol, précurseurs→thiols) —
-   touche plusieurs modules (schema, matching).
-2. Jointure PubChem CID/InChIKey — remplacerait la table d'alias manuelle
-   (`reference.ALIASES`) et la recherche par nom exact de `ingest_flavordb2` (488/734
-   sans correspondance sur un run réel) par une résolution structurale des synonymes.
+   touche plusieurs modules (schema, matching). RECHERCHE DE SOURCE EN COURS : la
+   littérature académique a de vraies valeurs (efficacités de libération par souche,
+   ex. 0,15-0,35 %) mais éparpillées en figures de papiers individuels, pas de table
+   exportable → inexploitable sans recopie manuelle (contraire à "rien codé en dur").
+   Piste : Escarpment Labs (labo commercial) a des fiches produit structurées par
+   souche avec une note de biotransformation catégorielle (Haut/Moyen/Bas) et une
+   méthodologie décrite — mais couverture incomplète constatée sur un premier
+   sondage (présente pour certaines souches, absente pour d'autres) : à vérifier sur
+   l'ensemble du catalogue avant de s'appuyer dessus. Pas encore de décision.
+2. Résolution PubChem par InChIKey/SMILES en plus du CAS (couvrirait les composés sans
+   CAS enregistré), et jointure FooDB/hop_composition au-delà des ~734 composés Flavornet
+   si le vocabulaire s'élargit beaucoup (crawl Yakima déjà réel, plus d'aliments FooDB).
 
 ## Conventions
 - Commentaires/docstrings en français (cohérent avec l'existant).

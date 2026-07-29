@@ -4,10 +4,11 @@
 questions concrètes : *quel houblon accorder à un ajout* (yuzu, basilic…), et *peut-on
 reproduire un goût avec du houblon seul* ?
 
-> État : `pytest` vert (23 tests). Toutes les sources tournent réellement contre les
+> État : `pytest` vert (28 tests). Toutes les sources tournent réellement contre les
 > sites externes : `crawl_barthhaas`, `crawl_yakima`, `ingest_flavornet`, `ingest_foodb`,
-> `ingest_flavordb2`, `by-descriptor`. Il reste le drapeau de biotransformation par
-> souche (géraniol→citronellol, précurseurs→thiols) — voir [Feuille de route](#feuille-de-route).
+> `ingest_flavordb2`, `resolve_pubchem_cids`, `by-descriptor`. Il reste le drapeau de
+> biotransformation par souche (géraniol→citronellol, précurseurs→thiols — recherche de
+> source en cours) — voir [Feuille de route](#feuille-de-route).
 
 ---
 
@@ -226,11 +227,13 @@ vient d'une vraie source ou d'une estimation maison.
 molécules et pas de dump bulk pour les seuils (juste un JSON bulk pour un graphe de co-occurrence
 ingrédient↔ingrédient, sans rapport). Crawler les 25 595 fiches aurait été disproportionné et
 inutilement lourd pour leur serveur : `ingest_flavordb2` cherche uniquement les ~734 composés déjà
-retenus par Flavornet (recherche par nom `/molecules?common_name=`, puis fiche détail
-`/molecules_details?id=<pubchem_cid>`), soit tout ce dont hopmatch peut se servir. Résultat sur un
-run réel : **86 seuils trouvés sur 734** (488 sans correspondance de nom exacte, 160 trouvés mais
-sans seuil olfactif publié sur leur fiche). Effet mesuré sur les notes de démo : le palier
-« seuil connu » passe de 3-4 à 23-24 entrées pour mangue/fruit-passion/kumquat.
+retenus par Flavornet, en priorité par **CID PubChem direct** (`/molecules_details?id=<cid>`, voir
+[section PubChem](#le-liant)), avec repli sur la recherche par nom (`/molecules?common_name=`)
+seulement pour les CAS sans CID résolu. Résultat sur un run réel (720/734 CID résolus au
+préalable) : **227 seuils trouvés sur 734** (720 accès directs par CID, seulement 14 sans
+correspondance — contre 488 avant ce changement, quand tout passait par la recherche par nom —
+493 trouvés mais sans seuil olfactif publié sur leur fiche). Presque 3× plus de seuils qu'avant
+(86 → 227), et surtout un mécanisme robuste (identité chimique) plutôt que fragile (nom exact).
 
 **Piège de texte libre.** Le champ seuil de FlavorDB2 est en texte libre, pas structuré
 (« 4 to 10 ppb », « Detection at 64 to 90 ppb »…), et contient de vrais pièges : la fiche du
@@ -241,20 +244,32 @@ pourcentage ou un texte sans unité renvoie `None`, jamais une valeur devinée.
 
 ### Le liant
 
-**PubChem (PUG-REST)** — *la clé de jointure, pas encore branchée.*
+**PubChem (PUG-REST)** — *implémenté : le CID comme identité chimique de référence.*
 - **Pourquoi.** Les trois mondes n'utilisent pas toujours les mêmes noms (estragole = methyl
-  chavicol = 4-allylanisole…). PubChem fournit l'identité chimique canonique (**CID**,
-  **InChIKey**) qui permettrait de joindre ingrédient ↔ molécule ↔ houblon sans se faire
-  piéger par les synonymes, au-delà de ce qu'un CAS ou une table d'alias manuelle couvrent.
-- **État actuel.** La jointure Flavornet↔FooDB implémentée passe par le **CAS** (présent des
-  deux côtés), pas par PubChem. Les synonymes restants (nommage différent entre Flavornet/FooDB
-  et le vocabulaire houblon — estragole/methyl-chavicol, β-caryophyllène/caryophyllène) sont
-  résolus par une petite table d'alias curée (`reference.ALIASES`) + un dépréfixage grec, pas
-  par une jointure structurale via PubChem. Ça marche pour le nombre limité de synonymes
-  rencontrés jusqu'ici, mais ne passera pas à l'échelle si le vocabulaire s'élargit beaucoup
-  (crawl Yakima, plus d'aliments FooDB) — PubChem reste la vraie solution générique, non
-  implémentée.
-- **Comment (si branché).** API PUG-REST publique, domaine public, robuste.
+  chavicol = 4-allylanisole…). PubChem fournit l'identité chimique canonique (**CID**) qui
+  permet de reconnaître deux noms comme la même molécule sans se faire piéger par les
+  synonymes — au-delà de ce qu'une table d'alias manuelle peut couvrir.
+- **Comment.** `ingest.resolve_pubchem_cids` résout le CID de chaque composé de la whitelist
+  Flavornet via l'endpoint PUG-REST `/compound/name/{cas}/cids/JSON` (qui accepte un CAS comme
+  synonyme), stocké dans `pubchem_cids(cas, cid)`. Vérifié : `140-67-0` (CAS de l'estragole)
+  résout au CID **8815** — exactement le CID déjà connu de *methyl-chavicol* dans
+  `reference.MOLECULES`. La fusion est donc un **fait chimique vérifié**, pas une supposition
+  de nommage. Sur un run réel : **720/734 CAS résolus (98%)**.
+- **Deux usages concrets, mesurés sur ce run.**
+  1. `ingest._canonical_compound` fusionne désormais un synonyme Flavornet/FooDB avec le
+     vocabulaire houblon **par identité de CID en priorité** ; la table d'alias manuelle
+     (`reference.ALIASES`) ne garde plus que les *agrégations* qui n'ont pas de CID propre
+     (« thiols » regroupe plusieurs molécules mesurées ensemble côté houblon — ce n'est pas
+     un synonyme de nommage, un CID ne peut pas trancher ça). Le dépréfixage grec
+     (β-caryophyllène → caryophyllène) reste un filet pour les CAS non résolus.
+  2. `ingest_flavordb2` va **directement** à `/molecules_details?id=<cid>` (l'endpoint natif de
+     FlavorDB2, découvert en l'utilisant nous-mêmes) quand le CID est connu, au lieu de chercher
+     par nom exact — les échecs de correspondance tombent de 488/734 (recherche par nom seule)
+     à **14/734** (720 résolus directement par CID), et le nombre de seuils trouvés grimpe de
+     86 à **227**.
+- **Limite assumée.** Résolution par CAS uniquement (pas encore InChIKey), et bornée aux ~734
+  composés de la whitelist Flavornet — cohérent avec le reste du pipeline (voir FlavorDB2
+  ci-dessus). Respecte la limite d'usage PubChem (5 requêtes/s).
 
 ---
 
@@ -427,10 +442,11 @@ hopmatch by-descriptor citrus,tropical   # découverte, sans note requise
 hopmatch crawl-barthhaas          # base complète BarthHaas (~90 variétés, réseau)
 hopmatch crawl-yakima              # base complète Yakima Chief (~152 variétés, via Algolia)
 hopmatch ingest-flavornet         # whitelist odeur-active (~734 composés, réseau)
+hopmatch resolve-pubchem-cids     # jointure structurale CAS->CID (réseau, avant flavordb2/foodb)
 hopmatch ingest-flavordb2         # seuils olfactifs, bornés à cette whitelist (réseau)
 hopmatch ingest-foodb <dossier_dump_foodb_csv>   # note→molécule filtré (local, gros fichiers)
 
-pytest -q                         # 23 tests
+pytest -q                         # 28 tests
 ```
 
 ---
@@ -459,16 +475,22 @@ CLAUDE.md        contexte projet pour Claude Code
 
 ## Feuille de route
 
-Fait : `ingest.ingest_flavornet`, `ingest.ingest_foodb` (jointure par CAS + alias, pas encore
-PubChem CID), `by-descriptor`, `ingest.crawl_yakima` (via Algolia, pas de DOM/Playwright),
-`ingest.ingest_flavordb2` (seuils, bornés à la whitelist Flavornet). Reste :
+Fait : `ingest.ingest_flavornet`, `ingest.ingest_foodb`, `by-descriptor`, `ingest.crawl_yakima`
+(via Algolia, pas de DOM/Playwright), `ingest.ingest_flavordb2`, `ingest.resolve_pubchem_cids`
+(jointure structurale CAS→CID : 720/734 résolus, remplace la table d'alias manuelle pour les
+synonymes purs et la recherche par nom exact de `ingest_flavordb2`, 227 seuils trouvés contre
+86 avant, 14 sans correspondance contre 488). Reste :
 
 1. **Drapeau biotransformation** par souche (géraniol→citronellol, précurseurs→thiols — central
-   pour une NEIPA Kveik). Touche plusieurs modules (schema, matching).
-2. **Jointure PubChem CID/InChIKey** — remplacerait la table d'alias manuelle
-   (`reference.ALIASES`) par une résolution structurale, plus robuste à l'échelle que la
-   recherche par nom exact utilisée aujourd'hui par `ingest_flavordb2` (488/734 sans
-   correspondance sur un run réel).
+   pour une NEIPA Kveik). Recherche de source en cours : la littérature académique a de vraies
+   valeurs (ex. efficacités de libération par souche, 0,15-0,35 %) mais éparpillées en figures
+   de papiers individuels, pas en table exportable — inutilisable sans recopie manuelle.
+   Piste retenue : Escarpment Labs (labo de levure commercial) a des fiches produit structurées
+   par souche (attenuation, floculation, **et une note de biotransformation catégorielle**
+   Haut/Moyen/Bas, méthodologie décrite) — à vérifier sur l'ensemble de leur catalogue avant
+   de s'appuyer dessus (couverture incomplète constatée sur un premier sondage).
+2. Résolution PubChem par InChIKey/SMILES en plus du CAS (couvrirait les 14/734 composés sans
+   CAS résolu), et jointure au-delà des ~734 composés Flavornet si le vocabulaire s'élargit.
 
 ---
 
