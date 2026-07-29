@@ -170,6 +170,44 @@ def contrast(con, note: str, top=8):
 
 
 # --------------------------------------------------------------------------- #
+# DÉCOUVERTE — by_descriptor (pas un cas A/B : pas de note requise)
+# --------------------------------------------------------------------------- #
+_NON_AROMA_DISPLAY = {"total_oil", "alpha_acid", "beta_acid"}
+
+
+def by_descriptor(con, selected: list[str], top: int = 10):
+    """
+    Houblons dont la roue d'arôme (`hop_descriptors`, BarthHaas/Yakima réelles)
+    recoupe une sélection de descripteurs. Grounded sur les données houblon
+    directement — ne dépend ni de CONTRAST_AFFINITY (prior curé) ni de FooDB.
+    Tri : (1) nb de descripteurs recoupés desc, (2) total_oil réconcilié desc
+    (proxy d'intensité aromatique), (3) variety asc (déterminisme).
+    """
+    hops, comp, hop_desc, _ = load(con)
+    selected = {reference.DESCRIPTOR_ALIASES.get(d, d) for d in selected}
+    ranked = []
+    for h in hops:
+        hd = hop_desc.get(h, set())
+        matched = selected & hd
+        if not matched:
+            continue
+        hcomp = comp.get(h, {})
+        total_oil = (hcomp.get("total_oil") or {}).get("mid") or 0.0
+        compounds = sorted(
+            ({"compound": c, "mid": v["mid"], "unit": v["unit"], "sources": v["sources"]}
+             for c, v in hcomp.items() if c not in _NON_AROMA_DISPLAY and v["mid"] is not None),
+            key=lambda r: -r["mid"])
+        ranked.append({"variety": h, "name": hops[h]["name"],
+                       "matched_descriptors": sorted(matched), "all_descriptors": sorted(hd),
+                       "compounds": compounds, "sources": hops[h]["sources"],
+                       "_rank": (-len(matched), -total_oil, h)})
+    ranked.sort(key=lambda r: r["_rank"])
+    for r in ranked:
+        del r["_rank"]
+    return ranked[:top]
+
+
+# --------------------------------------------------------------------------- #
 # CAS B — combine (NNLS + parcimonie + résidu irréductible)
 # --------------------------------------------------------------------------- #
 def combine(con, note: str, max_hops: int = 3):

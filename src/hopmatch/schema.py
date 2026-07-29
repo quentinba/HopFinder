@@ -24,6 +24,11 @@ CREATE TABLE aroma_notes (
 CREATE TABLE note_descriptors (
     note TEXT, descriptor TEXT, PRIMARY KEY (note, descriptor)
 );
+-- Whitelist Flavornet (composés odeur-actifs GC-O) : sert à filtrer FooDB
+-- (ingest_foodb), pas à la couche de matching note->molécules (`molecules`).
+CREATE TABLE flavornet_compounds (
+    cas TEXT PRIMARY KEY, compound TEXT, descriptors TEXT
+);
 """
 
 DROP_COMPOUNDS = {"alpha_acid", "beta_acid", "polyphenols"}  # non aromatiques
@@ -39,7 +44,8 @@ def init_db(con: sqlite3.Connection) -> None:
     con.executescript(
         "DROP TABLE IF EXISTS hops; DROP TABLE IF EXISTS hop_composition;"
         "DROP TABLE IF EXISTS hop_descriptors; DROP TABLE IF EXISTS molecules;"
-        "DROP TABLE IF EXISTS aroma_notes; DROP TABLE IF EXISTS note_descriptors;")
+        "DROP TABLE IF EXISTS aroma_notes; DROP TABLE IF EXISTS note_descriptors;"
+        "DROP TABLE IF EXISTS flavornet_compounds;")
     con.executescript(SCHEMA)
 
 

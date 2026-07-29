@@ -23,6 +23,19 @@ Réconciliation à la lecture : moyenne des milieux de fourchette, provenance tr
 Unités mixtes (% d'huile vs µg/kg pour les thiols) gérées via la normalisation
 par composé (les unités s'annulent au sein d'un composé).
 
+`flavornet_compounds(cas, compound, descriptors)` : whitelist odeur-active, distincte
+de `molecules` (couche de matching, avec seuils). Sert uniquement à filtrer FooDB à
+l'ingestion (`ingest_foodb`), jointure par CAS (pas encore par PubChem CID/InChIKey —
+voir docs/DATA_SOURCES.md). `ingest_foodb` écrit aussi dans `molecules` en `INSERT OR
+IGNORE`, sans écraser les seuils déjà connus de l'amorce `reference.MOLECULES`.
+
+**Normalisation des noms de composés à l'ingestion FooDB** (`ingest._canonical_compound`).
+Deux pièges d'honnêteté sinon : (1) synonymes explicites (`reference.ALIASES`, ex.
+estragole/methyl-chavicol, même CAS) → sans ça, double comptage dans le profil d'une
+note ; (2) préfixe grec (β-caryophyllene vs caryophyllene, vocabulaire houblon sans
+préfixe) → sinon fausse orpheline alors que le houblon fournit la molécule sous son
+autre nom. On ne renomme que vers une forme déjà connue du vocabulaire houblon.
+
 ## Validation/réparation
 `schema.validate_and_repair` détecte l'inversion myrcène/caryophyllène (fréquente
 dans les scrapes tiers), les négatifs, les sommes incohérentes. Inoffensif sur
@@ -34,6 +47,11 @@ BarthHaas/Yakima (propres) ; utile si tu ingères un dataset brut.
   moléculaire** : le contraste ne se dérive pas des composés partagés.
 - `combine` = NNLS `A·w ≈ t` (A = composés×houblons normalisés, t = poids note),
   parcimonie (≤ max_hops), + **résidu irréductible** = orphelines. Cas B.
+- `by_descriptor` = recoupement `hop_descriptors ∩ sélection`, sans note requise.
+  Orthogonal aux cas A/B : grounded sur les roues d'arôme réelles (pas
+  `CONTRAST_AFFINITY`), ne dépend ni de FooDB ni de `crawl_yakima`. Tri par nb de
+  descripteurs recoupés puis `total_oil` réconcilié (proxy d'intensité) puis variety.
+  Descripteurs normalisés à l'ingestion via `reference.DESCRIPTOR_ALIASES`.
 
 ## Ce qui est volontairement absent
 Pas d'OAV quantitatif (pas de concentration fiable), pas de cosinus pseudo-OAV,

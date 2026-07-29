@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+*.db
+.pytest_cache/
+# données volumineuses non versionnées
+data/foodb_*/
+data/*.csv
+!data/fixtures/**

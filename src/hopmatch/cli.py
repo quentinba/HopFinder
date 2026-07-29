@@ -29,11 +29,23 @@ def _print_combine(r):
     print(f"\n[COMBINE] {r['note']}  — couverture {r['coverage']*100:.0f}% "
           f"| résidu {r['residual']}")
     if not r["blend"]:
-        print("  aucune combinaison trouvée."); 
+        print("  aucune combinaison trouvée.");
     for h in r["blend"]:
         print(f"  {h['proportion']*100:5.1f}%  {h['name']}")
     if r["orphan"]:
         print("  irréductible (aucun houblon ne fournit) :", ", ".join(r["orphan"]))
+
+
+def _print_by_descriptor(ranked, selected):
+    print(f"\n[BY-DESCRIPTOR] {', '.join(selected)}")
+    if not ranked:
+        print("  aucun houblon ne recoupe ces descripteurs.")
+    for i, h in enumerate(ranked, 1):
+        print(f"  {i:<2}{h['name']:<14}recoupe {', '.join(h['matched_descriptors'])}"
+              f"  (tous : {', '.join(h['all_descriptors'])})  [{h['sources']}]")
+        for c in h["compounds"][:6]:
+            print(f"        {c['compound']:<18}{c['mid']:.2f} {c['unit']}"
+                  f"  ({', '.join(c['sources'])})")
 
 
 def main(argv=None):
@@ -48,6 +60,13 @@ def main(argv=None):
     c.add_argument("--db", default=DEFAULT_DB)
     c.add_argument("--limit", type=int)
 
+    fn = sub.add_parser("ingest-flavornet", help="moissonner flavornet.org (whitelist odeur-active)")
+    fn.add_argument("--db", default=DEFAULT_DB)
+
+    fb = sub.add_parser("ingest-foodb", help="ingérer le dump FooDB local (filtré par la whitelist Flavornet)")
+    fb.add_argument("foodb_dir", help="dossier du dump FooDB CSV")
+    fb.add_argument("--db", default=DEFAULT_DB)
+
     for name in ("amplify", "contrast", "combine"):
         s = sub.add_parser(name, help=f"cas d'usage : {name}")
         s.add_argument("note")
@@ -60,12 +79,24 @@ def main(argv=None):
     lst = sub.add_parser("list", help="lister notes et houblons")
     lst.add_argument("--db", default=DEFAULT_DB)
 
+    ds = sub.add_parser("descriptors", help="lister le vocabulaire de descripteurs disponible")
+    ds.add_argument("--db", default=DEFAULT_DB)
+
+    bd = sub.add_parser("by-descriptor", help="houblons recoupant des descripteurs choisis (découverte)")
+    bd.add_argument("descriptors", help="descripteurs séparés par virgule, ex: citrus,tropical")
+    bd.add_argument("--db", default=DEFAULT_DB)
+    bd.add_argument("--top", type=int, default=10)
+
     a = p.parse_args(argv)
 
     if a.cmd == "build":
         ingest.build_from_fixtures(a.fixtures, a.db); return 0
     if a.cmd == "crawl-barthhaas":
         ingest.crawl_barthhaas(a.db, limit=a.limit); return 0
+    if a.cmd == "ingest-flavornet":
+        ingest.ingest_flavornet(a.db); return 0
+    if a.cmd == "ingest-foodb":
+        ingest.ingest_foodb(a.db, a.foodb_dir); return 0
 
     con = connect(a.db)
     try:
@@ -80,6 +111,12 @@ def main(argv=None):
             _print_contrast(matching.contrast(con, a.note.lower()))
         elif a.cmd == "combine":
             _print_combine(matching.combine(con, a.note.lower(), max_hops=a.max_hops))
+        elif a.cmd == "descriptors":
+            ds = [r[0] for r in con.execute("SELECT DISTINCT descriptor FROM hop_descriptors")]
+            print("Descripteurs :", ", ".join(sorted(ds)))
+        elif a.cmd == "by-descriptor":
+            selected = [d.strip().lower() for d in a.descriptors.split(",") if d.strip()]
+            _print_by_descriptor(matching.by_descriptor(con, selected, top=a.top), selected)
     except KeyError as e:
         print(e); return 1
     finally:

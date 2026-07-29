@@ -19,3 +19,27 @@ def test_yakima_pinene_and_descriptors():
     assert comp["beta-pinene"] == (0.6, 1.0, "pct_oil")
     assert comp["myrcene"] == (50.0, 70.0, "pct_oil")
     assert parsers.parse_descriptors(text) == ["citrus", "stone fruit"]
+
+def test_parse_flavornet():
+    # gabarit calqué sur d_kovats_ov101.html (RI x4, lien CAS, descripteurs)
+    html = """
+    <table>
+    <tr><td class=sh>527</td><td>505</td><td>[596]</td><td>716</td><td class=ch>
+        <a href="info/75-18-3.html">Linalool</a></td><td class=sm>floral, citrus</td></tr>
+    <tr><td class=sh>500</td><td>500</td><td>500</td><td>500</td><td class=ch>
+        <a href="info/109-66-0.html">pentane</a></td><td class=sm>alkane</td></tr>
+    </table>
+    """
+    rows = parsers.parse_flavornet(html)
+    assert rows == [
+        ("75-18-3", "linalool", ["floral", "citrus"]),
+        ("109-66-0", "pentane", ["alkane"]),
+    ]
+
+def test_mass_mg_per_100g():
+    assert parsers.mass_mg_per_100g(3.2, "mg/100g") == 3.2
+    assert parsers.mass_mg_per_100g(3.2, "mg/100 g fresh weight") == 3.2
+    assert parsers.mass_mg_per_100g(12.15, "mg/kg") == 1.215
+    assert parsers.mass_mg_per_100g(2499, "IU") is None    # pas une masse
+    assert parsers.mass_mg_per_100g(0.0001, "ppb") is None  # échelle différente
+    assert parsers.mass_mg_per_100g(None, "mg/100g") is None

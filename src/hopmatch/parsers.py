@@ -80,6 +80,55 @@ def parse_descriptors(text: str) -> list[str]:
     return []
 
 
+def parse_flavornet(html: str) -> list[tuple[str, str, list[str]]]:
+    """
+    Parse la table Flavornet triée par indice de Kovats (d_kovats_ov101.html) :
+    une ligne par composé odeur-actif, avec CAS (dans le lien vers sa fiche),
+    nom et descripteurs séparés par virgule. Renvoie [(cas, compound, descriptors)].
+    """
+    from bs4 import BeautifulSoup
+    soup = BeautifulSoup(html, "html.parser")
+    out = []
+    for tr in soup.find_all("tr"):
+        link = tr.find("td", class_="ch")
+        sm = tr.find("td", class_="sm")
+        if link is None or sm is None:
+            continue
+        a = link.find("a", href=True)
+        if a is None:
+            continue
+        m = re.search(r"info/([^/]+)\.html", a["href"])
+        if not m:
+            continue
+        cas = m.group(1)
+        compound = a.get_text(strip=True).lower()
+        descriptors = [d.strip() for d in sm.get_text(strip=True).split(",") if d.strip()]
+        out.append((cas, compound, descriptors))
+    return out
+
+
+def mass_mg_per_100g(value: float | None, unit: str | None) -> float | None:
+    """
+    Convertit une concentration FooDB (Content.orig_content/orig_unit) en mg/100g
+    UNIQUEMENT si l'unité est une masse/masse comparable (mg/100g, mg/kg...).
+    Renvoie None pour les unités non comparables (IU, ppb, µM, kcal, RE, NE, α-TE...)
+    plutôt que de les traiter comme des mg — 'standard_content' de FooDB prétend
+    normaliser mais recopie en fait ces unités telles quelles (vérifié sur le dump).
+    """
+    if value is None or unit is None:
+        return None
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return None
+    u = str(unit).strip().lower()
+    if re.match(r"^mg\s*/\s*100\s*g", u):
+        return value
+    if re.match(r"^mg\s*/\s*kg", u):
+        return value * 0.1
+    return None
+
+
 def parse_region(text: str) -> str:
     lines = [l.strip() for l in text.splitlines() if l.strip()]
     for i, l in enumerate(lines[:-1]):

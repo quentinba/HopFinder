@@ -34,3 +34,23 @@ def test_orphans_flagged(db):
     r = matching.amplify(db, "yuzu")
     # limonène n'existe pas dans le houblon -> orphelin
     assert "limonene" in r["orphan"]
+
+def test_by_descriptor_matches_and_ranks(db):
+    r = matching.by_descriptor(db, ["citrus", "tropical"])
+    varieties = [h["variety"] for h in r]
+    assert set(varieties) == {"citra", "mosaic", "simcoe"}  # saazer n'a ni l'un ni l'autre
+    for h in r:
+        assert set(h["matched_descriptors"]) <= {"citrus", "tropical"}
+        assert set(h["matched_descriptors"]) <= set(h["all_descriptors"])
+    # tous à 2 descripteurs recoupés ici -> tie-break par total_oil réconcilié desc
+    # (fixtures : simcoe 1.75 > citra 1.7 > mosaic 1.625 ml/100g)
+    assert [h["variety"] for h in r] == ["simcoe", "citra", "mosaic"]
+
+def test_by_descriptor_normalizes_aliases(db):
+    # "stonefruit"/"citrus fruit" doivent se comporter comme leurs formes canoniques
+    r_alias = matching.by_descriptor(db, ["citrus fruit"])
+    r_canon = matching.by_descriptor(db, ["citrus"])
+    assert [h["variety"] for h in r_alias] == [h["variety"] for h in r_canon]
+
+def test_by_descriptor_no_match(db):
+    assert matching.by_descriptor(db, ["nonexistent-descriptor"]) == []

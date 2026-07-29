@@ -29,8 +29,12 @@ MOLECULES: dict[str, tuple[str, float | None, int | None]] = {
     "methyl-chavicol": ("anis, estragon, basilic", None, 8815),
 }
 
-# molécule côté note -> composé mesuré côté houblon (thiols agrégés, etc.)
-ALIASES: dict[str, str] = {"3-mercaptohexanol": "thiols", "4mmp": "thiols"}
+# molécule côté note -> composé mesuré côté houblon (thiols agrégés, synonymes
+# FooDB/Flavornet à normaliser vers le vocabulaire houblon existant, etc.)
+ALIASES: dict[str, str] = {
+    "3-mercaptohexanol": "thiols", "4mmp": "thiols",
+    "estragole": "methyl-chavicol",  # même composé (CAS 140-67-0), nom Flavornet/FooDB
+}
 
 # note -> {molécule: poids de contribution au caractère (0-1)}
 AROMA_NOTES: dict[str, dict[str, float]] = {
@@ -52,6 +56,30 @@ NOTE_DESCRIPTORS: dict[str, list[str]] = {
     "fruit-passion": ["tropical"],
     "mangue":        ["tropical", "stone fruit"],
     "pin-resine":    ["woody", "resinous"],
+}
+
+# note -> nom d'aliment FooDB (Food.name) à ingérer via ingest_foodb.
+# Uniquement les correspondances propres et sans ambiguïté (vérifié sur le dump 2020-04-07) :
+#   - yuzu : absent de FooDB (aucune entrée), reste sur l'amorce littérature.
+#   - rose : FooDB n'a que "Rose hip" (le fruit de l'églantier, note plus acidulée que
+#     florale) — mapper "rose" dessus serait un faux ami, on s'abstient.
+#   - pin-resine : pas un aliment (note résineuse pure), aucun candidat FooDB pertinent.
+NOTE_TO_FOODB: dict[str, str] = {
+    "kumquat":       "Kumquat",
+    "basilic":       "Sweet basil",
+    "fruit-passion": "Passion fruit",
+    "mangue":        "Mango",
+}
+
+# Normalisation des variantes de descripteurs entre sources (pluriel, formulation).
+# Amorce curée ; appliquée à l'ingestion (ingest._ingest_variety), pas dans
+# parsers.parse_descriptors qui reste un parseur brut sans connaissance métier.
+# À enrichir au fil des variétés réellement ingérées (crawl_barthhaas/crawl_yakima).
+DESCRIPTOR_ALIASES: dict[str, str] = {
+    "citrus fruit": "citrus", "citrus fruits": "citrus",
+    "stonefruit": "stone fruit", "stone fruits": "stone fruit",
+    "berries": "berry", "tropical fruit": "tropical", "tropical fruits": "tropical",
+    "woody/resinous": "woody", "spice": "spicy", "spices": "spicy",
 }
 
 # Carte d'affinités descripteurs pour le MODE CONTRASTE (cas A).
