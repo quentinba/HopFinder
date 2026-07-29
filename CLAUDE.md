@@ -86,10 +86,10 @@ scorings DIFFÉRENTS :
   `parsers.parse_flavordb2_threshold` n'accepte qu'un nombre accolé à une unité reconnue
   ppb/ppm/ppt). 25 595 molécules au total, mais `ingest.ingest_flavordb2` IMPLÉMENTÉ se
   borne aux ~734 de la whitelist Flavornet (pas tout crawler : hors sujet + lourd pour leur
-  serveur). Run réel (avec CID déjà résolus) : 227/734 seuils trouvés (720 accès directs par
-  CID, 14 sans correspondance — contre 86 trouvés / 488 sans correspondance avant le CID).
-  Écrit dans `flavordb2_thresholds` (jamais dans `molecules`). Licence CC BY-NC-SA (non
-  commercial).
+  serveur). Run réel (avec CID déjà résolus, repli par nom inclus) : 227/734 seuils trouvés
+  (727 accès directs par CID, 6 sans correspondance — contre 86 trouvés / 488 sans
+  correspondance avant le CID). Écrit dans `flavordb2_thresholds` (jamais dans `molecules`).
+  Licence CC BY-NC-SA (non commercial).
 - **PubChem (PUG-REST)** : `ingest.resolve_pubchem_cids` IMPLÉMENTÉ, `/compound/name/{cas}/cids/JSON`
   (accepte un CAS comme synonyme), écrit `pubchem_cids(cas, cid)`, borné à la whitelist
   Flavornet. Repli sur le nom du composé quand le CAS seul échoue

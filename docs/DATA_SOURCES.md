@@ -75,10 +75,10 @@
 - Rôle : couche seuils (prior de puissance).
 - Statut : `ingest.ingest_flavordb2` implémenté, **borné aux ~734 composés de la whitelist
   Flavornet** (pas les 25 595 molécules — hors de portée de ce dont hopmatch se sert, et
-  inutilement lourd pour leur serveur). Run réel (avec `pubchem_cids` déjà résolu, accès direct
-  par CID) : **227 seuils trouvés sur 734** (720 via CID direct, 14 sans correspondance, 493
-  trouvés mais sans seuil publié). Écrit dans `flavordb2_thresholds`, jamais dans
-  `molecules`/`reference.MOLECULES`.
+  inutilement lourd pour leur serveur). Run réel (avec `pubchem_cids` déjà résolu, repli par nom
+  inclus, accès direct par CID) : **227 seuils trouvés sur 734** (727 via CID direct, 6 sans
+  correspondance, 501 trouvés mais sans seuil publié). Écrit dans `flavordb2_thresholds`, jamais
+  dans `molecules`/`reference.MOLECULES`.
 
 **The Good Scents Company** — descripteurs parfumeur fins, **pas d'API, CGU restrictives**. Optionnel.
 
