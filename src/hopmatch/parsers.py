@@ -33,6 +33,17 @@ YAKIMA_LABELS = {
 
 LABELS_BY_SOURCE = {"barthhaas": BARTHHAAS_LABELS, "yakima": YAKIMA_LABELS}
 
+# clé de champ JSON (API Algolia YCH, brewing_values[i]) -> (compound, unit).
+# Distinct de YAKIMA_LABELS (texte des fixtures) : la source API a ses propres
+# clés (ex. 'b_pinene', 'silinene') déjà structurées en {low, ave, high}.
+YAKIMA_API_FIELDS = {
+    "b_pinene": ("beta-pinene", "pct_oil"), "myrcene": ("myrcene", "pct_oil"),
+    "linalool": ("linalool", "pct_oil"), "caryophyllene": ("caryophyllene", "pct_oil"),
+    "farnesene": ("farnesene", "pct_oil"), "humulene": ("humulene", "pct_oil"),
+    "geraniol": ("geraniol", "pct_oil"), "silinene": ("selinene", "pct_oil"),
+    "oil": ("total_oil", "ml_100g"), "alpha": ("alpha_acid", "pct"), "beta": ("beta_acid", "pct"),
+}
+
 
 def parse_range(s: str) -> tuple[float | None, float | None]:
     """'50 - 70%' -> (50, 70) ; 'up to 2.8 ml/100 g' -> (0, 2.8) ; '1.0 - 3.0' -> (1, 3)."""
@@ -138,3 +149,99 @@ def parse_region(text: str) -> str:
         if "BREWING VALUES" in l.upper() and not any(c.isdigit() for c in lines[i + 1]):
             return lines[i + 1]
     return ""
+
+
+_THRESHOLD_UNIT_RE = re.compile(r"(ppb|ppt|ppm)\b", re.I)
+_THRESHOLD_UNIT_TO_PPB = {"ppb": 1.0, "ppt": 0.001, "ppm": 1000.0}
+
+
+def parse_flavordb2_threshold(text: str) -> float | None:
+    """
+    Texte libre FlavorDB2 (« 4 to 10 ppb », « Detection at 64 to 90 ppb », mais
+    aussi des pièges type « Aroma characteristics at 10%; terpy, herbaceous... »
+    pour le myrcène — une composition, pas un seuil). On ne fait confiance qu'à
+    un nombre directement associé à une unité RECONNUE (ppb/ppm/ppt) : jamais un
+    pourcentage, jamais un nombre sans unité. Prend la première plage/valeur
+    trouvée dans le texte (milieu si plage), convertie en ppb. Renvoie None si
+    aucune unité reconnue n'apparaît — mieux vaut aucun seuil qu'un seuil deviné.
+    """
+    m = _THRESHOLD_UNIT_RE.search(text)
+    if not m:
+        return None
+    prefix = text[:m.start()]
+    nums = re.findall(r"\d+\.?\d*", prefix.split(";")[-1])
+    if not nums:
+        return None
+    vals = [float(n) for n in nums[-2:]]
+    mid = sum(vals) / len(vals)
+    return mid * _THRESHOLD_UNIT_TO_PPB[m.group(1).lower()]
+
+
+def parse_flavordb2_search(html: str) -> list[tuple[str, int]]:
+    """Résultats de /flavordb2/molecules?common_name=... -> [(nom, pubchem_cid)]."""
+    from bs4 import BeautifulSoup
+    soup = BeautifulSoup(html, "html.parser")
+    out = []
+    table = soup.find("table", id="molecules")
+    if table is None:
+        return out
+    for tr in table.find_all("tr"):
+        tds = tr.find_all("td")
+        if len(tds) < 2:
+            continue
+        name = tds[0].get_text(strip=True)
+        a = tds[1].find("a")
+        cid_text = a.get_text(strip=True) if a else ""
+        if name and cid_text.isdigit():
+            out.append((name, int(cid_text)))
+    return out
+
+
+def parse_flavordb2_detail(html: str) -> tuple[list[str], float | None]:
+    """Fiche /flavordb2/molecules_details?id=... -> (liste CAS, seuil ppb | None)."""
+    from bs4 import BeautifulSoup
+    soup = BeautifulSoup(html, "html.parser")
+    cas_list: list[str] = []
+    for th in soup.find_all("th"):
+        if th.get_text(strip=True) == "CAS:":
+            td = th.find_next_sibling("td")
+            if td:
+                cas_list = [c.strip() for c in td.get_text(strip=True).split(",") if c.strip()]
+            break
+    threshold = None
+    for strong in soup.find_all("strong"):
+        if strong.get_text(strip=True) == "Aroma threshold values:":
+            li = strong.find_parent("li")
+            if li:
+                text = li.get_text(" ", strip=True).replace("Aroma threshold values:", "", 1).strip()
+                threshold = parse_flavordb2_threshold(text)
+            break
+    return cas_list, threshold
+
+
+def parse_yakima_hit(hit: dict) -> tuple[str, str, str, dict, list[str]]:
+    """
+    Extrait (variety, name, region, comp, descriptors) d'un hit Algolia YCH
+    (index contentstack--name-asc, _content_type='variety'). Renvoie comp au
+    même format que parse_composition ({compound: (vmin, vmax, unit)}).
+
+    La composition vient de imported_fields.brewing_values[code='ARO01']
+    ('HopAroma', l'analyse brute de la variété) — pas d'une forme produit
+    (pellets/leaf/baled), qui ne diffère qu'en présentation, pas en variété ;
+    à défaut, la première entrée disponible.
+    """
+    imp = hit.get("imported_fields") or {}
+    variety = (hit.get("url") or "").rsplit("/", 1)[-1]
+    name = imp.get("display_name") or variety
+    region = imp.get("country_name") or ""
+    descriptors = [d.strip().lower() for d in (imp.get("aromas") or []) if d and d.strip()]
+
+    brewing = imp.get("brewing_values") or []
+    bv = next((b for b in brewing if b.get("code") == "ARO01"), brewing[0] if brewing else {})
+    comp: dict = {}
+    for field, (compound, unit) in YAKIMA_API_FIELDS.items():
+        rng = bv.get(field) or {}
+        lo, hi = rng.get("low"), rng.get("high")
+        if lo is not None and hi is not None:
+            comp[compound] = (float(lo), float(hi), unit)
+    return variety, name, region, comp, descriptors

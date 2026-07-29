@@ -60,12 +60,20 @@ def main(argv=None):
     c.add_argument("--db", default=DEFAULT_DB)
     c.add_argument("--limit", type=int)
 
+    cy = sub.add_parser("crawl-yakima", help="moissonner yakimachief.com (via son index Algolia)")
+    cy.add_argument("--db", default=DEFAULT_DB)
+    cy.add_argument("--limit", type=int)
+
     fn = sub.add_parser("ingest-flavornet", help="moissonner flavornet.org (whitelist odeur-active)")
     fn.add_argument("--db", default=DEFAULT_DB)
 
     fb = sub.add_parser("ingest-foodb", help="ingérer le dump FooDB local (filtré par la whitelist Flavornet)")
     fb.add_argument("foodb_dir", help="dossier du dump FooDB CSV")
     fb.add_argument("--db", default=DEFAULT_DB)
+
+    f2 = sub.add_parser("ingest-flavordb2", help="seuils olfactifs FlavorDB2 (bornés à la whitelist Flavornet)")
+    f2.add_argument("--db", default=DEFAULT_DB)
+    f2.add_argument("--sleep", type=float, default=0.3)
 
     for name in ("amplify", "contrast", "combine"):
         s = sub.add_parser(name, help=f"cas d'usage : {name}")
@@ -93,10 +101,14 @@ def main(argv=None):
         ingest.build_from_fixtures(a.fixtures, a.db); return 0
     if a.cmd == "crawl-barthhaas":
         ingest.crawl_barthhaas(a.db, limit=a.limit); return 0
+    if a.cmd == "crawl-yakima":
+        ingest.crawl_yakima(a.db, limit=a.limit); return 0
     if a.cmd == "ingest-flavornet":
         ingest.ingest_flavornet(a.db); return 0
     if a.cmd == "ingest-foodb":
         ingest.ingest_foodb(a.db, a.foodb_dir); return 0
+    if a.cmd == "ingest-flavordb2":
+        ingest.ingest_flavordb2(a.db, sleep=a.sleep); return 0
 
     con = connect(a.db)
     try:

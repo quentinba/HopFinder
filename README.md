@@ -4,10 +4,10 @@
 questions concrètes : *quel houblon accorder à un ajout* (yuzu, basilic…), et *peut-on
 reproduire un goût avec du houblon seul* ?
 
-> État : squelette fonctionnel, testé (`pytest` vert, 18 tests) sur des données réelles
-> de démonstration (3 variétés BarthHaas + 3 Yakima). `ingest_flavornet`, `ingest_foodb`
-> et `by-descriptor` tournent réellement contre les sources externes. Il reste
-> `crawl_yakima` (scaffold) et la couche seuils FlavorDB2 — voir [Feuille de route](#feuille-de-route).
+> État : `pytest` vert (23 tests). Toutes les sources tournent réellement contre les
+> sites externes : `crawl_barthhaas`, `crawl_yakima`, `ingest_flavornet`, `ingest_foodb`,
+> `ingest_flavordb2`, `by-descriptor`. Il reste le drapeau de biotransformation par
+> souche (géraniol→citronellol, précurseurs→thiols) — voir [Feuille de route](#feuille-de-route).
 
 ---
 
@@ -75,11 +75,11 @@ accède, et *ce qu'elle vaut*.
 | Base | Monde | Rôle | Accès | Qualité / limite | Licence |
 |---|---|---|---|---|---|
 | **BarthHaas** | houblon | composition (dont thiols) | HTML servi | propre, producteur | données producteur |
-| **Yakima Chief** | houblon | β-pinène, sélinène, roue d'arôme | HTML (SPA) | propre, labo ASBC | données producteur |
+| **Yakima Chief** | houblon | β-pinène, sélinène, roue d'arôme | API Algolia (checkpoint devant le HTML) | propre, labo ASBC | données producteur |
 | **FooDB** | ingrédient→molécule | composition + concentration | dump bulk | lacunaire, bruitée, figée 2020 | **non commerciale** |
 | **Flavornet** | molécule | whitelist odeur-active | HTML statique | curée mais petite/ancienne | académique |
-| **FlavorDB2** | molécule | seuils olfactifs | scrape JSON | seuils utiles, présence seule | **CC BY-NC-SA** |
-| **PubChem** | molécule | identité chimique (jointure) | API PUG-REST | robuste | domaine public |
+| **FlavorDB2** | molécule | seuils olfactifs | scrape HTML (recherche + fiche AJAX) | seuils utiles, texte libre, présence seule | **CC BY-NC-SA** |
+| **PubChem** | molécule | identité chimique (jointure) | API PUG-REST | robuste, pas encore branché | domaine public |
 
 ### Côté houblon
 
@@ -99,14 +99,28 @@ accède, et *ce qu'elle vaut*.
 - **Pourquoi.** Complète BarthHaas avec le **β-pinène** et le **sélinène**, et fournit une
   **roue d'arôme** (descripteurs sensoriels) exploitable directement pour la couche
   descripteurs. Données issues de leur labo qualité, conformes aux méthodes ASBC.
-- **Comment.** Pages `/variety/{slug}`. Les valeurs sont *présentes* dans le HTML rendu, mais
-  le front est de type SPA → il faut une extraction DOM ciblée (ou Playwright si un simple
-  `requests` ne renvoie qu'un shell JS). C'est le scaffold `ingest.crawl_yakima`.
+- **Comment — pas ce qui était prévu.** Le site a un vrai rempart anti-bot devant le HTML
+  (Vercel Security Checkpoint) : `requests` seul ne passe jamais, même avec un User-Agent de
+  navigateur réel (vérifié). Mais leur front s'appuie sur **Algolia** (recherche instantanée),
+  avec une clé API **publique en lecture seule** exposée côté client (design normal pour ce
+  type de clé Algolia « search-only », visible dans le JS de n'importe quel navigateur qui
+  visite le site) — trouvée en inspectant les requêtes réseau. `ingest.crawl_yakima` interroge
+  cet index Algolia directement en HTTP simple : une seule requête ramène les ~152 variétés,
+  chacune avec sa composition **déjà structurée en JSON** (pas de texte à parser, contrairement
+  à BarthHaas) et sa roue d'arôme. Fragile par construction (clé/index non documentés
+  publiquement, peuvent changer si YCH modifie son frontend).
+- **Piège de nommage.** Les variétés déposées ont un slug `-brand` (`citra-brand`,
+  `mosaic-brand`…) qui ne fusionnerait jamais avec le slug BarthHaas (`citra`, `mosaic`). Mais
+  le catalogue YCH a aussi de vrais doublons de SKU sans rapport avec les marques (`perle` ET
+  `perle-per03` coexistent, `saaz` ET `saaz-saz01`…). `crawl_yakima` ne déprefixe `-brand` que
+  lorsque ça ne rentre pas en collision avec un autre slug du même lot — sinon il garde le
+  slug tel quel, pour ne jamais fusionner silencieusement deux fiches distinctes.
 - **Limite.** Pas de thiols. Complémentarité exacte avec BarthHaas.
 
 > **Fusion.** Une variété reçoit des mesures des deux sources ; hopmatch les stocke toutes
 > (schéma EAV) et les *réconcilie à la lecture* (moyenne des milieux de fourchette, provenance
-> tracée). Citra finit ainsi avec le β-pinène de Yakima **et** les thiols de BarthHaas.
+> tracée). Citra finit ainsi avec le β-pinène de Yakima **et** les thiols de BarthHaas —
+> vérifié en conditions réelles (crawl BarthHaas + crawl Yakima, pas juste les fixtures).
 
 ### Côté ingrédient → molécule
 
@@ -173,6 +187,57 @@ accède, et *ce qu'elle vaut*.
 - **Limite cruciale.** Le lien ingrédient→molécule est en **présence/absence** : aucune
   concentration *dans l'ingrédient*. Donc on ne peut pas déduire « le linalol est au-dessus de
   son seuil dans le basilic » — le seuil reste un prior, pas un OAV. Licence CC BY-NC-SA.
+
+### Flavornet + FlavorDB2 : deux questions différentes sur la même molécule, pas la même donnée
+
+Les deux sources parlent de la **molécule elle-même**, jamais d'un aliment précis (contrairement
+à FooDB) — mais elles répondent chacune à une question différente :
+
+| Source | Question | Réponse type |
+|---|---|---|
+| Flavornet | Cette molécule sent-elle quelque chose, tout court ? | binaire + descriptif : « linalol : oui, floral/agrume » |
+| FlavorDB2 | À partir de quelle quantité devient-elle perceptible ? | quantitatif : « linalol : perceptible dès 6 ppb » |
+
+Flavornet sert à **filtrer** (garder les composés FooDB qui sentent quelque chose, jeter le
+reste). FlavorDB2 sert à **pondérer** ce qui reste (une molécule à seuil très bas, comme les
+thiols à ~0,06 ppb, compte plus fort qu'une molécule à seuil élevé, même sans connaître sa
+concentration exacte dans l'aliment).
+
+**Deux tables séparées, jamais fusionnées en une seule à l'ingestion :**
+- `flavornet_compounds(cas, compound, descriptors)`.
+- `flavordb2_thresholds(cas, compound, threshold_ppb)` — même principe, copie fidèle de la
+  source, aucun nettoyage.
+
+`ingest_foodb` lit ces deux tables **directement**, jamais via `molecules` (voir plus bas) :
+Flavornet pour filtrer, `flavordb2_thresholds` pour le palier « seuil connu » du poids
+(concentration > seuil > présence, voir [méthode](#méthode-de-score-moléculaire-tf-idf)).
+
+**Règle explicite : aucun repli sur une liste codée en dur.** `reference.MOLECULES` contient 14
+molécules avec seuil saisies à la main depuis la littérature — c'est l'amorce originelle du
+projet, encore utilisée par `--oav` sur les 7 notes de démo. Mais le pipeline d'ingestion
+(FooDB/Flavornet/FlavorDB2) ne s'appuie **jamais** dessus comme repli silencieux : si
+`flavordb2_thresholds` ne connaît pas une molécule, elle reste sans seuil (palier « présence »),
+point. Mélanger un seuil sourcé (FlavorDB2) et un seuil deviné/manuel dans le même calcul serait
+exactement le genre de précision-déchet que le projet évite ailleurs (pas d'OAV, pas de
+cosinus pseudo-OAV) — et rendrait impossible de savoir, en regardant un résultat, si un poids
+vient d'une vraie source ou d'une estimation maison.
+
+**`ingest_flavordb2` — implémenté, périmètre volontairement borné.** FlavorDB2 a 25 595
+molécules et pas de dump bulk pour les seuils (juste un JSON bulk pour un graphe de co-occurrence
+ingrédient↔ingrédient, sans rapport). Crawler les 25 595 fiches aurait été disproportionné et
+inutilement lourd pour leur serveur : `ingest_flavordb2` cherche uniquement les ~734 composés déjà
+retenus par Flavornet (recherche par nom `/molecules?common_name=`, puis fiche détail
+`/molecules_details?id=<pubchem_cid>`), soit tout ce dont hopmatch peut se servir. Résultat sur un
+run réel : **86 seuils trouvés sur 734** (488 sans correspondance de nom exacte, 160 trouvés mais
+sans seuil olfactif publié sur leur fiche). Effet mesuré sur les notes de démo : le palier
+« seuil connu » passe de 3-4 à 23-24 entrées pour mangue/fruit-passion/kumquat.
+
+**Piège de texte libre.** Le champ seuil de FlavorDB2 est en texte libre, pas structuré
+(« 4 to 10 ppb », « Detection at 64 to 90 ppb »…), et contient de vrais pièges : la fiche du
+myrcène liste *« Aroma characteristics at 10%; terpy, herbaceous... »* dans ce même champ — une
+composition dans un extrait aromatique, pas un seuil de détection. `parsers.parse_flavordb2_threshold`
+ne fait confiance qu'à un nombre **directement accolé à une unité reconnue** (ppb/ppm/ppt) ; un
+pourcentage ou un texte sans unité renvoie `None`, jamais une valeur devinée.
 
 ### Le liant
 
@@ -360,10 +425,12 @@ hopmatch descriptors              # vocabulaire de descripteurs disponible
 hopmatch by-descriptor citrus,tropical   # découverte, sans note requise
 
 hopmatch crawl-barthhaas          # base complète BarthHaas (~90 variétés, réseau)
+hopmatch crawl-yakima              # base complète Yakima Chief (~152 variétés, via Algolia)
 hopmatch ingest-flavornet         # whitelist odeur-active (~734 composés, réseau)
+hopmatch ingest-flavordb2         # seuils olfactifs, bornés à cette whitelist (réseau)
 hopmatch ingest-foodb <dossier_dump_foodb_csv>   # note→molécule filtré (local, gros fichiers)
 
-pytest -q                         # 18 tests
+pytest -q                         # 23 tests
 ```
 
 ---
@@ -375,9 +442,10 @@ src/hopmatch/
   reference.py   amorce note→molécule/descripteur + alias/normalisation + carte d'affinités
                  (⚠️ AROMA_NOTES/CONTRAST_AFFINITY = prior, à remplacer/ancrer)
   parsers.py     parseurs label/valeur BarthHaas & Yakima, descripteurs, unités FooDB
-  schema.py      schéma SQLite EAV (+ flavornet_compounds) + validation/réparation
-  ingest.py      build fixtures / crawl BarthHaas / ingest_flavornet / ingest_foodb (réel) ;
-                 crawl_yakima (scaffold)
+  schema.py      schéma SQLite EAV (+ flavornet_compounds, flavordb2_thresholds) +
+                 validation/réparation
+  ingest.py      build fixtures / crawl BarthHaas / crawl Yakima (Algolia) / ingest_flavornet /
+                 ingest_flavordb2 / ingest_foodb — tout réel, aucun scaffold restant
   matching.py    load+réconciliation ; amplify / contrast / combine(NNLS) / by_descriptor
   cli.py         CLI
 data/fixtures/   pages réelles (démo) : barthhaas/{citra,mosaic,saazer}, yakima/{citra,mosaic,simcoe}
@@ -392,14 +460,15 @@ CLAUDE.md        contexte projet pour Claude Code
 ## Feuille de route
 
 Fait : `ingest.ingest_flavornet`, `ingest.ingest_foodb` (jointure par CAS + alias, pas encore
-PubChem CID), `by-descriptor`. Reste :
+PubChem CID), `by-descriptor`, `ingest.crawl_yakima` (via Algolia, pas de DOM/Playwright),
+`ingest.ingest_flavordb2` (seuils, bornés à la whitelist Flavornet). Reste :
 
-1. **`ingest.crawl_yakima`** — extraction DOM contre le SPA (ou Playwright).
-2. **Couche seuils** (FlavorDB2) + **drapeau biotransformation** par souche (géraniol→citronellol,
-   précurseurs→thiols — central pour une NEIPA Kveik). Enrichirait aussi les poids `foodb:thr` de
-   `ingest_foodb`, aujourd'hui limités aux seuils déjà connus de `reference.MOLECULES`.
-3. **Jointure PubChem CID/InChIKey** — remplacerait la table d'alias manuelle
-   (`reference.ALIASES`) par une résolution structurale, plus robuste à l'échelle.
+1. **Drapeau biotransformation** par souche (géraniol→citronellol, précurseurs→thiols — central
+   pour une NEIPA Kveik). Touche plusieurs modules (schema, matching).
+2. **Jointure PubChem CID/InChIKey** — remplacerait la table d'alias manuelle
+   (`reference.ALIASES`) par une résolution structurale, plus robuste à l'échelle que la
+   recherche par nom exact utilisée aujourd'hui par `ingest_flavordb2` (488/734 sans
+   correspondance sur un run réel).
 
 ---
 

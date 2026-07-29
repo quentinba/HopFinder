@@ -8,9 +8,10 @@ RÉEL (tourne ici) :
   - ingest_flavornet     : moissonne flavornet.org (réseau ; requests+bs4)
   - ingest_foodb         : ingère un dump bulk FooDB local, filtré par la whitelist
                            Flavornet (nécessite ingest_flavornet au préalable)
-
-SCAFFOLD (à finir dans TON environnement — voir docstrings et README) :
-  - crawl_yakima         : Yakima est un front SPA → extraction DOM à ajuster
+  - ingest_flavordb2     : moissonne cosylab.iiitd.edu.in/flavordb2 (réseau ; requests+bs4),
+                           seuils olfactifs bornés à la whitelist Flavornet
+  - crawl_yakima         : moissonne yakimachief.com via son index Algolia (réseau ;
+                           requests seul, pas de navigateur — voir docstring)
 """
 from __future__ import annotations
 import glob
@@ -157,21 +158,147 @@ def ingest_flavornet(out_db: str, timeout: float = 30.0) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# SCAFFOLDS — à compléter dans ton environnement (voir README "Passer à Claude Code")
+# FlavorDB2 (réseau réel) — seuils olfactifs, bornés à la whitelist Flavornet
 # --------------------------------------------------------------------------- #
-def crawl_yakima(out_db: str, **kw) -> None:
+def ingest_flavordb2(out_db: str, sleep: float = 0.3, timeout: float = 30.0) -> None:
     """
-    SCAFFOLD. Yakima Chief (yakimachief.com/variety/{slug}) rend les valeurs dans
-    le HTML mais via un front type SPA. Étapes à implémenter :
-      1. lister les slugs depuis /hop-varieties (ou l'API interne si trouvée) ;
-      2. pour chaque page, extraire le bloc 'TYPICAL BREWING VALUES' + 'Aroma Profile'
-         via sélecteurs BeautifulSoup (les valeurs sont dans des éléments distincts) ;
-      3. passer le texte extrait à parsers.parse_composition(text, YAKIMA_LABELS)
-         et parsers.parse_descriptors(text), puis _ingest_variety(..., 'yakima').
-    Si requests ne renvoie qu'un shell JS : basculer sur playwright (headless).
+    FlavorDB2 (cosylab.iiitd.edu.in/flavordb2) : seuils olfactifs par molécule.
+    Pas de dump bulk ni d'API JSON stable pour les seuils (le seul JSON bulk du
+    site est un graphe d'imports entre aliments, sans rapport) : on suit le même
+    chemin que le site lui-même — recherche par nom (`/molecules?common_name=`)
+    puis fiche détail AJAX (`/molecules_details?id=<pubchem_cid>`), qui contient
+    le CAS et un champ 'Aroma threshold values' en texte libre.
+
+    Bornée à la whitelist Flavornet (table flavornet_compounds, ~734 composés)
+    plutôt qu'un crawl des 25 595 molécules de FlavorDB2 : c'est tout ce dont
+    hopmatch peut utiliser, et ça évite de solliciter inutilement leur serveur
+    pour des dizaines de milliers de molécules hors sujet.
+
+    Écrit dans `flavordb2_thresholds`, PAS dans `molecules` : pas de repli sur
+    l'amorce manuelle `reference.MOLECULES` (14 seuils saisis à la main) — soit
+    FlavorDB2 confirme un seuil, soit la molécule reste sans seuil pour
+    `ingest_foodb`. Un nom sans correspondance exacte ou sans seuil publié est
+    simplement ignoré (compté, pas deviné) : voir parsers.parse_flavordb2_threshold
+    pour le garde-fou contre les textes sans unité reconnue (ex. un pourcentage
+    de composition confondu avec un seuil pour le myrcène).
     """
-    raise NotImplementedError(
-        "crawl_yakima : scaffold — voir docstring et README (tâche Claude Code).")
+    import time
+    import requests
+    from .schema import connect
+    BASE = "https://cosylab.iiitd.edu.in/flavordb2"
+    HEADERS = {"User-Agent": "hopmatch/0.1 (research)"}
+    con = connect(out_db)
+    if not con.execute("SELECT name FROM sqlite_master WHERE name='hops'").fetchone():
+        init_db(con); seed_reference(con)
+
+    targets = con.execute("SELECT cas, compound FROM flavornet_compounds").fetchall()
+    if not targets:
+        con.close()
+        raise RuntimeError(
+            "flavornet_compounds est vide : lancer ingest_flavornet avant ingest_flavordb2.")
+    print(f"FlavorDB2 : recherche de seuils pour {len(targets)} composés (whitelist Flavornet)")
+
+    found, no_match, no_threshold = 0, [], []
+    for row in targets:
+        cas, compound = row["cas"], row["compound"]
+        try:
+            html = requests.get(f"{BASE}/molecules", params={"common_name": compound, "page": 1},
+                                timeout=timeout, headers=HEADERS).text
+            match = next((cid for name, cid in parsers.parse_flavordb2_search(html)
+                         if name.lower() == compound.lower()), None)
+            if match is None:
+                no_match.append(compound); continue
+            time.sleep(sleep)
+            detail_html = requests.get(f"{BASE}/molecules_details", params={"id": match},
+                                       timeout=timeout, headers=HEADERS).text
+            _, threshold = parsers.parse_flavordb2_detail(detail_html)
+            if threshold is None:
+                no_threshold.append(compound); continue
+            con.execute("INSERT OR REPLACE INTO flavordb2_thresholds VALUES (?,?,?)",
+                        (cas, compound, threshold))
+            found += 1
+        except Exception as e:  # noqa
+            print(f"  !! {compound}: {e}")
+        time.sleep(sleep)
+    con.commit(); con.close()
+    print(f"FlavorDB2 : {found} seuils trouvés | {len(no_match)} sans correspondance de nom "
+          f"| {len(no_threshold)} trouvés mais sans seuil olfactif publié.")
+
+
+# --------------------------------------------------------------------------- #
+# Crawl Yakima Chief (réseau réel) — via Algolia, pas de HTML/checkpoint
+# --------------------------------------------------------------------------- #
+def crawl_yakima(out_db: str, limit: int | None = None, timeout: float = 30.0) -> None:
+    """
+    Yakima Chief (yakimachief.com/hop-varieties). Le site a un vrai rempart
+    anti-bot devant le HTML (Vercel Security Checkpoint) : `requests` seul ne
+    passe jamais, même avec un User-Agent de navigateur réel (vérifié). MAIS le
+    site s'appuie sur Algolia (InstantSearch) pour lister/chercher les variétés,
+    avec une clé de recherche PUBLIQUE exposée côté client (clé Algolia
+    "search-only", conçue pour être visible dans le JS du navigateur, en
+    lecture seule) : on interroge cet index Algolia directement, en HTTP simple,
+    sans navigateur ni checkpoint.
+
+    Une seule requête ramène les ~152 variétés, chacune avec sa composition déjà
+    structurée en JSON (imported_fields.brewing_values, low/ave/high) ET sa roue
+    d'arôme (imported_fields.aromas) — pas de parsing HTML/texte requis pour
+    cette source, contrairement à BarthHaas. Voir parsers.parse_yakima_hit.
+
+    Fragile par nature (clé/index/champs non documentés publiquement, peuvent
+    changer sans préavis si YCH modifie son frontend) — si ça casse, ouvrir
+    https://www.yakimachief.com/hop-varieties dans un navigateur, onglet réseau,
+    et retrouver la requête POST vers *.algolia.net.
+    """
+    import requests
+    from .schema import connect
+    ALGOLIA_URL = "https://9L63CAKQTR-dsn.algolia.net/1/indexes/*/queries"
+    ALGOLIA_PARAMS = {"x-algolia-api-key": "7805da050ed9c904a85c95e81ec8181c",
+                      "x-algolia-application-id": "9L63CAKQTR"}
+    BODY = {"requests": [{
+        "indexName": "contentstack--name-asc",
+        "filters": '_content_type:"variety" AND environment:"production" '
+                   'AND publish_details.locale:"en-us"',
+        "hitsPerPage": 1000, "page": 0, "query": "",
+    }]}
+    con = connect(out_db)
+    if not con.execute("SELECT name FROM sqlite_master WHERE name='hops'").fetchone():
+        init_db(con); seed_reference(con)
+
+    resp = requests.post(ALGOLIA_URL, params=ALGOLIA_PARAMS, json=BODY,
+                         timeout=timeout, headers={"User-Agent": "hopmatch/0.1 (research)"})
+    resp.raise_for_status()
+    hits = resp.json()["results"][0]["hits"]
+    if limit:
+        hits = hits[:limit]
+    print(f"Yakima Chief : {len(hits)} variétés (Algolia)")
+
+    # Les variétés déposées ont un slug '-brand' (ex. 'citra-brand') qui ne
+    # fusionnerait jamais avec le slug BarthHaas ('citra'). On déprefixe SAUF
+    # collision avec un autre slug du même lot : le catalogue YCH a aussi de
+    # vrais doublons de SKU sans rapport avec les marques (ex. 'perle' ET
+    # 'perle-per03' coexistent déjà) — dans ce cas on n'y touche pas, pour ne
+    # pas fusionner silencieusement deux fiches distinctes.
+    raw_slugs = {(hit.get("url") or "").rsplit("/", 1)[-1] for hit in hits}
+
+    def _dealias(slug: str) -> str:
+        if slug.endswith("-brand"):
+            stripped = slug[: -len("-brand")]
+            if stripped and stripped not in raw_slugs:
+                return stripped
+        return slug
+
+    stats = {"ok": 0, "repaired": 0, "suspect": 0}
+    skipped = 0
+    for hit in hits:
+        variety, name, region, comp, descriptors = parsers.parse_yakima_hit(hit)
+        variety = _dealias(variety)
+        if not variety or not comp:
+            skipped += 1; continue
+        conf = _ingest_variety(con, variety, name, region, comp, descriptors, "yakima")
+        stats[conf] += 1
+    con.commit(); con.close()
+    print(f"  ok={stats['ok']} repaired={stats['repaired']} suspect={stats['suspect']}"
+          + (f" | {skipped} sans composition exploitable (ignorées)" if skipped else ""))
 
 
 def _find_csv(folder: str, name: str) -> str:
@@ -264,7 +391,8 @@ def ingest_foodb(out_db: str, foodb_csv_dir: str,
 
     Poids : concentration (mg/100g, familles d'unités comparables uniquement, cf.
     parsers.mass_mg_per_100g) là où elle existe, sinon prior de seuil (1/seuil_ppb,
-    depuis les seuils déjà connus dans `molecules`), sinon présence pure. Jamais
+    depuis `flavordb2_thresholds` UNIQUEMENT — jamais l'amorce manuelle
+    reference.MOLECULES, voir ingest_flavordb2), sinon présence pure. Jamais
     d'OAV (pas de concentration fiable pour la majorité des composés).
     """
     import pandas as pd
@@ -284,9 +412,12 @@ def ingest_foodb(out_db: str, foodb_csv_dir: str,
             "(whitelist odeur-active requise pour filtrer FooDB).")
     whitelist = {cas: compound for cas, (compound, _) in flavornet.items()}
     odor_by_compound = {compound: desc for compound, desc in flavornet.values()}
+    # Seuils : uniquement flavordb2_thresholds (source sourcée), JAMAIS l'amorce
+    # manuelle reference.MOLECULES — voir ingest_flavordb2 et le README pour le
+    # pourquoi (mélanger un seuil réel et un seuil deviné casserait la
+    # traçabilité du palier de poids).
     thresholds = {r["compound"]: r["threshold_ppb"] for r in
-                 con.execute("SELECT compound, threshold_ppb FROM molecules "
-                             "WHERE threshold_ppb IS NOT NULL")}
+                 con.execute("SELECT compound, threshold_ppb FROM flavordb2_thresholds")}
 
     fdf = pd.read_csv(_find_csv(foodb_csv_dir, "food"), usecols=["id", "name"])
     food_id_to_note = {}

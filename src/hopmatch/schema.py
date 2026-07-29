@@ -29,6 +29,12 @@ CREATE TABLE note_descriptors (
 CREATE TABLE flavornet_compounds (
     cas TEXT PRIMARY KEY, compound TEXT, descriptors TEXT
 );
+-- Seuils olfactifs FlavorDB2, bornés à la whitelist Flavornet. Source dédiée,
+-- lue directement par ingest_foodb (jamais de repli sur l'amorce manuelle
+-- reference.MOLECULES pour cette décision de poids).
+CREATE TABLE flavordb2_thresholds (
+    cas TEXT PRIMARY KEY, compound TEXT, threshold_ppb REAL
+);
 """
 
 DROP_COMPOUNDS = {"alpha_acid", "beta_acid", "polyphenols"}  # non aromatiques
@@ -45,7 +51,7 @@ def init_db(con: sqlite3.Connection) -> None:
         "DROP TABLE IF EXISTS hops; DROP TABLE IF EXISTS hop_composition;"
         "DROP TABLE IF EXISTS hop_descriptors; DROP TABLE IF EXISTS molecules;"
         "DROP TABLE IF EXISTS aroma_notes; DROP TABLE IF EXISTS note_descriptors;"
-        "DROP TABLE IF EXISTS flavornet_compounds;")
+        "DROP TABLE IF EXISTS flavornet_compounds; DROP TABLE IF EXISTS flavordb2_thresholds;")
     con.executescript(SCHEMA)
 
 

@@ -27,7 +27,16 @@ par composé (les unités s'annulent au sein d'un composé).
 de `molecules` (couche de matching, avec seuils). Sert uniquement à filtrer FooDB à
 l'ingestion (`ingest_foodb`), jointure par CAS (pas encore par PubChem CID/InChIKey —
 voir docs/DATA_SOURCES.md). `ingest_foodb` écrit aussi dans `molecules` en `INSERT OR
-IGNORE`, sans écraser les seuils déjà connus de l'amorce `reference.MOLECULES`.
+IGNORE` (odeur/descripteur uniquement), sans jamais y écrire de seuil.
+
+`flavordb2_thresholds(cas, compound, threshold_ppb)` : même principe que
+`flavornet_compounds` — table brute dédiée, bornée aux ~734 composés de la whitelist
+Flavornet (pas les 25 595 molécules de FlavorDB2 : périmètre = ce dont hopmatch peut
+se servir). `ingest_foodb` lit **cette table directement** pour le palier « seuil
+connu », **jamais** `molecules`/`reference.MOLECULES` (14 seuils manuels, amorce
+littérature) — décision explicite : ne jamais mélanger un seuil sourcé et un seuil
+deviné dans une même décision de poids automatisée. `reference.MOLECULES` reste
+utilisé ailleurs (option `--oav`, indépendante de ce pipeline).
 
 **Normalisation des noms de composés à l'ingestion FooDB** (`ingest._canonical_compound`).
 Deux pièges d'honnêteté sinon : (1) synonymes explicites (`reference.ALIASES`, ex.

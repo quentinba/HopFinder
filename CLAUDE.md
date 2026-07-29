@@ -29,8 +29,15 @@ scorings DIFFÉRENTS :
 ## Réalité des données (vérifiée)
 - **BarthHaas** : source houblon primaire. HTML servi, parsable, inclut les THIOLS.
   Crawler implémenté (`ingest.crawl_barthhaas`).
-- **Yakima Chief** : secondaire. Front SPA → extraction DOM (ou Playwright). Ajoute
-  β-pinène, sélinène. `ingest.crawl_yakima` = SCAFFOLD.
+- **Yakima Chief** : secondaire. Ajoute β-pinène, sélinène. Vrai rempart anti-bot devant
+  le HTML (Vercel Security Checkpoint) — `requests` seul ne passe jamais (vérifié, même
+  avec UA de navigateur). Contournement : leur front s'appuie sur Algolia avec une clé
+  API PUBLIQUE en lecture seule exposée côté client (design normal pour ce type de clé) —
+  interrogée en HTTP simple, sans navigateur. Une requête ramène les ~152 variétés en
+  JSON déjà structuré (composition + roue d'arôme), pas de parsing HTML. Piège nommage :
+  slugs `-brand` (`citra-brand`) à déprefixer pour fusionner avec BarthHaas (`citra`),
+  SAUF collision avec un vrai doublon de SKU déjà existant (`perle`/`perle-per03`).
+  `ingest.crawl_yakima` IMPLÉMENTÉ. Fragile (clé/index Algolia non documentés).
 - **FooDB** : source note→molécule. Dump bulk local, figé 2020-04-07, licence NON
   COMMERCIALE. `ingest.ingest_foodb` IMPLÉMENTÉ. Vérifié sur le dump réel :
   - lacunaire : 14,4 % des liens compound↔aliment ont une concentration (mesuré sur
@@ -53,7 +60,9 @@ scorings DIFFÉRENTS :
     mg/kg) : `standard_content` prétend normaliser mais recopie IU/ppb/µM tels quels
     (vérifié) — les traiter comme des mg serait de la précision-déchet.
   Poids : concentration (mg/100g-équivalent) → sinon prior de seuil (1/seuil, depuis
-  `molecules`) → sinon présence pure. 3 paliers disjoints, jamais mélangés entre eux.
+  `flavordb2_thresholds` UNIQUEMENT — JAMAIS `molecules`/`reference.MOLECULES`, décision
+  explicite pour ne jamais mélanger un seuil sourcé et un seuil deviné) → sinon présence
+  pure. 3 paliers disjoints, jamais mélangés entre eux.
   FUSIONNE avec l'amorce littérature (molécule par molécule), ne l'efface pas.
   `reference.NOTE_TO_FOODB` : 4/7 notes-amorce seulement (kumquat, basilic, fruit-passion,
   mangue) — yuzu absent de FooDB, rose = faux ami ("Rose hip"), pin-résine pas un aliment.
@@ -62,8 +71,14 @@ scorings DIFFÉRENTS :
   (page HTML statique unique `d_kovats_ov101.html`, pas de pagination). Sert de whitelist
   « sensoriellement présent » (table `flavornet_compounds`, distincte de `molecules`).
   `ingest.ingest_flavornet` IMPLÉMENTÉ.
-- **FlavorDB2** : seuils par molécule. Pas d'API (JSON par fiche ; endpoint v1 = 500).
-  Licence CC BY-NC-SA (non commercial).
+- **FlavorDB2** : seuils par molécule. Pas d'API/dump bulk pour les seuils ; recherche par
+  nom + fiche détail AJAX (`/molecules_details?id=<pubchem_cid>`), champ seuil en TEXTE
+  LIBRE avec de vrais pièges (le myrcène y liste "10%" de composition, PAS un seuil —
+  `parsers.parse_flavordb2_threshold` n'accepte qu'un nombre accolé à une unité reconnue
+  ppb/ppm/ppt). 25 595 molécules au total, mais `ingest.ingest_flavordb2` IMPLÉMENTÉ se
+  borne aux ~734 de la whitelist Flavornet (pas tout crawler : hors sujet + lourd pour leur
+  serveur). Run réel : 86/734 seuils trouvés. Écrit dans `flavordb2_thresholds` (jamais
+  dans `molecules`). Licence CC BY-NC-SA (non commercial).
 - **PubChem (PUG-REST)** : domaine public. Clé InChIKey/CID pour joindre les 3 mondes.
 - **Licence** : le CODE est MIT ; FooDB et FlavorDB2 sont NON COMMERCIALES. Un usage
   commercial imposerait de retirer/renégocier ces sources.
@@ -74,15 +89,14 @@ scrappés sales. Sur BarthHaas/Yakima (propres) elle ne se déclenche pas — c'
 filet de sécurité, pas une valeur active.
 
 ## Prochaines tâches (ordre d'utilité)
-Fait : `ingest.ingest_flavornet`, `ingest.ingest_foodb`, `by-descriptor` (voir
-`docs/FEATURE_NOTES.md` pour le détail de spec de ce dernier). Reste :
-1. `ingest.crawl_yakima` — itérer contre un site SPA vivant.
-2. Couche seuils (FlavorDB2) + drapeau biotransformation par souche
-   (géraniol→citronellol, précurseurs→thiols) — touche plusieurs modules. Enrichirait
-   aussi les poids `foodb:thr` de `ingest_foodb`, limités aux seuils déjà connus.
-3. Jointure PubChem CID/InChIKey — remplacerait la table d'alias manuelle
-   (`reference.ALIASES`) par une résolution structurale des synonymes, plus robuste
-   à l'échelle que l'amorce actuelle.
+Fait : `ingest.ingest_flavornet`, `ingest.ingest_foodb`, `by-descriptor`, `ingest.crawl_yakima`,
+`ingest.ingest_flavordb2` (voir `docs/FEATURE_NOTES.md` pour le détail de spec de by-descriptor).
+Reste :
+1. Drapeau biotransformation par souche (géraniol→citronellol, précurseurs→thiols) —
+   touche plusieurs modules (schema, matching).
+2. Jointure PubChem CID/InChIKey — remplacerait la table d'alias manuelle
+   (`reference.ALIASES`) et la recherche par nom exact de `ingest_flavordb2` (488/734
+   sans correspondance sur un run réel) par une résolution structurale des synonymes.
 
 ## Conventions
 - Commentaires/docstrings en français (cohérent avec l'existant).

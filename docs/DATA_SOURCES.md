@@ -8,9 +8,22 @@
 - Statut : `ingest.crawl_barthhaas` implémenté.
 
 **Yakima Chief** — https://www.yakimachief.com/variety/{slug}
-- Accès : valeurs rendues dans le HTML mais front type SPA → extraction DOM (ou playwright si `requests` ne renvoie qu'un shell).
+- Accès : le site a un vrai rempart anti-bot devant le HTML (Vercel Security Checkpoint) —
+  `requests` seul ne passe jamais, même avec un User-Agent de navigateur réel (vérifié ; un
+  navigateur headless Playwright, lui, passe). Contournement retenu : leur front s'appuie sur
+  **Algolia** (recherche instantanée) avec une clé API **publique en lecture seule**, exposée
+  côté client (design normal pour ce type de clé Algolia « search-only ») — trouvée en
+  inspectant les requêtes réseau via Playwright, puis interrogée en HTTP simple (pas besoin de
+  navigateur en usage courant). Une requête ramène les ~152 variétés avec composition déjà
+  structurée en JSON (`imported_fields.brewing_values`, low/ave/high) et roue d'arôme
+  (`imported_fields.aromas`) — pas de parsing HTML/texte requis, contrairement à BarthHaas.
 - Qualité : labo qualité YCH, conforme méthodes ASBC. Ajoute **β-pinène, sélinène**.
-- Statut : `ingest.crawl_yakima` = scaffold.
+- **Piège de nommage** : les variétés déposées ont un slug `-brand` (`citra-brand`) qui ne
+  fusionnerait jamais avec le slug BarthHaas (`citra`). Mais le catalogue a aussi de vrais
+  doublons de SKU sans rapport (`perle` ET `perle-per03` coexistent) — `crawl_yakima` ne
+  déprefixe `-brand` que hors collision avec un autre slug du même lot.
+- Statut : `ingest.crawl_yakima` implémenté. Fragile par construction (clé/index Algolia non
+  documentés publiquement, peuvent changer si YCH modifie son frontend).
 
 **Beermaverick** — agrégé, sans API. Utile en recoupement. Non implémenté.
 
@@ -45,10 +58,23 @@
   `molecules`).
 
 **FlavorDB2** — https://cosylab.iiitd.edu.in/flavordb2/
-- Accès : pas d'API ; données JSON par fiche (à scraper ; l'ancien endpoint v1 renvoie une 500).
+- Accès : pas d'API ni de dump bulk pour les seuils (l'unique JSON bulk du site est un graphe
+  de co-occurrence ingrédient↔ingrédient, sans rapport). Recherche par nom
+  (`/molecules?common_name=`) puis fiche détail AJAX (`/molecules_details?id=<pubchem_cid>`),
+  qui contient le(s) CAS et un champ **texte libre** « Aroma threshold values » (ex. « 4 to 10
+  ppb », « Detection at 64 to 90 ppb »).
+- **Piège vérifié** : ce champ texte libre contient parfois autre chose qu'un seuil — la fiche
+  du myrcène y liste *« Aroma characteristics at 10%; terpy, herbaceous... »* (une composition
+  dans un extrait, pas un seuil). `parsers.parse_flavordb2_threshold` ne fait confiance qu'à un
+  nombre directement accolé à une unité reconnue (ppb/ppm/ppt) ; sinon `None`.
 - Qualité : 25 595 molécules, **seuils aroma/goût par molécule** ; lien ingrédient→molécule en présence/absence (pas de concentration).
 - Licence : **CC BY-NC-SA** (non commercial).
 - Rôle : couche seuils (prior de puissance).
+- Statut : `ingest.ingest_flavordb2` implémenté, **borné aux ~734 composés de la whitelist
+  Flavornet** (pas les 25 595 molécules — hors de portée de ce dont hopmatch se sert, et
+  inutilement lourd pour leur serveur). Run réel : 86 seuils trouvés sur 734 (488 sans
+  correspondance de nom exacte, 160 trouvés mais sans seuil publié). Écrit dans
+  `flavordb2_thresholds`, jamais dans `molecules`/`reference.MOLECULES`.
 
 **The Good Scents Company** — descripteurs parfumeur fins, **pas d'API, CGU restrictives**. Optionnel.
 
