@@ -25,6 +25,13 @@ scorings DIFFÉRENTS :
 - **Honnêteté d'abord** : toujours rapporter la couverture et les molécules orphelines.
 - **Base EAV multi-sources** : `hop_composition` clé (variety, compound, source) ;
   réconciliation à la LECTURE (moyenne des milieux, provenance tracée), pas à l'écriture.
+- **Option `--biotransform` : portée étroite et sourcée, généralisée par espèce de levure
+  (pas par souche commerciale individuelle).** `reference.BIOTRANSFORMATIONS`
+  ne contient que géraniol→citronellol et linalol→alpha-terpinéol — les deux seules voies
+  avec preuve indépendante convergente entre souche ale ET lager (King & Dickinson 2003 ;
+  corroboré par Michel et al. 2019 pour l'absence d'effet souche sur un thiol proche).
+  Jamais de drapeau par souche commerciale individuelle : aucune source ne compare des
+  souches commerciales entre elles, seulement des codes de collection académique.
 
 ## Réalité des données (vérifiée)
 - **BarthHaas** : source houblon primaire. HTML servi, parsable, inclut les THIOLS.
@@ -99,20 +106,15 @@ filet de sécurité, pas une valeur active.
 ## Prochaines tâches (ordre d'utilité)
 Fait : `ingest.ingest_flavornet`, `ingest.ingest_foodb`, `by-descriptor`, `ingest.crawl_yakima`,
 `ingest.ingest_flavordb2`, `ingest.resolve_pubchem_cids` (jointure structurale CAS->CID,
-voir `docs/FEATURE_NOTES.md` pour le détail de spec de by-descriptor). Reste :
-1. Drapeau biotransformation par souche (géraniol→citronellol, précurseurs→thiols) —
-   touche plusieurs modules (schema, matching). RECHERCHE DE SOURCE EN COURS : la
-   littérature académique a de vraies valeurs (efficacités de libération par souche,
-   ex. 0,15-0,35 %) mais éparpillées en figures de papiers individuels, pas de table
-   exportable → inexploitable sans recopie manuelle (contraire à "rien codé en dur").
-   Piste : Escarpment Labs (labo commercial) a des fiches produit structurées par
-   souche avec une note de biotransformation catégorielle (Haut/Moyen/Bas) et une
-   méthodologie décrite — mais couverture incomplète constatée sur un premier
-   sondage (présente pour certaines souches, absente pour d'autres) : à vérifier sur
-   l'ensemble du catalogue avant de s'appuyer dessus. Pas encore de décision.
-2. Résolution PubChem par InChIKey/SMILES en plus du CAS (couvrirait les composés sans
+voir `docs/FEATURE_NOTES.md` pour le détail de spec de by-descriptor), option
+`--biotransform` (`amplify`/`combine`, portée étroite — voir décision ci-dessus). Reste :
+1. Résolution PubChem par InChIKey/SMILES en plus du CAS (couvrirait les composés sans
    CAS enregistré), et jointure FooDB/hop_composition au-delà des ~734 composés Flavornet
    si le vocabulaire s'élargit beaucoup (crawl Yakima déjà réel, plus d'aliments FooDB).
+2. Extension de `reference.BIOTRANSFORMATIONS` SI une étude comparant des souches
+   commerciales entre elles (pas des codes de collection académique TUM/CBS/NCYC) sur
+   ces mêmes composés devient disponible. Pas de drapeau par souche individuelle en
+   attendant — voir le raisonnement dans README.md#option---biotransform.
 
 ## Conventions
 - Commentaires/docstrings en français (cohérent avec l'existant).

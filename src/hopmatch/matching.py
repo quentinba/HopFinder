@@ -10,6 +10,12 @@ fiable). Le seuil sert de prior de puissance, la couche descripteurs est primair
 et la couche moléculaire tourne en similarité normalisée-par-composé (TF-IDF), pas
 en cosinus pseudo-OAV. Le cas B rapporte le RÉSIDU irréductible (molécules qu'aucune
 combinaison ne peut fournir) — la quantification honnête du « à quel point on approche ».
+
+Option `biotransform` (amplify et combine) : redirige une molécule non mesurée côté
+houblon vers son précurseur mesuré, via `reference.BIOTRANSFORMATIONS` (portée
+étroite : géraniol->citronellol et linalol->alpha-terpinéol, les deux voies avec
+preuve indépendante convergente ale/lager). Affirme une fermentation levure
+standard — voir le commentaire sur cette table.
 """
 from __future__ import annotations
 import math
@@ -51,12 +57,20 @@ def load(con: sqlite3.Connection):
     return hops, comp, hop_desc, mols
 
 
-def hop_compound(m: str) -> str:
+def hop_compound(m: str, biotransform: bool = False) -> str:
+    """
+    Résout un nom de molécule côté note vers le composé à chercher côté houblon.
+    `biotransform=True` ajoute la redirection precurseur->produit de
+    `reference.BIOTRANSFORMATIONS` (ex. citronellol -> geraniol) : affirme une
+    fermentation levure standard, voir le commentaire sur cette table.
+    """
+    if biotransform and m in reference.BIOTRANSFORMATIONS:
+        return reference.BIOTRANSFORMATIONS[m]
     return reference.ALIASES.get(m, m)
 
 
-def amount(variety: str, molecule: str, comp) -> float:
-    rec = comp.get(variety, {}).get(hop_compound(molecule))
+def amount(variety: str, molecule: str, comp, biotransform: bool = False) -> float:
+    rec = comp.get(variety, {}).get(hop_compound(molecule, biotransform))
     if not rec or rec["mid"] is None:
         return 0.0
     if rec["unit"] == "pct_oil":
@@ -65,8 +79,8 @@ def amount(variety: str, molecule: str, comp) -> float:
     return rec["mid"]
 
 
-def specificity(molecule: str, comp) -> float:
-    c = hop_compound(molecule)
+def specificity(molecule: str, comp, biotransform: bool = False) -> float:
+    c = hop_compound(molecule, biotransform)
     n = len(comp)
     n_with = sum(1 for h in comp if comp[h].get(c) and comp[h][c]["mid"])
     return math.log(n / (1 + n_with)) + 1.0
@@ -88,19 +102,20 @@ def get_note_descriptors(con, note: str) -> set[str]:
 # --------------------------------------------------------------------------- #
 # Couches de score
 # --------------------------------------------------------------------------- #
-def molecular_scores(note_profile, comp, use_oav=False, mols=None):
+def molecular_scores(note_profile, comp, use_oav=False, mols=None, biotransform=False):
     """Similarité moléculaire normalisée-par-composé (TF-IDF). -> {variety: (score, contribs)}."""
-    max_amt = {m: max((amount(h, m, comp) for h in comp), default=0.0) for m in note_profile}
+    max_amt = {m: max((amount(h, m, comp, biotransform) for h in comp), default=0.0)
+              for m in note_profile}
     out = {}
     for h in comp:
         contribs = {}
         for m, w in note_profile.items():
-            a = amount(h, m, comp)
+            a = amount(h, m, comp, biotransform)
             if a <= 0 or not max_amt[m]:
                 continue
-            s = w * (a / max_amt[m]) * specificity(m, comp)
+            s = w * (a / max_amt[m]) * specificity(m, comp, biotransform)
             if use_oav and mols:
-                thr = mols.get(hop_compound(m), {}).get("threshold_ppb")
+                thr = mols.get(hop_compound(m, biotransform), {}).get("threshold_ppb")
                 s *= (REFERENCE_THRESHOLD_PPB / thr) if thr else 1.0
             contribs[m] = s
         if contribs:
@@ -113,9 +128,10 @@ def descriptor_overlap(note_desc: set[str], hop_desc: set[str]) -> float:
     return len(note_desc & hop_desc) / len(note_desc) if note_desc else 0.0
 
 
-def coverage(note_profile, comp):
+def coverage(note_profile, comp, biotransform: bool = False):
     """Molécules de la note couvrables par ≥1 houblon, et orphelines."""
-    producible = {m for m in note_profile if any(comp[h].get(hop_compound(m)) for h in comp)}
+    producible = {m for m in note_profile
+                  if any(comp[h].get(hop_compound(m, biotransform)) for h in comp)}
     orphan = [m for m in note_profile if m not in producible]
     tot = sum(note_profile.values()) or 1
     cov = sum(w for m, w in note_profile.items() if m in producible) / tot
@@ -125,12 +141,13 @@ def coverage(note_profile, comp):
 # --------------------------------------------------------------------------- #
 # CAS A — amplify
 # --------------------------------------------------------------------------- #
-def amplify(con, note: str, w_mol: float = 0.5, w_desc: float = 0.5, use_oav=False, top=8):
+def amplify(con, note: str, w_mol: float = 0.5, w_desc: float = 0.5, use_oav=False, top=8,
+           biotransform=False):
     hops, comp, hop_desc, mols = load(con)
     profile = get_note(con, note)
     ndesc = get_note_descriptors(con, note)
 
-    mol = molecular_scores(profile, comp, use_oav=use_oav, mols=mols)
+    mol = molecular_scores(profile, comp, use_oav=use_oav, mols=mols, biotransform=biotransform)
     mmax = max((s for s, _ in mol.values()), default=1.0) or 1.0
 
     ranked = []
@@ -143,8 +160,9 @@ def amplify(con, note: str, w_mol: float = 0.5, w_desc: float = 0.5, use_oav=Fal
                            "mol": round(ms, 2), "desc": round(ds, 2),
                            "why": mol.get(h, (0, []))[1][:4], "sources": hops[h]["sources"]})
     ranked.sort(key=lambda r: -r["score"])
-    _, orphan, cov = coverage(profile, comp)
-    return {"mode": "amplify", "note": note, "coverage": cov, "orphan": orphan, "ranked": ranked[:top]}
+    _, orphan, cov = coverage(profile, comp, biotransform)
+    return {"mode": "amplify", "note": note, "coverage": cov, "orphan": orphan,
+           "biotransform": biotransform, "ranked": ranked[:top]}
 
 
 # --------------------------------------------------------------------------- #
@@ -210,24 +228,32 @@ def by_descriptor(con, selected: list[str], top: int = 10):
 # --------------------------------------------------------------------------- #
 # CAS B — combine (NNLS + parcimonie + résidu irréductible)
 # --------------------------------------------------------------------------- #
-def combine(con, note: str, max_hops: int = 3):
+def combine(con, note: str, max_hops: int = 3, biotransform: bool = False):
+    """
+    `biotransform=True` : le résidu irréductible reflète une fermentation levure
+    standard (S. cerevisiae/S. pastorianus, voir reference.BIOTRANSFORMATIONS).
+    Une molécule comme le citronellol, jamais mesurée côté houblon, devient
+    couvrable via le géraniol du houblon — c'est ici que ça compte le plus :
+    la promesse de `combine` est de dire honnêtement ce qui est irréductible,
+    et ignorer une biotransformation bien documentée le surestimerait.
+    """
     import numpy as np
     from scipy.optimize import nnls
 
     hops, comp, _, _ = load(con)
     profile = get_note(con, note)
-    producible, orphan, cov = coverage(profile, comp)
+    producible, orphan, cov = coverage(profile, comp, biotransform)
     mols = sorted(producible)
     varieties = list(comp.keys())
     if not mols or not varieties:
         return {"mode": "combine", "note": note, "coverage": cov, "orphan": orphan,
-                "blend": [], "residual": None}
+                "biotransform": biotransform, "blend": [], "residual": None}
 
     # matrice A (molécules × houblons), normalisée par molécule ; cible t = poids note
     A = np.zeros((len(mols), len(varieties)))
     for j, h in enumerate(varieties):
         for i, m in enumerate(mols):
-            A[i, j] = amount(h, m, comp)
+            A[i, j] = amount(h, m, comp, biotransform)
     row_max = A.max(axis=1, keepdims=True)
     row_max[row_max == 0] = 1.0
     A = A / row_max
@@ -249,5 +275,5 @@ def combine(con, note: str, max_hops: int = 3):
                      "proportion": round(w / total, 3)} for v, w in blend_w.items()),
                    key=lambda r: -r["proportion"])
     return {"mode": "combine", "note": note, "coverage": cov, "orphan": orphan,
-            "blend": blend, "residual": round(float(res), 3),
-            "note": note, "n_molecules": len(mols)}
+            "biotransform": biotransform, "blend": blend, "residual": round(float(res), 3),
+            "n_molecules": len(mols)}

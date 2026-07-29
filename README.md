@@ -4,11 +4,10 @@
 questions concrètes : *quel houblon accorder à un ajout* (yuzu, basilic…), et *un goût
 est-il reproductible avec du houblon seul* ?
 
-> État : `pytest` vert (28 tests). Toutes les sources tournent contre les sites externes :
+> État : `pytest` vert (33 tests). Toutes les sources tournent contre les sites externes :
 > `crawl_barthhaas`, `crawl_yakima`, `ingest_flavornet`, `ingest_foodb`, `ingest_flavordb2`,
-> `resolve_pubchem_cids`, `by-descriptor`. Reste : le drapeau de biotransformation par
-> souche, non implémenté faute de source de données défendable — voir
-> [Feuille de route](#feuille-de-route).
+> `resolve_pubchem_cids`, `by-descriptor`, `--biotransform` (portée volontairement étroite,
+> deux voies sourcées) — voir [Feuille de route](#feuille-de-route).
 
 ---
 
@@ -333,6 +332,50 @@ quoi qu'il arrive »**.
 
 `hopmatch combine mangue` → blend + « irréductible : terpinolène ».
 
+### Option `--biotransform`
+
+Certains composés qu'une note demande ne sont jamais mesurés dans une fiche houblon
+(BarthHaas/Yakima ne rapportent pas le citronellol) mais peuvent apparaître dans la bière
+finie : la fermentation transforme une partie de certains composés du houblon en d'autres,
+via les enzymes de la levure. Sans en tenir compte, ces composés tombent systématiquement en
+orphelins/irréductibles — ce qui pèse surtout sur `combine`, dont la promesse centrale est de
+dire honnêtement ce qui est hors de portée.
+
+`--biotransform` redirige une molécule demandée par la note vers le composé précurseur que le
+houblon mesure réellement (`reference.BIOTRANSFORMATIONS`), dans `amplify` et `combine`. Portée
+volontairement étroite à deux voies :
+
+- **géraniol → citronellol**
+- **linalol → alpha-terpinéol**
+
+Ce sont les deux seules voies avec une preuve indépendante convergente entre souche ale et
+souche lager — deux espèces différentes, résultats concordants : King & Dickinson (2003,
+*Biotransformation of hop aroma terpenoids by ale and lager yeasts*, FEMS Yeast Research)
+mesurent des courbes de concentration réelles sur *Saccharomyces cerevisiae* NCYC 1681 (ale) et
+*Saccharomyces bayanus* NCYC 1324 (lager), avec des niveaux de conversion proches pour les deux
+souches sur ces deux voies. Michel et al. (2019, *Screening of brewing yeast β-lyase activity
+and release of hop volatile thiols from precursors during fermentation*, BrewingScience)
+corrobore l'absence d'effet souche détectable, sur près de 100 souches de brasserie (*S.
+cerevisiae*/*S. pastorianus*), pour un thiol proche mécaniquement.
+
+**Délibérément hors périmètre :**
+- Les esters (acétate de géranyle, acétate de citronellyle) : King & Dickinson montrent qu'ils
+  ne sont produits que par la souche lager, pas l'ale — preuve divergente entre souches, donc
+  hors de la généralisation que fait cette option.
+- Les thiols et leurs précurseurs : jamais mesurés côté houblon, rien à rediriger vers.
+- Les terpènes majoritaires du houblon (myrcène, humulène, caryophyllène, pinènes) : montrés
+  explicitement NON biotransformés dans la même étude — juste perdus par
+  évaporation/adsorption, aucun produit détecté.
+
+**Ce que `--biotransform` affirme, et ce qu'il n'affirme pas.** L'option suppose une
+fermentation à la levure *S. cerevisiae*/*S. pastorianus* standard. Aucune étude trouvée ne
+teste les souches Kveik, *Brettanomyces* ou une fermentation mixte pour ces voies précises :
+l'option ne fait aucune affirmation dans ces cas (ni « pareil », ni « différent ») — elle
+suppose simplement une fermentation standard, à l'utilisateur de juger si c'est pertinent pour
+sa recette. C'est pour cette raison qu'il n'y a pas de sélection de souche : les données ne
+permettent pas de différencier entre souches individuelles, seulement entre « standard » et
+« non testé ».
+
 ### Découverte — `by-descriptor` : explorer par vocabulaire
 
 Un troisième mode, orthogonal aux cas A/B : pas de note requise. L'utilisateur choisit un ou
@@ -418,6 +461,7 @@ hopmatch amplify basilic --oav    # + prior de seuil
 hopmatch contrast yuzu            # cas A — contraster
 hopmatch combine mangue           # cas B — recomposer
 hopmatch combine fruit-passion --max-hops 2
+hopmatch combine rose --biotransform   # géraniol->citronellol compte pour le résidu
 
 hopmatch descriptors              # vocabulaire de descripteurs disponible
 hopmatch by-descriptor citrus,tropical   # découverte, sans note requise
@@ -429,7 +473,7 @@ hopmatch resolve-pubchem-cids     # jointure structurale CAS->CID (réseau, avan
 hopmatch ingest-flavordb2         # seuils olfactifs, bornés à cette whitelist (réseau)
 hopmatch ingest-foodb <dossier_dump_foodb_csv>   # note→molécule filtré (local, gros fichiers)
 
-pytest -q                         # 28 tests
+pytest -q                         # 33 tests
 ```
 
 ---
@@ -461,41 +505,15 @@ CLAUDE.md        contexte projet pour Claude Code
 Fait : `ingest.ingest_flavornet`, `ingest.ingest_foodb`, `by-descriptor`, `ingest.crawl_yakima`
 (via Algolia), `ingest.ingest_flavordb2`, `ingest.resolve_pubchem_cids` (jointure structurale
 CAS→CID, remplace la table d'alias manuelle pour les synonymes purs et la recherche par nom
-exact de `ingest_flavordb2`). Reste :
+exact de `ingest_flavordb2`), option `--biotransform` sur `amplify`/`combine` (portée étroite,
+deux voies sourcées — détail dans la [section dédiée](#option---biotransform)). Reste :
 
-1. **Drapeau biotransformation par souche** (géraniol→citronellol, précurseurs→thiols — central
-   pour une NEIPA Kveik). **Non implémenté : aucune source de données défendable identifiée.**
-   Ressources examinées :
-   - Takoi et al. (2010), *Synergistic Effects of Hop-Derived Volatile Compounds*, Journal of
-     the Institute of Brewing.
-   - King & Dickinson (2003), *Biotransformation of Hop Terpene Alcohols*, FEMS Yeast
-     Research — 2 souches testées, texte payant, pas de table exploitable.
-   - Belda et al. (2017), *Microbial Contribution to Wine Aroma*, Molecules (accès libre) —
-     revue centrée sur le vin, pas le houblon ; pas de table strain-par-strain applicable à la
-     bière.
-   - Michel et al. (2019), *Screening of brewing yeast β-lyase activity and release of hop
-     volatile thiols from precursors during fermentation*, BrewingScience (accès libre) —
-     l'étude la plus directement pertinente : 148 souches criblées, mais seulement 6 testées
-     en fermentation réelle, avec des identifiants de collection académique (TUM/CBS/BRY) qui
-     ne correspondent à aucun produit commercial. Aucune différence significative trouvée
-     entre souches pour le 3-mercaptohexanol (le thiol principal libéré) ; la seule différence
-     significative pour le 4MMP est un effet d'espèce (*Saccharomyces* vs *Torulaspora
-     delbrueckii*), pas un effet distinguant les souches de brasserie courantes.
-   - Escarpment Labs (labo de levure commercial) : fiches produit structurées par souche avec
-     une note de biotransformation catégorielle (Haut/Moyen/Bas) et une méthodologie décrite —
-     mais couverture incomplète sur un premier sondage (présente sur certaines fiches, absente
-     sur d'autres) et propriétaire à un seul fournisseur, sans données indépendantes pour
-     recouper.
-
-   Aucune de ces sources ne fournit un jeu de données structuré, largement applicable et
-   directement ingérable : soit les valeurs existent mais sont éparpillées en figures de
-   papiers individuels sans table exportable, soit l'étude la plus rigoureuse et la plus
-   ciblée sur le houblon ne trouve pas d'effet souche fiable pour le thiol qui compte le plus.
-   Implémenter un drapeau sur cette base introduirait la précision-déchet que le projet évite
-   par ailleurs (pas d'OAV, pas de repli codé en dur). Statut : en attente d'une source
-   structurée et vérifiable.
-2. Résolution PubChem par InChIKey/SMILES en plus du CAS (couvrirait les composés sans CAS
+1. Résolution PubChem par InChIKey/SMILES en plus du CAS (couvrirait les composés sans CAS
    résolu), et jointure au-delà des ~734 composés Flavornet si le vocabulaire s'élargit.
+2. Extension éventuelle de `reference.BIOTRANSFORMATIONS` si une étude comparant explicitement
+   des souches commerciales (pas des codes de collection académique) sur ces mêmes composés
+   devient disponible — pas de drapeau par souche individuelle en attendant (voir
+   [section dédiée](#option---biotransform) pour le raisonnement).
 
 ---
 

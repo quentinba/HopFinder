@@ -40,6 +40,39 @@ ALIASES: dict[str, str] = {
     "3-mercaptohexanol": "thiols", "4mmp": "thiols",
 }
 
+# Biotransformation levure (option --biotransform, cas A `amplify`/cas B `combine`) :
+# molécule demandée par la note -> composé précurseur mesuré côté houblon, que la
+# fermentation peut convertir. Actif seulement si l'utilisateur l'active — ça
+# affirme une fermentation standard, ce que hopmatch ne peut pas vérifier.
+#
+# Portée volontairement étroite aux deux voies avec preuve indépendante
+# convergente sur souche ale ET lager (King & Dickinson 2003, FEMS Yeast
+# Research — courbes cinétiques réelles sur S. cerevisiae NCYC 1681 et
+# S. bayanus NCYC 1324, deux espèces différentes, résultats concordants) :
+#   - géraniol -> citronellol : produit principal, quantifié dans les deux
+#     souches (~1,4-1,5 µg/mL de pic depuis 10 µg/mL de géraniol ajouté).
+#     Corroboré par Michel et al. 2019 (BrewingScience) : aucun effet souche
+#     détecté sur un thiol proche mécaniquement, sur ~98 souches de brasserie.
+#   - linalol -> alpha-terpinéol : produit principal du linalol, également
+#     quantifié dans les deux souches (~0,4-0,45 µg/mL après 15 jours).
+#
+# Délibérément PAS étendu : (1) aux esters (acétate de géranyle/citronellyle) —
+# King & Dickinson montrent que SEULE la souche lager les produit, pas l'ale :
+# preuve divergente entre souches, donc hors de la portée "généralisable" de
+# cette option ; (2) aux thiols (précurseurs non mesurés côté houblon, rien à
+# rediriger) ; (3) aux terpènes majoritaires du houblon — myrcène, humulène,
+# caryophyllène, les pinènes sont explicitement montrés NON biotransformés
+# (aucun produit détecté, juste perdus par évaporation/adsorption) ; (4) au
+# nérol comme cible ou source — jamais mesuré côté houblon (aucune fiche
+# BarthHaas/Yakima ne le rapporte), une redirection vers lui serait inerte.
+# Non validé pour Kveik/Brettanomyces/fermentation mixte : aucune étude
+# trouvée ne teste ces cas, donc aucune affirmation n'est faite (ni "pareil",
+# ni "différent") — l'option suppose une souche standard.
+BIOTRANSFORMATIONS: dict[str, str] = {
+    "citronellol": "geraniol",
+    "alpha-terpineol": "linalool",
+}
+
 # note -> {molécule: poids de contribution au caractère (0-1)}
 AROMA_NOTES: dict[str, dict[str, float]] = {
     "yuzu":          {"limonene": 1.0, "linalool": 0.7, "myrcene": 0.4, "terpinolene": 0.3, "beta-pinene": 0.3, "geraniol": 0.2},

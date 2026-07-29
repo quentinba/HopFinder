@@ -14,7 +14,8 @@ déchet. hopmatch privilégie donc des couches robustes et honnêtes.
    pour que les molécules-signature pilotent, pas le myrcène ubiquitaire. Le seuil
    olfactif est un **prior de puissance** (option `--oav`), pas un OAV réel.
 3. **Honnêteté.** Couverture (fraction du caractère réellement portable par le
-   houblon) + molécules **orphelines** + (roadmap) biotransformation par souche.
+   houblon) + molécules **orphelines** + biotransformation levure optionnelle
+   (`--biotransform`, portée étroite — voir plus bas).
 
 ## Base : EAV multi-sources
 `hop_composition(variety, compound, vmin, vmax, unit, source, confidence, notes)`
@@ -72,6 +73,18 @@ BarthHaas/Yakima (propres) ; utile si tu ingères un dataset brut.
   `CONTRAST_AFFINITY`), ne dépend ni de FooDB ni de `crawl_yakima`. Tri par nb de
   descripteurs recoupés puis `total_oil` réconcilié (proxy d'intensité) puis variety.
   Descripteurs normalisés à l'ingestion via `reference.DESCRIPTOR_ALIASES`.
+
+`--biotransform` (`amplify`/`combine`) : `matching.hop_compound(m, biotransform=True)`
+redirige une molécule vers son précurseur mesuré côté houblon via
+`reference.BIOTRANSFORMATIONS` — géraniol→citronellol et linalol→alpha-terpinéol
+uniquement (deux voies avec preuve indépendante convergente ale/lager, King &
+Dickinson 2003 ; corroboré par Michel et al. 2019 sur l'absence d'effet souche). Un
+seul point d'implémentation (`hop_compound`) traverse `amount`, `specificity`,
+`coverage`, donc `molecular_scores`/`amplify` ET la matrice NNLS/`combine` — c'est
+`combine` qui en tire le plus, puisque le résidu irréductible surestimerait sinon ce
+qui est vraiment hors de portée. Pas de sélection de souche : aucune source ne
+compare des souches commerciales entre elles, seulement des codes de collection
+académique — voir README.md#option---biotransform pour le détail du raisonnement.
 
 ## Ce qui est volontairement absent
 Pas d'OAV quantitatif (pas de concentration fiable), pas de cosinus pseudo-OAV,

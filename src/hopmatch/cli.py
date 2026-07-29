@@ -12,6 +12,8 @@ FIXTURES = os.path.join(os.path.dirname(__file__), "..", "..", "data", "fixtures
 
 def _print_amplify(r):
     print(f"\n[AMPLIFY] {r['note']}  — couverture moléculaire {r['coverage']*100:.0f}%")
+    if r.get("biotransform"):
+        print("  (hypothèse : fermentation levure standard, géraniol->citronellol)")
     if r["orphan"]:
         print("  orphelines (ajout requis) :", ", ".join(r["orphan"]))
     for i, h in enumerate(r["ranked"], 1):
@@ -28,6 +30,8 @@ def _print_contrast(r):
 def _print_combine(r):
     print(f"\n[COMBINE] {r['note']}  — couverture {r['coverage']*100:.0f}% "
           f"| résidu {r['residual']}")
+    if r.get("biotransform"):
+        print("  (hypothèse : fermentation levure standard, géraniol->citronellol)")
     if not r["blend"]:
         print("  aucune combinaison trouvée.");
     for h in r["blend"]:
@@ -87,6 +91,10 @@ def main(argv=None):
             s.add_argument("--oav", action="store_true", help="prior de seuil (approx.)")
         if name == "combine":
             s.add_argument("--max-hops", type=int, default=3)
+        if name in ("amplify", "combine"):
+            s.add_argument("--biotransform", action="store_true",
+                           help="suppose une fermentation levure standard "
+                                "(géraniol->citronellol, portée limitée)")
 
     lst = sub.add_parser("list", help="lister notes et houblons")
     lst.add_argument("--db", default=DEFAULT_DB)
@@ -124,11 +132,13 @@ def main(argv=None):
             print("Notes :", ", ".join(sorted(notes)))
             print("Houblons :", ", ".join(sorted(hops)))
         elif a.cmd == "amplify":
-            _print_amplify(matching.amplify(con, a.note.lower(), use_oav=a.oav))
+            _print_amplify(matching.amplify(con, a.note.lower(), use_oav=a.oav,
+                                            biotransform=a.biotransform))
         elif a.cmd == "contrast":
             _print_contrast(matching.contrast(con, a.note.lower()))
         elif a.cmd == "combine":
-            _print_combine(matching.combine(con, a.note.lower(), max_hops=a.max_hops))
+            _print_combine(matching.combine(con, a.note.lower(), max_hops=a.max_hops,
+                                            biotransform=a.biotransform))
         elif a.cmd == "descriptors":
             ds = [r[0] for r in con.execute("SELECT DISTINCT descriptor FROM hop_descriptors")]
             print("Descripteurs :", ", ".join(sorted(ds)))
