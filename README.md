@@ -449,6 +449,7 @@ git clone <ton-repo> hopmatch && cd hopmatch
 pip install -e .            # cœur (numpy, scipy)
 pip install -e ".[crawl]"   # + requests, beautifulsoup4 (crawl BarthHaas)
 pip install -e ".[foodb]"   # + pandas (audit/ingest FooDB)
+pip install -e ".[ui]"      # + streamlit (GUI navigateur)
 pip install -e ".[dev]"     # + pytest
 ```
 
@@ -476,6 +477,18 @@ hopmatch ingest-foodb <dossier_dump_foodb_csv>   # note→molécule filtré (loc
 pytest -q                         # 33 tests
 ```
 
+**GUI navigateur** (lecture seule contre une base déjà construite) :
+
+```bash
+hopmatch build   # ou crawl-*/ingest-* pour une base plus complète
+streamlit run src/hopmatch/app.py
+```
+
+Les quatre modes (amplify/contrast/combine/by-descriptor) et les options
+(`--oav`, `--biotransform`, `max_hops`) sont dans la barre latérale ; `app.py`
+importe directement `matching`/`schema`, pas de couche API intermédiaire. Pour
+pointer vers une autre base : `streamlit run src/hopmatch/app.py -- --db chemin.db`.
+
 ---
 
 ## Structure du projet
@@ -491,6 +504,7 @@ src/hopmatch/
                  resolve_pubchem_cids / ingest_flavordb2 / ingest_foodb
   matching.py    load+réconciliation ; amplify / contrast / combine(NNLS) / by_descriptor
   cli.py         CLI
+  app.py         GUI Streamlit (lecture seule, importe matching/schema directement)
 data/fixtures/   pages réelles (démo) : barthhaas/{citra,mosaic,saazer}, yakima/{citra,mosaic,simcoe}
 tools/           audit_foodb.py, foodb_impact_check.py
 tests/           parsers, ingest, validation, réconciliation, modes, non-régression NNLS
