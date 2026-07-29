@@ -92,9 +92,12 @@ scorings DIFFÉRENTS :
   commercial).
 - **PubChem (PUG-REST)** : `ingest.resolve_pubchem_cids` IMPLÉMENTÉ, `/compound/name/{cas}/cids/JSON`
   (accepte un CAS comme synonyme), écrit `pubchem_cids(cas, cid)`, borné à la whitelist
-  Flavornet. Run réel : 720/734 CAS résolus (98%). C'est le "liant" structural qui remplace
-  la table d'alias manuelle et la recherche par nom exact — voir `_canonical_compound` et
-  `ingest_flavordb2` ci-dessus. Domaine public, limite 5 req/s.
+  Flavornet. Repli sur le nom du composé quand le CAS seul échoue
+  (`parsers.pubchem_name_fallbacks` : lettre grecque épelée, préfixe stéréochimique retiré —
+  Flavornet ne donne ni InChIKey ni SMILES, rien d'autre à essayer ; pas de recherche floue
+  au-delà). C'est le "liant" structural qui remplace la table d'alias manuelle et la recherche
+  par nom exact — voir `_canonical_compound` et `ingest_flavordb2` ci-dessus. Domaine public,
+  limite 5 req/s.
 - **Licence** : le CODE est MIT ; FooDB et FlavorDB2 sont NON COMMERCIALES. Un usage
   commercial imposerait de retirer/renégocier ces sources.
 
@@ -105,12 +108,14 @@ filet de sécurité, pas une valeur active.
 
 ## Prochaines tâches (ordre d'utilité)
 Fait : `ingest.ingest_flavornet`, `ingest.ingest_foodb`, `by-descriptor`, `ingest.crawl_yakima`,
-`ingest.ingest_flavordb2`, `ingest.resolve_pubchem_cids` (jointure structurale CAS->CID,
-voir `docs/FEATURE_NOTES.md` pour le détail de spec de by-descriptor), option
-`--biotransform` (`amplify`/`combine`, portée étroite — voir décision ci-dessus). Reste :
-1. Résolution PubChem par InChIKey/SMILES en plus du CAS (couvrirait les composés sans
-   CAS enregistré), et jointure FooDB/hop_composition au-delà des ~734 composés Flavornet
-   si le vocabulaire s'élargit beaucoup (crawl Yakima déjà réel, plus d'aliments FooDB).
+`ingest.ingest_flavordb2`, `ingest.resolve_pubchem_cids` (jointure structurale CAS->CID + repli
+sur le nom, voir `docs/FEATURE_NOTES.md` pour le détail de spec de by-descriptor), option
+`--biotransform` (`amplify`/`combine`, portée étroite — voir décision ci-dessus), GUI Streamlit
+(`src/hopmatch/app.py`). Reste :
+1. Jointure FooDB/hop_composition au-delà des ~734 composés Flavornet si le vocabulaire
+   s'élargit beaucoup (crawl Yakima déjà réel, plus d'aliments FooDB). Les CAS encore sans CID
+   après le repli sur le nom (`pubchem_name_fallbacks`) resteraient un gap résiduel sans
+   nouvelle source (Flavornet ne donne ni InChIKey ni SMILES à essayer).
 2. Extension de `reference.BIOTRANSFORMATIONS` SI une étude comparant des souches
    commerciales entre elles (pas des codes de collection académique TUM/CBS/NCYC) sur
    ces mêmes composés devient disponible. Pas de drapeau par souche individuelle en

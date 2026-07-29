@@ -140,3 +140,14 @@ def test_parse_yakima_hit_falls_back_without_aro01():
     }
     _, _, _, comp, _ = parsers.parse_yakima_hit(hit)
     assert comp["myrcene"] == (10.0, 14.0, "pct_oil")
+
+def test_pubchem_name_fallbacks():
+    # échantillons réels : CAS non résolus par PubChem, noms Flavornet en cause
+    assert parsers.pubchem_name_fallbacks("δ-cadinol") == ["δ-cadinol", "delta-cadinol"]
+    assert parsers.pubchem_name_fallbacks("(r)-linden ether") == \
+        ["(r)-linden ether", "linden ether"]
+    # les deux replis s'appliquent : lettre grecque épelée ET préfixe stéréo retiré
+    assert parsers.pubchem_name_fallbacks("(r)-β-citronellol") == [
+        "(r)-β-citronellol", "(r)-beta-citronellol", "β-citronellol", "beta-citronellol"]
+    # rien à corriger -> une seule variante (le nom lui-même)
+    assert parsers.pubchem_name_fallbacks("hexadecanol") == ["hexadecanol"]

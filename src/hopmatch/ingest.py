@@ -180,42 +180,64 @@ def resolve_pubchem_cids(out_db: str, sleep: float = 0.25, timeout: float = 15.0
          recherche par nom exact (qui ratait 488/734 composés sur un run réel,
          les synonymes/casse ne matchant pas toujours).
 
+    Repli si le CAS ne résout rien : le nom Flavornet du composé, puis les
+    variantes de `parsers.pubchem_name_fallbacks` (lettre grecque épelée,
+    préfixe stéréochimique retiré — vérifié sur un run réel : 8/14 CAS
+    initialement sans CID se résolvent ainsi, ex. 'δ-cadinol' seulement en
+    'delta-cadinol', PubChem n'indexant pas le symbole grec comme synonyme).
+    Le reste est laissé sans CID plutôt que de deviner une variante non vérifiée.
+
     Idempotent : ne resollicite PubChem que pour les CAS pas encore en base
     (cid NULL inclus, pour ne pas re-tenter en boucle une résolution échouée).
     Respecte la limite d'usage PubChem (5 req/s conseillées) via `sleep`.
     """
     import requests
     import time
+    import urllib.parse
     from .schema import connect
     URL = "https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/{}/cids/JSON"
+
+    def _lookup(query: str) -> int | None:
+        resp = requests.get(URL.format(urllib.parse.quote(query)), timeout=timeout,
+                            headers={"User-Agent": "hopmatch/0.1 (research)"})
+        if resp.status_code == 200:
+            cids = resp.json().get("IdentifierList", {}).get("CID", [])
+            if cids:
+                return cids[0]
+        return None
+
     con = connect(out_db)
     if not con.execute("SELECT name FROM sqlite_master WHERE name='hops'").fetchone():
         init_db(con); seed_reference(con)
 
     known = {r[0] for r in con.execute("SELECT cas FROM pubchem_cids")}
-    targets = [r["cas"] for r in con.execute("SELECT cas FROM flavornet_compounds")
+    targets = [(r["cas"], r["compound"]) for r in
+              con.execute("SELECT cas, compound FROM flavornet_compounds")
               if r["cas"] not in known]
     if not targets:
         print("PubChem : rien à résoudre (déjà fait, ou flavornet_compounds vide)."); con.close(); return
     print(f"PubChem : résolution de {len(targets)} CAS -> CID")
 
-    found = 0
-    for cas in targets:
+    found, via_name = 0, 0
+    for cas, compound in targets:
         cid = None
         try:
-            resp = requests.get(URL.format(cas), timeout=timeout,
-                                headers={"User-Agent": "hopmatch/0.1 (research)"})
-            if resp.status_code == 200:
-                cids = resp.json().get("IdentifierList", {}).get("CID", [])
-                if cids:
-                    cid = cids[0]
-                    found += 1
+            cid = _lookup(cas)
+            if cid is None:
+                for variant in parsers.pubchem_name_fallbacks(compound):
+                    time.sleep(sleep)
+                    cid = _lookup(variant)
+                    if cid:
+                        via_name += 1
+                        break
+            if cid:
+                found += 1
         except Exception as e:  # noqa
-            print(f"  !! {cas}: {e}")
+            print(f"  !! {cas} ({compound}): {e}")
         con.execute("INSERT OR REPLACE INTO pubchem_cids VALUES (?,?)", (cas, cid))
         time.sleep(sleep)
     con.commit(); con.close()
-    print(f"PubChem : {found}/{len(targets)} CAS résolus en CID.")
+    print(f"PubChem : {found}/{len(targets)} CAS résolus en CID ({via_name} via repli sur le nom).")
 
 
 # --------------------------------------------------------------------------- #

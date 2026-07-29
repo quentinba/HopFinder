@@ -91,12 +91,12 @@
   vérifié, pas une supposition de nommage.
 - API publique robuste, domaine public. Limite d'usage : 5 requêtes/s conseillées.
 - Statut : `ingest.resolve_pubchem_cids` implémenté, écrit `pubchem_cids(cas, cid)`, borné à la
-  whitelist Flavornet (~734 composés, même périmètre que le reste du pipeline). Run réel :
-  **720/734 CAS résolus en CID (98%)**. Résolution par **CAS uniquement** pour l'instant (pas
-  encore InChIKey/SMILES — les 14 non résolus resteraient un gap). Consommé par
+  whitelist Flavornet (~734 composés, même périmètre que le reste du pipeline). Résolution par
+  CAS d'abord, puis repli sur le nom du composé (`parsers.pubchem_name_fallbacks` : lettre
+  grecque épelée, préfixe stéréochimique retiré — Flavornet ne fournit ni InChIKey ni SMILES,
+  donc pas de variante au-delà de ces deux normalisations déterministes). Consommé par
   `ingest._canonical_compound` (fusion de synonymes par CID, priorité sur `reference.ALIASES`)
-  et `ingest_flavordb2` (accès direct à la fiche par CID, sans recherche par nom — fait passer
-  les seuils trouvés de 86 à 227 et les échecs de correspondance de 488 à 14, cf. ci-dessus).
+  et `ingest_flavordb2` (accès direct à la fiche par CID, sans recherche par nom).
 
 ## Rappel licences
 Le **code** est MIT. **FooDB et FlavorDB2 sont non commerciales.** Un usage commercial de hopmatch imposerait de retirer/renégocier ces sources.

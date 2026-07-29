@@ -245,3 +245,35 @@ def parse_yakima_hit(hit: dict) -> tuple[str, str, str, dict, list[str]]:
         if lo is not None and hi is not None:
             comp[compound] = (float(lo), float(hi), unit)
     return variety, name, region, comp, descriptors
+
+
+_GREEK_TO_LATIN = {"α": "alpha", "β": "beta", "γ": "gamma", "δ": "delta"}
+_STEREO_PREFIX_RE = re.compile(r"^\(\s*[±rs+\-]+\s*\)[-\s]*", re.I)
+
+
+def pubchem_name_fallbacks(name: str) -> list[str]:
+    """
+    Variantes de nom à tenter auprès de PubChem quand le nom Flavornet brut ne
+    résout rien (endpoint /compound/name/.../cids/JSON). Vérifié sur les CAS
+    non résolus d'un run réel : 'δ-cadinol' ne résout qu'en 'delta-cadinol'
+    (PubChem n'indexe pas le symbole grec comme synonyme), '(r)-linden ether'
+    seulement en 'linden ether' (le descripteur stéréochimique n'est pas un
+    synonyme reconnu). Renvoie des variantes déterministes seulement — pas de
+    recherche floue, qui risquerait de faire correspondre le mauvais composé
+    (mieux vaut rester non résolu que deviner).
+    """
+    variants = [name]
+    greek = "".join(_GREEK_TO_LATIN.get(c, c) for c in name)
+    if greek != name:
+        variants.append(greek)
+    for base in (name, greek):
+        stripped = _STEREO_PREFIX_RE.sub("", base).strip()
+        if stripped and stripped != base:
+            variants.append(stripped)
+    seen: set[str] = set()
+    out = []
+    for v in variants:
+        if v and v not in seen:
+            seen.add(v)
+            out.append(v)
+    return out

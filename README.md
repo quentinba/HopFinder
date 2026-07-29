@@ -235,6 +235,13 @@ résultat, si un poids vient d'une vraie source ou d'une estimation maison.
   synonyme), stocké dans `pubchem_cids(cas, cid)`. Le CAS de l'estragole (140-67-0) résout au
   CID 8815, identique au CID déjà connu de *methyl-chavicol* dans `reference.MOLECULES` — la
   fusion de synonymes devient un fait chimique, pas une supposition de nommage.
+- **Repli sur le nom quand le CAS seul ne suffit pas.** Flavornet ne fournit ni InChIKey ni
+  SMILES — seule variante disponible en plus du CAS : le nom du composé lui-même
+  (`parsers.pubchem_name_fallbacks`), avec deux normalisations déterministes vérifiées sur les
+  échecs d'un run réel : lettre grecque épelée (`δ-cadinol` ne résout qu'en `delta-cadinol`,
+  PubChem n'indexant pas le symbole grec comme synonyme) et préfixe stéréochimique retiré
+  (`(r)-linden ether` ne résout qu'en `linden ether`). Pas de recherche floue au-delà de ces
+  deux règles : mieux vaut un composé sans CID que le mauvais CID.
 - **Deux usages concrets.**
   1. `ingest._canonical_compound` fusionne un synonyme Flavornet/FooDB avec le vocabulaire
      houblon par identité de CID en priorité ; la table d'alias manuelle (`reference.ALIASES`)
@@ -444,17 +451,61 @@ parseur et une provenance.
 
 ## Installation & usage
 
+### Installation
+
 ```bash
 git clone <ton-repo> hopmatch && cd hopmatch
+python3 --version           # nécessite 3.10+ — voir la note ci-dessous sinon
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -e .            # cœur (numpy, scipy)
-pip install -e ".[crawl]"   # + requests, beautifulsoup4 (crawl BarthHaas)
+pip install -e ".[crawl]"   # + requests, beautifulsoup4 (crawl BarthHaas/Yakima)
 pip install -e ".[foodb]"   # + pandas (audit/ingest FooDB)
 pip install -e ".[ui]"      # + streamlit (GUI navigateur)
 pip install -e ".[dev]"     # + pytest
 ```
 
+> Si `python3 --version` affiche moins que 3.10 (fréquent : le `python3` système
+> macOS/Linux est souvent plus ancien), installer une version récente séparément
+> (`brew install python@3.12` sur macOS, ou pyenv) et créer le venv avec ce binaire
+> précis, ex. `/opt/homebrew/opt/python@3.12/bin/python3.12 -m venv .venv`.
+
+Une fois le venv activé (`source .venv/bin/activate`), `hopmatch`, `streamlit` et
+`pytest` sont directement sur le `PATH`. Dans un nouveau terminal où il n'est pas
+activé, préfixer les commandes par `.venv/bin/` (`.venv/bin/hopmatch`,
+`.venv/bin/streamlit run ...`).
+
+### Construire une base
+
+`hopmatch build` construit **seulement la démo** — 3 fiches BarthHaas + 3 fiches
+Yakima figées dans `data/fixtures/`, avec citra/mosaic communs aux deux sources :
+**4 houblons au total**. Pratique pour tester rapidement l'outil, pas pour un usage
+réel.
+
 ```bash
-hopmatch build                    # construit aromahops.db depuis data/fixtures
+hopmatch build                    # démo : 4 houblons
+```
+
+Pour une base réelle, lancer les crawls/ingestions réseau — chacun écrit dans la
+même base (`aromahops.db` par défaut, pas besoin d'appeler `build` avant : ils
+l'initialisent si elle n'existe pas) et fusionne les variétés déjà présentes :
+
+```bash
+hopmatch crawl-barthhaas          # ~90 variétés BarthHaas
+hopmatch crawl-yakima             # ~152 variétés Yakima Chief (via Algolia)
+hopmatch ingest-flavornet         # whitelist odeur-active (~734 composés) — avant les deux suivants
+hopmatch resolve-pubchem-cids     # jointure structurale CAS->CID — avant les deux suivants
+hopmatch ingest-flavordb2         # seuils olfactifs, bornés à cette whitelist
+hopmatch ingest-foodb <dossier_dump_foodb_csv>   # note→molécule filtré (dump FooDB local)
+```
+
+L'ordre ci-dessus est celui des dépendances réelles entre commandes (`ingest-flavornet`
+avant `resolve-pubchem-cids` avant `ingest-flavordb2`/`ingest-foodb`) ; les deux crawls
+houblon (`crawl-barthhaas`/`crawl-yakima`) sont indépendants et dans n'importe quel ordre.
+
+### CLI
+
+```bash
 hopmatch list                     # notes et houblons disponibles
 
 hopmatch amplify yuzu             # cas A — prolonger
@@ -467,20 +518,15 @@ hopmatch combine rose --biotransform   # géraniol->citronellol compte pour le r
 hopmatch descriptors              # vocabulaire de descripteurs disponible
 hopmatch by-descriptor citrus,tropical   # découverte, sans note requise
 
-hopmatch crawl-barthhaas          # base complète BarthHaas (~90 variétés, réseau)
-hopmatch crawl-yakima             # base complète Yakima Chief (~152 variétés, via Algolia)
-hopmatch ingest-flavornet         # whitelist odeur-active (~734 composés, réseau)
-hopmatch resolve-pubchem-cids     # jointure structurale CAS->CID (réseau, avant flavordb2/foodb)
-hopmatch ingest-flavordb2         # seuils olfactifs, bornés à cette whitelist (réseau)
-hopmatch ingest-foodb <dossier_dump_foodb_csv>   # note→molécule filtré (local, gros fichiers)
-
-pytest -q                         # 33 tests
+pytest -q                         # 33 tests (nécessite l'extra [dev])
 ```
 
-**GUI navigateur** (lecture seule contre une base déjà construite) :
+### GUI navigateur
+
+Lecture seule contre une base déjà construite (voir [Construire une base](#construire-une-base)
+ci-dessus) :
 
 ```bash
-hopmatch build   # ou crawl-*/ingest-* pour une base plus complète
 streamlit run src/hopmatch/app.py
 ```
 
@@ -518,12 +564,15 @@ CLAUDE.md        contexte projet pour Claude Code
 
 Fait : `ingest.ingest_flavornet`, `ingest.ingest_foodb`, `by-descriptor`, `ingest.crawl_yakima`
 (via Algolia), `ingest.ingest_flavordb2`, `ingest.resolve_pubchem_cids` (jointure structurale
-CAS→CID, remplace la table d'alias manuelle pour les synonymes purs et la recherche par nom
-exact de `ingest_flavordb2`), option `--biotransform` sur `amplify`/`combine` (portée étroite,
-deux voies sourcées — détail dans la [section dédiée](#option---biotransform)). Reste :
+CAS→CID, avec repli sur le nom du composé — cf. `parsers.pubchem_name_fallbacks` — quand le
+CAS seul ne résout rien ; remplace la table d'alias manuelle pour les synonymes purs et la
+recherche par nom exact de `ingest_flavordb2`), option `--biotransform` sur `amplify`/`combine`
+(portée étroite, deux voies sourcées — détail dans la [section dédiée](#option---biotransform)),
+GUI Streamlit (`src/hopmatch/app.py`, lecture seule). Reste :
 
-1. Résolution PubChem par InChIKey/SMILES en plus du CAS (couvrirait les composés sans CAS
-   résolu), et jointure au-delà des ~734 composés Flavornet si le vocabulaire s'élargit.
+1. Résolution PubChem par InChIKey/SMILES quand ni le CAS ni le nom ne suffisent (Flavornet ne
+   fournit ni l'un ni l'autre nativement — nécessiterait une source supplémentaire), et
+   jointure au-delà des ~734 composés Flavornet si le vocabulaire s'élargit.
 2. Extension éventuelle de `reference.BIOTRANSFORMATIONS` si une étude comparant explicitement
    des souches commerciales (pas des codes de collection académique) sur ces mêmes composés
    devient disponible — pas de drapeau par souche individuelle en attendant (voir
