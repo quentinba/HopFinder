@@ -8,8 +8,11 @@ RÉEL (tourne ici) :
   - ingest_flavornet     : moissonne flavornet.org (réseau ; requests+bs4)
   - resolve_pubchem_cids : résout CAS->CID PubChem pour la whitelist Flavornet (réseau ;
                            requests), le "liant" structural entre les 3 mondes
-  - ingest_foodb         : ingère un dump bulk FooDB local, filtré par la whitelist
-                           Flavornet (nécessite ingest_flavornet au préalable)
+  - download_foodb_dump  : télécharge+extrait le dump bulk FooDB si absent localement
+                           (réseau ; requests ; appelé automatiquement par ingest_foodb)
+  - ingest_foodb         : ingère un dump bulk FooDB local (le télécharge si besoin),
+                           filtré par la whitelist Flavornet (nécessite ingest_flavornet
+                           au préalable)
   - ingest_flavordb2     : moissonne cosylab.iiitd.edu.in/flavordb2 (réseau ; requests+bs4),
                            seuils olfactifs bornés à la whitelist Flavornet, accès direct
                            par CID si resolve_pubchem_cids a tourné
@@ -532,7 +535,77 @@ def _tier_weight(mass, thr, conc_max, thr_max):
     return 0.15
 
 
-def ingest_foodb(out_db: str, foodb_csv_dir: str,
+FOODB_DUMP_URL = "https://foodb.ca/public/system/downloads/foodb_2020_4_7_csv.tar.gz"
+FOODB_DUMP_DIR = "data/foodb_2020_04_07_csv"
+
+
+def _extract_foodb_tarball(tar_path: str, extract_root: str) -> None:
+    """Extraction pure (testable sans réseau) : sépare le téléchargement de son
+    dépaquetage. `filter="data"` (PEP 706) écarte les chemins absolus/`..` d'une
+    archive malveillante — défense en profondeur pour un fichier tiers distant."""
+    import tarfile
+    with tarfile.open(tar_path, "r:gz") as tar:
+        tar.extractall(extract_root, filter="data")
+
+
+def download_foodb_dump(dest_dir: str = FOODB_DUMP_DIR, url: str = FOODB_DUMP_URL,
+                        force: bool = False) -> str:
+    """
+    Télécharge et extrait le dump bulk FooDB (foodb.ca) s'il n'est pas déjà présent
+    localement, pour que `ingest_foodb` fonctionne sans étape manuelle de
+    téléchargement. Dump figé au 2020-04-07 (dernière version publique du site,
+    vérifié : `foodb.ca/public/system/downloads/...` répond 200 sans authentification),
+    ~950 Mo compressé (tar.gz), extrait ~2,3 Go. Licence **CC BY-NC-SA (non
+    commerciale)** — voir CLAUDE.md/README, ce script ne contourne aucune
+    protection, le lien est celui exposé publiquement par le site.
+
+    Idempotent : si `dest_dir/Food.csv` existe déjà, ne retélécharge rien (sauf
+    `force=True`). Le tar.gz est écrit dans un fichier temporaire (jamais dans
+    `dest_dir` directement) pour ne jamais laisser un dump partiel/corrompu passer
+    pour un dump valide si le téléchargement est interrompu.
+    """
+    import requests
+    import tempfile
+
+    food_csv = os.path.join(dest_dir, "Food.csv")
+    if os.path.exists(food_csv) and not force:
+        print(f"FooDB : dump déjà présent dans {dest_dir!r}, pas de retéléchargement.")
+        return dest_dir
+
+    print("FooDB : dump non trouvé localement, téléchargement depuis foodb.ca "
+         "(~950 Mo, licence CC BY-NC-SA non commerciale)...")
+    extract_root = os.path.dirname(os.path.normpath(dest_dir)) or "."
+    os.makedirs(extract_root, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(suffix=".tar.gz", dir=extract_root)
+    os.close(fd)
+    try:
+        with requests.get(url, stream=True, timeout=60,
+                          headers={"User-Agent": "hopmatch/0.1 (research)"}) as resp:
+            resp.raise_for_status()
+            total = int(resp.headers.get("content-length", 0))
+            downloaded, next_report = 0, 100_000_000
+            with open(tmp_path, "wb") as f:
+                for chunk in resp.iter_content(chunk_size=1 << 20):
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    if downloaded >= next_report:
+                        pct = f" ({100*downloaded/total:.0f}%)" if total else ""
+                        print(f"  {downloaded/1e6:.0f} Mo téléchargés{pct}...")
+                        next_report += 100_000_000
+        print("FooDB : extraction...")
+        _extract_foodb_tarball(tmp_path, extract_root)
+    finally:
+        os.remove(tmp_path)
+    if not os.path.exists(food_csv):
+        raise RuntimeError(
+            f"Extraction terminée mais {food_csv!r} introuvable : structure d'archive "
+            f"inattendue (le tar.gz FooDB a changé de disposition ? vérifier "
+            f"{extract_root!r} manuellement).")
+    print(f"FooDB : dump prêt dans {dest_dir!r}.")
+    return dest_dir
+
+
+def ingest_foodb(out_db: str, foodb_csv_dir: str | None = None,
                  notes: dict[str, str] | None = None, all_foods: bool = True,
                  chunksize: int = 300_000) -> None:
     """
@@ -540,6 +613,11 @@ def ingest_foodb(out_db: str, foodb_csv_dir: str,
     FILTRÉ via la whitelist Flavornet (ingest_flavornet doit avoir tourné avant :
     sinon >90% des ~6000 composés/aliment sont du bruit nutritionnel, cf. CLAUDE.md
     et tools/audit_foodb.py).
+
+    `foodb_csv_dir` : dossier du dump CSV déjà extrait. Si `None` (défaut),
+    `download_foodb_dump()` le télécharge et l'extrait automatiquement dans
+    `FOODB_DUMP_DIR` (idempotent : ne retélécharge pas s'il est déjà présent) —
+    l'utilisateur n'a plus besoin de récupérer le dump à la main.
 
     `notes` : {note: nom Food.csv} — surcharge de nommage pour les notes de
     l'amorce littérature (reference.NOTE_TO_FOODB par défaut : "basilic" ->
@@ -553,7 +631,17 @@ def ingest_foodb(out_db: str, foodb_csv_dir: str,
     note à part entière, nom = celui de Food.csv en minuscule. Pipeline non
     supervisé : rien dans le filtrage/pondération FooDB n'est spécifique aux
     7 notes curées, c'est uniquement `notes` qui restreignait artificiellement
-    la couverture. Limite honnête de ces notes auto-dérivées : pas de
+    la couverture.
+
+    **Filtre de distinctivité** (notes auto-dérivées uniquement, jamais sur les
+    notes curées) : un aliment est écarté s'il n'a AUCUN composé à concentration
+    mesurée (`foodb:conc`) — vérifié sur le dump réel que deux aliments sans
+    rapport (capers/chervil) partagent 99,2% de leurs composés listés (FooDB cite
+    souvent un gabarit générique plutôt qu'une composition mesurée pour cet
+    aliment précis) ; sans concentration, tout retombe sur la table de seuils
+    GLOBALE, donnant des poids identiques à deux aliments sans lien. Sur le dump
+    2020-04-07 : exactement 427/854 candidats auto-dérivés (50%) écartés par ce
+    filtre. Limite honnête des ~427 restants : pas de
     `note_descriptors` ni de `reference.CONTRAST_AFFINITY` (curés à la main
     pour les 7 notes littérature seulement) — `amplify`/`combine` dégradent
     proprement en scoring molécules-seules, `contrast` lève une ValueError
@@ -578,6 +666,8 @@ def ingest_foodb(out_db: str, foodb_csv_dir: str,
     import pandas as pd
     from .schema import connect
 
+    if foodb_csv_dir is None:
+        foodb_csv_dir = download_foodb_dump()
     notes = notes or reference.NOTE_TO_FOODB
     con = connect(out_db)
     if not con.execute("SELECT name FROM sqlite_master WHERE name='hops'").fetchone():
@@ -612,6 +702,7 @@ def ingest_foodb(out_db: str, foodb_csv_dir: str,
             continue
         food_id_to_note[int(m.iloc[0]["id"])] = note
     n_curated = len(food_id_to_note)
+    curated_food_ids = set(food_id_to_note)
     if all_foods:
         for _, r in fdf.iterrows():
             fid = int(r["id"])
@@ -648,7 +739,7 @@ def ingest_foodb(out_db: str, foodb_csv_dir: str,
     # nécessaire dès que food_id_to_note passe de 7 à ~1000 entrées.
     by_food = {fid: g for fid, g in best.groupby("food_id")}
 
-    written, no_hit = 0, []
+    written, no_hit, no_signal = 0, [], []
     for food_id, note in food_id_to_note.items():
         sub = by_food.get(food_id)
         if sub is None or sub.empty:
@@ -659,6 +750,21 @@ def ingest_foodb(out_db: str, foodb_csv_dir: str,
             compound = whitelist[cas]
             recs.append((compound, r["mass"] if pd.notna(r["mass"]) else None,
                         thresholds.get(compound)))
+        # Filtre de distinctivité (notes auto-dérivées uniquement) : vérifié sur le
+        # dump réel (foodb_impact_check-style) que deux aliments sans rapport
+        # (capers/chervil) partagent 99,2% de leurs composés listés (5961/6011) —
+        # FooDB cite souvent un gabarit générique plutôt qu'une composition mesurée.
+        # Sans concentration réelle, tout tombe en palier seuil/présence, calculé
+        # depuis la table de seuils GLOBALE : deux aliments au même ensemble de
+        # composés produisent alors des poids identiques, sans signal food-specific.
+        # Exiger >=1 composé en palier concentration (mesure réelle pour CET aliment,
+        # pas un seuil partagé) écarte ce bruit. Seuil non arbitraire : sur le dump
+        # réel, c'est exactement la frontière 0/1 (427/854 notes auto à 0 composé
+        # concentration, aucune à exactement 1 en bordure ambiguë).
+        if food_id not in curated_food_ids:
+            has_conc = any(mass and mass > 0 for _, mass, _ in recs)
+            if not has_conc:
+                no_signal.append(note); continue
         conc_max = max((m for _, m, _ in recs if m is not None), default=0.0)
         thr_max = max((1.0 / t for _, _, t in recs if t), default=0.0)
         for compound, mass, thr in recs:
@@ -670,8 +776,13 @@ def ingest_foodb(out_db: str, foodb_csv_dir: str,
                         (compound, odor_by_compound.get(compound), None, None))
             written += 1
     con.commit(); con.close()
-    print(f"FooDB : {written} liens note->molécule ingérés sur {len(food_id_to_note)} aliments "
-         f"({n_curated} curés, {len(food_id_to_note) - n_curated} auto-dérivés de Food.csv).")
+    print(f"FooDB : {written} liens note->molécule ingérés sur "
+         f"{len(food_id_to_note) - len(no_signal)} aliments "
+         f"({n_curated} curés, {len(food_id_to_note) - n_curated - len(no_signal)} auto-dérivés "
+         f"distinctifs de Food.csv).")
+    if no_signal:
+        print(f"  {len(no_signal)} aliments auto-dérivés écartés : aucun composé à concentration "
+             f"mesurée (que du bruit générique FooDB, cf. docstring).")
     if no_hit:
         if len(no_hit) <= 15:
             print("  aucun composé whitelisté pour :", ", ".join(no_hit))

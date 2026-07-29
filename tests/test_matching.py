@@ -1,6 +1,6 @@
 import os, tempfile
 import pytest
-from hopmatch import ingest, matching
+from hopmatch import ingest, matching, reference
 from hopmatch.schema import connect
 
 FIX = os.path.join(os.path.dirname(__file__), "..", "data", "fixtures")
@@ -94,3 +94,36 @@ def test_combine_biotransform_removes_citronellol_from_residual(db):
 def test_amplify_biotransform_flag_echoed(db):
     r = matching.amplify(db, "rose", biotransform=True)
     assert r["biotransform"] is True
+
+def test_contrast_requires_note_or_descriptors(db):
+    with pytest.raises(ValueError):
+        matching.contrast(db)
+
+def test_contrast_raises_for_note_without_curated_descriptors(db):
+    # aucune note_descriptors pour une note qui n'existe pas / non curée
+    with pytest.raises(ValueError):
+        matching.contrast(db, note="pas-une-note-curee")
+
+def test_contrast_manual_descriptors_match_note_based_equivalent(db):
+    # "yuzu" a reference.NOTE_DESCRIPTORS = ["citrus", "floral"] -> passer les
+    # mêmes descripteurs à la main doit reproduire exactement la même cible/rang,
+    # preuve que la généralisation ne change rien pour les notes déjà curées.
+    r_note = matching.contrast(db, note="yuzu")
+    r_manual = matching.contrast(db, descriptors=["citrus", "floral"])
+    assert r_manual["affinity_target"] == r_note["affinity_target"]
+    assert [h["variety"] for h in r_manual["ranked"]] == [h["variety"] for h in r_note["ranked"]]
+
+def test_contrast_manual_descriptors_generalize_beyond_curated_notes(db):
+    # aucune note requise du tout : la sélection manuelle fonctionne pour
+    # n'importe quel descripteur du vocabulaire réel, curé ou non.
+    r = matching.contrast(db, descriptors=["woody"])
+    assert r["affinity_target"] == sorted(set(reference.CONTRAST_AFFINITY["woody"]))
+
+def test_contrast_blend_covers_target_within_max_hops(db):
+    r = matching.contrast_blend(db, note="yuzu", max_hops=2)
+    assert len(r["blend"]) <= 2
+    assert set(r["covered"]) | set(r["residual"]) == set(r["affinity_target"])
+    covered_via_blend = set()
+    for h in r["blend"]:
+        covered_via_blend.update(h["covers"])
+    assert covered_via_blend == set(r["covered"])

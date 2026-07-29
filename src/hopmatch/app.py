@@ -64,11 +64,31 @@ def _amplify(con, note):
         use_container_width=True, hide_index=True)
 
 
-def _contrast(con, note):
-    try:
-        r = matching.contrast(con, note)
-    except ValueError as e:
-        st.error(str(e)); return
+def _contrast(con):
+    # contrast n'a de note_descriptors curés que pour les 7 notes littérature
+    # (voir matching.contrast) : les notes auto-dérivées de FooDB n'en ont pas et
+    # ça ne peut pas être dérivé fiablement (données FooDB majoritairement
+    # génériques, cf. docs/DATA_SOURCES.md). Plutôt qu'échouer sur ces notes-là,
+    # on laisse l'utilisateur décrire sa note à la main avec le vocabulaire réel
+    # de la roue d'arôme (même source que by-descriptor) — généralise contrast à
+    # n'importe quelle note sans rien inventer.
+    source = st.radio("Décrire la note via", ["note curée (amorce littérature)",
+                                              "sélection manuelle de descripteurs"])
+    if source.startswith("note"):
+        notes = _notes(con)
+        if not notes:
+            st.error("Aucune note en base."); return
+        note = st.selectbox("Note", notes)
+        try:
+            r = matching.contrast(con, note=note)
+        except ValueError as e:
+            st.error(str(e)); return
+    else:
+        selected = st.multiselect("Descripteurs de la note à contraster", _descriptors(con))
+        if not selected:
+            st.write("Choisis au moins un descripteur."); return
+        r = matching.contrast(con, descriptors=selected)
+
     st.caption("Cible d'affinité : " + ", ".join(r["affinity_target"]))
     if not r["ranked"]:
         st.write("Aucun houblon ne recoupe cette cible.")
@@ -78,6 +98,22 @@ def _contrast(con, note):
           "Contraste via": ", ".join(h["contrast_via"]), "Sources": h["sources"]}
          for h in r["ranked"]],
         use_container_width=True, hide_index=True)
+
+    st.subheader("Proposer un blend")
+    max_hops = st.slider("Nombre de houblons max", 1, 6, 3)
+    if source.startswith("note"):
+        blend = matching.contrast_blend(con, note=note, max_hops=max_hops)
+    else:
+        blend = matching.contrast_blend(con, descriptors=selected, max_hops=max_hops)
+    if not blend["blend"]:
+        st.write("Aucune combinaison trouvée.")
+        return
+    st.dataframe(
+        [{"Houblon": h["name"], "Couvre": ", ".join(h["covers"]), "Sources": h["sources"]}
+         for h in blend["blend"]],
+        use_container_width=True, hide_index=True)
+    if blend["residual"]:
+        st.warning("Non couvert par le blend : " + ", ".join(blend["residual"]))
 
 
 def _combine(con, note):
@@ -148,6 +184,11 @@ def main():
         _by_descriptor(con)
         return
 
+    if mode == "contrast":
+        st.header("contrast")
+        _contrast(con)
+        return
+
     notes = _notes(con)
     if not notes:
         st.error("Aucune note en base."); st.stop()
@@ -156,8 +197,6 @@ def main():
     st.header(f"{mode} — {note}")
     if mode == "amplify":
         _amplify(con, note)
-    elif mode == "contrast":
-        _contrast(con, note)
     elif mode == "combine":
         _combine(con, note)
 

@@ -65,10 +65,15 @@ BarthHaas/Yakima (propres) ; utile si tu ingères un dataset brut.
 ## Les trois modes
 - `amplify` = w_mol·(molécules) + w_desc·(descripteurs). Cas A, prolonger.
 - `contrast` = affinités descripteurs (carte curée). Cas A, contraster. **Non
-  moléculaire** : le contraste ne se dérive pas des composés partagés. N'est
-  disponible que pour les notes ayant des `note_descriptors` curés (l'amorce
-  littérature, 7 notes) — `ValueError` explicite sinon (notes auto-dérivées de
-  FooDB via `ingest_foodb`, voir docs/DATA_SOURCES.md).
+  moléculaire** : le contraste ne se dérive pas des composés partagés. Par
+  `note`, seules les 7 notes littérature ont des `note_descriptors` curés —
+  `ValueError` explicite sinon (dériver des descripteurs depuis FooDB a été
+  tenté et rejeté, données trop génériques, voir docs/DATA_SOURCES.md). Généralisé
+  via `descriptors=[...]` : sélection manuelle par l'utilisateur sur le
+  vocabulaire réel `hop_descriptors` (même principe que `by_descriptor`),
+  fonctionne pour n'importe quelle note sans curation. `contrast_blend` propose
+  une combinaison parcimonieuse (couverture ensembliste gloutonne, pas de NNLS)
+  avec résidu non couvert rapporté.
 - `combine` = NNLS `A·w ≈ t` (A = composés×houblons normalisés, t = poids note),
   parcimonie (≤ max_hops), + **résidu irréductible** = orphelines. Cas B.
 - `by_descriptor` = recoupement `hop_descriptors ∩ sélection`, sans note requise.

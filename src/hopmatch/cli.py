@@ -27,6 +27,16 @@ def _print_contrast(r):
         print(f"  {i:<2}{h['name']:<14}{h['score']:>6}  via {', '.join(h['contrast_via'])}")
 
 
+def _print_contrast_blend(r):
+    print(f"\n[CONTRAST-BLEND] {r['note']}  — cible d'affinité : {', '.join(r['affinity_target'])}")
+    if not r["blend"]:
+        print("  aucune combinaison trouvée.")
+    for h in r["blend"]:
+        print(f"  {h['name']:<14}couvre {', '.join(h['covers'])}")
+    if r["residual"]:
+        print("  non couvert :", ", ".join(r["residual"]))
+
+
 def _print_combine(r):
     print(f"\n[COMBINE] {r['note']}  — couverture {r['coverage']*100:.0f}% "
           f"| résidu {r['residual']}")
@@ -75,8 +85,11 @@ def main(argv=None):
     pc.add_argument("--db", default=DEFAULT_DB)
     pc.add_argument("--sleep", type=float, default=0.25)
 
-    fb = sub.add_parser("ingest-foodb", help="ingérer le dump FooDB local (filtré par la whitelist Flavornet)")
-    fb.add_argument("foodb_dir", help="dossier du dump FooDB CSV")
+    fb = sub.add_parser("ingest-foodb", help="ingérer le dump FooDB (filtré par la whitelist Flavornet) ; "
+                                             "téléchargé automatiquement si absent")
+    fb.add_argument("foodb_dir", nargs="?", default=None,
+                    help="dossier du dump FooDB CSV déjà extrait ; omis = téléchargé "
+                         "automatiquement (~950 Mo, licence CC BY-NC-SA non commerciale)")
     fb.add_argument("--curated-only", action="store_true",
                     help="limiter aux 7 notes de l'amorce littérature au lieu de tout Food.csv "
                          "(~1000 notes par défaut) — plus rapide, utile en démo/test")
@@ -86,7 +99,7 @@ def main(argv=None):
     f2.add_argument("--db", default=DEFAULT_DB)
     f2.add_argument("--sleep", type=float, default=0.3)
 
-    for name in ("amplify", "contrast", "combine"):
+    for name in ("amplify", "combine"):
         s = sub.add_parser(name, help=f"cas d'usage : {name}")
         s.add_argument("note")
         s.add_argument("--db", default=DEFAULT_DB)
@@ -94,10 +107,22 @@ def main(argv=None):
             s.add_argument("--oav", action="store_true", help="prior de seuil (approx.)")
         if name == "combine":
             s.add_argument("--max-hops", type=int, default=3)
-        if name in ("amplify", "combine"):
-            s.add_argument("--biotransform", action="store_true",
-                           help="suppose une fermentation levure standard "
-                                "(géraniol->citronellol, portée limitée)")
+        s.add_argument("--biotransform", action="store_true",
+                       help="suppose une fermentation levure standard "
+                            "(géraniol->citronellol, portée limitée)")
+
+    for name in ("contrast", "contrast-blend"):
+        s = sub.add_parser(name, help="cas d'usage : contraster"
+                                     + (" (combinaison parcimonieuse)" if "blend" in name else ""))
+        s.add_argument("note", nargs="?", default=None,
+                       help="note curée (amorce littérature) ; omis si --descriptors fourni")
+        s.add_argument("--descriptors",
+                       help="sélection manuelle de descripteurs séparés par virgule (contourne "
+                            "note_descriptors, généralise à toute note — voir `hopmatch descriptors`), "
+                            "ex: citrus,tropical")
+        s.add_argument("--db", default=DEFAULT_DB)
+        if name == "contrast-blend":
+            s.add_argument("--max-hops", type=int, default=3)
 
     lst = sub.add_parser("list", help="lister notes et houblons")
     lst.add_argument("--db", default=DEFAULT_DB)
@@ -137,8 +162,15 @@ def main(argv=None):
         elif a.cmd == "amplify":
             _print_amplify(matching.amplify(con, a.note.lower(), use_oav=a.oav,
                                             biotransform=a.biotransform))
-        elif a.cmd == "contrast":
-            _print_contrast(matching.contrast(con, a.note.lower()))
+        elif a.cmd in ("contrast", "contrast-blend"):
+            descriptors = ([d.strip().lower() for d in a.descriptors.split(",") if d.strip()]
+                          if a.descriptors else None)
+            note = a.note.lower() if a.note else None
+            if a.cmd == "contrast":
+                _print_contrast(matching.contrast(con, note, descriptors))
+            else:
+                _print_contrast_blend(matching.contrast_blend(
+                    con, note, descriptors, max_hops=a.max_hops))
         elif a.cmd == "combine":
             _print_combine(matching.combine(con, a.note.lower(), max_hops=a.max_hops,
                                             biotransform=a.biotransform))

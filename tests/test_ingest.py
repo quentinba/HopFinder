@@ -88,3 +88,88 @@ def test_ingest_foodb_curated_only_when_all_foods_false(tmp_path):
     con.close()
     assert "basilic" in notes
     assert "mango" not in notes
+
+
+def test_extract_foodb_tarball_places_csvs_at_expected_path(tmp_path):
+    import tarfile
+    src_dir = tmp_path / "src" / "foodb_2020_04_07_csv"
+    src_dir.mkdir(parents=True)
+    (src_dir / "Food.csv").write_text("id,name\n1,Mango\n")
+    tar_path = tmp_path / "foodb_2020_4_7_csv.tar.gz"
+    with tarfile.open(tar_path, "w:gz") as tar:
+        tar.add(src_dir, arcname="foodb_2020_04_07_csv")
+
+    extract_root = tmp_path / "extracted"
+    extract_root.mkdir()
+    ingest._extract_foodb_tarball(str(tar_path), str(extract_root))
+
+    extracted_csv = extract_root / "foodb_2020_04_07_csv" / "Food.csv"
+    assert extracted_csv.exists()
+    assert "Mango" in extracted_csv.read_text()
+
+
+def test_download_foodb_dump_skips_if_already_present(tmp_path, monkeypatch):
+    dest = tmp_path / "already_here"
+    dest.mkdir()
+    (dest / "Food.csv").write_text("id,name\n1,Mango\n")
+
+    def _boom(*a, **k):
+        raise AssertionError("ne doit pas faire de requête réseau si le dump existe déjà")
+    monkeypatch.setattr("requests.get", _boom)
+
+    result = ingest.download_foodb_dump(dest_dir=str(dest))
+    assert result == str(dest)
+
+
+def _foodb_fixture_with_generic_food(tmp_path):
+    """3e aliment ('Generic Herb') dont le seul composé listé n'a aucune
+    concentration mesurée (que du bruit générique, cf. capers/chervil)."""
+    pd.DataFrame({"id": [1, 2, 3], "name": ["Sweet basil", "Mango", "Generic Herb"]}).to_csv(
+        tmp_path / "Food.csv", index=False)
+    pd.DataFrame({"id": [10, 11], "cas_number": ["78-70-6", "5989-27-5"]}).to_csv(
+        tmp_path / "Compound.csv", index=False)
+    pd.DataFrame({
+        "source_type": ["Compound", "Compound", "Compound"], "food_id": [1, 2, 3],
+        "source_id": [10, 11, 10], "orig_content": [5.0, 3.0, 0.0],
+        "orig_unit": ["mg/100g", "mg/100g", "mg/100g"],
+    }).to_csv(tmp_path / "Content.csv", index=False)
+    return tmp_path
+
+
+def test_ingest_foodb_drops_auto_derived_note_without_any_concentration(tmp_path):
+    db_path = tmp_path / "test.db"
+    con = connect(str(db_path))
+    init_db(con)
+    con.execute("INSERT INTO flavornet_compounds VALUES (?,?,?)",
+               ("78-70-6", "linalool", "floral, citrus"))
+    con.execute("INSERT INTO flavornet_compounds VALUES (?,?,?)",
+               ("5989-27-5", "limonene", "citrus"))
+    con.commit(); con.close()
+
+    foodb_dir = _foodb_fixture_with_generic_food(tmp_path)
+    ingest.ingest_foodb(str(db_path), str(foodb_dir), notes={"basilic": "Sweet basil"})
+
+    con = connect(str(db_path))
+    notes = {r[0] for r in con.execute("SELECT DISTINCT note FROM aroma_notes")}
+    con.close()
+    assert "mango" in notes           # auto-dérivé, avec concentration -> gardé
+    assert "generic herb" not in notes  # auto-dérivé, sans concentration -> écarté
+
+
+def test_ingest_foodb_keeps_curated_note_even_without_concentration(tmp_path):
+    db_path = tmp_path / "test.db"
+    con = connect(str(db_path))
+    init_db(con)
+    con.execute("INSERT INTO flavornet_compounds VALUES (?,?,?)",
+               ("78-70-6", "linalool", "floral, citrus"))
+    con.commit(); con.close()
+
+    foodb_dir = _foodb_fixture_with_generic_food(tmp_path)
+    # "curé" pointé directement sur l'aliment sans concentration : la fusion
+    # avec l'amorce littérature ne doit jamais s'effacer, filtre ou pas.
+    ingest.ingest_foodb(str(db_path), str(foodb_dir), notes={"herbe-curee": "Generic Herb"})
+
+    con = connect(str(db_path))
+    notes = {r[0] for r in con.execute("SELECT DISTINCT note FROM aroma_notes")}
+    con.close()
+    assert "herbe-curee" in notes

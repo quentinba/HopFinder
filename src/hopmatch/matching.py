@@ -168,15 +168,39 @@ def amplify(con, note: str, w_mol: float = 0.5, w_desc: float = 0.5, use_oav=Fal
 # --------------------------------------------------------------------------- #
 # CAS A — contrast (piloté par les affinités descripteurs, pas les molécules)
 # --------------------------------------------------------------------------- #
-def contrast(con, note: str, top=8):
+def contrast(con, note: str | None = None, descriptors: list[str] | None = None, top=8):
+    """
+    `note` : notes de l'amorce littérature (note_descriptors curés à la main, 7
+    notes) — lève ValueError si la note n'en a pas (notes auto-dérivées FooDB,
+    voir ingest_foodb : pas de moyen fiable de dériver des descripteurs depuis
+    des données FooDB majoritairement génériques, cf. docs/DATA_SOURCES.md).
+
+    `descriptors` : sélection manuelle par l'utilisateur (contourne
+    note_descriptors entièrement) — généralise contrast à N'IMPORTE QUELLE note,
+    curée ou non, tant que l'utilisateur sait décrire son goût avec le
+    vocabulaire réel de la roue d'arôme (même vocabulaire que `by_descriptor`,
+    grounded sur `hop_descriptors`, pas inventé). Prioritaire sur `note` si les
+    deux sont fournis.
+    """
     hops, comp, hop_desc, _ = load(con)
-    ndesc = get_note_descriptors(con, note)
-    if not ndesc:
-        raise ValueError(
-            f"contrast indisponible pour {note!r} : pas de descripteurs curés "
-            f"(note_descriptors). Ce mode ne couvre que l'amorce littérature "
-            f"(reference.NOTE_DESCRIPTORS/CONTRAST_AFFINITY, curées à la main) — "
-            f"pas les notes auto-dérivées de FooDB. Essayer amplify/combine.")
+    if descriptors:
+        ndesc = {reference.DESCRIPTOR_ALIASES.get(d.strip().lower(), d.strip().lower())
+                 for d in descriptors if d.strip()}
+        label = ", ".join(sorted(ndesc)) if ndesc else "(vide)"
+    elif note:
+        ndesc = get_note_descriptors(con, note)
+        if not ndesc:
+            raise ValueError(
+                f"contrast indisponible pour {note!r} : pas de descripteurs curés "
+                f"(note_descriptors). Ce mode ne couvre que l'amorce littérature "
+                f"(reference.NOTE_DESCRIPTORS/CONTRAST_AFFINITY, curées à la main) — "
+                f"pas les notes auto-dérivées de FooDB. Passer `descriptors=` pour "
+                f"décrire la note à la main (voir `hopmatch descriptors`), ou "
+                f"essayer amplify/combine.")
+        label = note
+    else:
+        raise ValueError("contrast nécessite soit `note` (note curée), soit "
+                         "`descriptors` (sélection manuelle).")
     # descripteurs qui contrastent bien avec ceux de la note
     target = set()
     for d in ndesc:
@@ -190,7 +214,34 @@ def contrast(con, note: str, top=8):
                            "score": round(100 * len(hit) / max(len(target), 1), 1),
                            "contrast_via": sorted(hit), "sources": hops[h]["sources"]})
     ranked.sort(key=lambda r: -r["score"])
-    return {"mode": "contrast", "note": note, "affinity_target": sorted(target), "ranked": ranked[:top]}
+    return {"mode": "contrast", "note": label, "affinity_target": sorted(target), "ranked": ranked[:top]}
+
+
+def contrast_blend(con, note: str | None = None, descriptors: list[str] | None = None,
+                   max_hops: int = 3, top_candidates: int = 20):
+    """
+    Combinaison PARCIMONIEUSE de houblons couvrant la cible de contraste — pas de
+    NNLS ici (contrast reste non-moléculaire par design, cf. ARCHITECTURE.md) :
+    couverture ensembliste gloutonne sur `hop_descriptors` (à chaque étape, le
+    houblon qui couvre le PLUS de descripteurs-cible encore non couverts), même
+    esprit honnête que `combine` — parcimonie (`max_hops`) + résidu irréductible
+    rapportés explicitement plutôt qu'une liste tronquée silencieuse.
+    """
+    r = contrast(con, note=note, descriptors=descriptors, top=top_candidates)
+    target = set(r["affinity_target"])
+    remaining = set(target)
+    blend, candidates = [], list(r["ranked"])
+    while remaining and len(blend) < max_hops and candidates:
+        best = max(candidates, key=lambda h: len(set(h["contrast_via"]) & remaining))
+        gain = set(best["contrast_via"]) & remaining
+        if not gain:
+            break
+        blend.append({"variety": best["variety"], "name": best["name"],
+                      "covers": sorted(gain), "sources": best["sources"]})
+        remaining -= gain
+        candidates.remove(best)
+    return {"mode": "contrast_blend", "note": r["note"], "affinity_target": r["affinity_target"],
+           "blend": blend, "covered": sorted(target - remaining), "residual": sorted(remaining)}
 
 
 # --------------------------------------------------------------------------- #

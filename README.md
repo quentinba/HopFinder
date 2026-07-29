@@ -4,7 +4,7 @@
 questions concrètes : *quel houblon accorder à un ajout* (yuzu, basilic…), et *un goût
 est-il reproductible avec du houblon seul* ?
 
-> État : `pytest` vert (33 tests). Toutes les sources tournent contre les sites externes :
+> État : `pytest` vert (45 tests). Toutes les sources tournent contre les sites externes :
 > `crawl_barthhaas`, `crawl_yakima`, `ingest_flavornet`, `ingest_foodb`, `ingest_flavordb2`,
 > `resolve_pubchem_cids`, `by-descriptor`, `--biotransform` (portée volontairement étroite,
 > deux voies sourcées) — voir [Feuille de route](#feuille-de-route).
@@ -165,13 +165,23 @@ et *ce qu'elle vaut*.
 - **Pas limité aux 7 notes.** Ce mapping n'est qu'une surcharge de nommage pour l'amorce
   littérature — le filtrage/pondération FooDB n'est spécifique à aucune note. Par défaut
   (`all_foods=True`), `ingest_foodb` ingère aussi tout le reste de `Food.csv` (~1000 aliments
-  sur le dump 2020-04-07, ~850 avec au moins un composé de la whitelist Flavornet), une note
-  par aliment, nom = celui de FooDB en minuscule. Sur un run réel : **854 notes distinctes**,
-  38 126 liens note→molécule. Limite honnête de ces notes auto-dérivées : pas de descripteurs
-  curés (`note_descriptors`/`reference.CONTRAST_AFFINITY`, réservés aux 7 littérature) —
-  `amplify`/`combine` dégradent proprement en scoring molécules-seules, `contrast` lève une
-  erreur explicite plutôt qu'un résultat vide silencieux. `hopmatch ingest-foodb --curated-only`
-  revient au périmètre des 7 notes (plus rapide, utile en démo/test).
+  sur le dump 2020-04-07), une note par aliment, nom = celui de FooDB en minuscule.
+- **Filtre de distinctivité.** Un aliment auto-dérivé sans AUCUN composé à concentration
+  mesurée est écarté. Pourquoi : vérifié sur le dump réel que deux aliments sans rapport
+  (capers/chervil) partagent 99,2% de leurs composés listés (5961/6011) — sans concentration,
+  FooDB cite un gabarit générique plutôt qu'une composition mesurée pour cet aliment précis, et
+  le poids retombe sur la table de seuils globale, identique entre aliments sans lien. Sur un
+  run réel : **647 notes distinctes** (4 curées + 643 auto-dérivées), 21 958 liens
+  note→molécule. `hopmatch ingest-foodb --curated-only` revient au périmètre des 7 notes (plus
+  rapide, utile en démo/test).
+- **Généraliser les descripteurs a été essayé et abandonné.** Agréger les descripteurs
+  Flavornet des molécules d'une note (pondéré, puis pondéré par IDF, puis restreint aux seuls
+  composés distinctifs) reproduit systématiquement la même dégénérescence : soit les notes
+  convergent vers les mêmes mots génériques, soit le profil devient vide dès qu'on se limite
+  aux composés vraiment food-specific. `note_descriptors`/`reference.CONTRAST_AFFINITY` restent
+  donc curés à la main (7 notes littérature seulement) — `amplify`/`combine` dégradent
+  proprement en scoring molécules-seules pour les autres notes ; `contrast` (voir plus bas) est
+  généralisé autrement, pas par auto-dérivation.
   (Outils : `tools/audit_foodb.py`, `tools/foodb_impact_check.py`.)
 
 **Flavornet** — *le filtre « odeur-active ».*
@@ -316,13 +326,33 @@ harmonieux* (un houblon dank/noble sous un ajout agrume vif) : ça ne se calcule
 composés communs.
 
 **Méthode.**
-1. Récupérer les descripteurs de la note.
+1. Récupérer les descripteurs de la note — soit curés (`note_descriptors`, amorce littérature,
+   7 notes), soit **choisis à la main par l'utilisateur** (`--descriptors`, vocabulaire réel
+   `hop_descriptors`, comme `by-descriptor` — voir « Pourquoi la sélection manuelle » ci-dessous).
 2. Pour chacun, chercher ses descripteurs **complémentaires** dans la carte d'affinités
    (`reference.CONTRAST_AFFINITY` : ex. agrume ↔ résineux/boisé/herbacé).
 3. Cible = union des descripteurs complémentaires.
 4. Classer les houblons selon le nombre de descripteurs-cibles que leur roue d'arôme recoupe.
 
 `hopmatch contrast yuzu` → cible earthy/herbal/resinous/woody → Saazer (noble, herbacé) ressort.
+
+**Pourquoi la sélection manuelle (`--descriptors`), pas une auto-dérivation.** `contrast` ne
+marche que pour une note ayant des `note_descriptors` — curés à la main pour les 7 notes
+littérature seulement. Dériver automatiquement des descripteurs depuis FooDB pour les notes
+auto-dérivées a été tenté (agrégation pondérée, puis pondérée par IDF, puis restreinte aux
+composés à concentration réelle) et rejeté : ça reproduit la même dégénérescence documentée dans
+la section FooDB plus haut, pas un vrai signal par note. `matching.contrast(descriptors=[...])`
+contourne le problème en laissant l'utilisateur décrire lui-même sa note avec le vocabulaire réel
+de la roue d'arôme — généralise `contrast` à n'importe quelle note (curée ou non) sans rien
+inventer côté données. `hopmatch contrast --descriptors citrus,herbal` fonctionne sans note du
+tout.
+
+**Proposer un blend.** `matching.contrast_blend` (CLI : `hopmatch contrast-blend`) combine
+plusieurs houblons pour couvrir la cible de contraste, par couverture ensembliste **gloutonne**
+sur `hop_descriptors` (pas de NNLS ici — le contraste reste non-moléculaire par design) :
+à chaque étape, le houblon qui couvre le plus de descripteurs-cible encore non couverts, jusqu'à
+`--max-hops` ou couverture complète. Rapporte explicitement ce qui n'est pas couvert (même
+principe honnête que le résidu de `combine`), plutôt qu'une liste tronquée silencieuse.
 
 > ⚠️ La carte d'affinités est un **prior heuristique**, pas une donnée sourcée (voir
 > [section dédiée](#ce-qui-est-un-prior-pas-une-donnée)). À ancrer sur un corpus de recettes
@@ -506,16 +536,20 @@ hopmatch crawl-yakima             # ~152 variétés Yakima Chief (via Algolia)
 hopmatch ingest-flavornet         # whitelist odeur-active (~734 composés) — avant les deux suivants
 hopmatch resolve-pubchem-cids     # jointure structurale CAS->CID — avant les deux suivants
 hopmatch ingest-flavordb2         # seuils olfactifs, bornés à cette whitelist
-hopmatch ingest-foodb <dossier_dump_foodb_csv>   # note→molécule filtré (dump FooDB local)
+hopmatch ingest-foodb              # télécharge+extrait le dump FooDB si absent, puis ingère
 ```
 
 L'ordre ci-dessus est celui des dépendances réelles entre commandes (`ingest-flavornet`
 avant `resolve-pubchem-cids` avant `ingest-flavordb2`/`ingest-foodb`) ; les deux crawls
 houblon (`crawl-barthhaas`/`crawl-yakima`) sont indépendants et dans n'importe quel ordre.
 
-`ingest-foodb` ingère par défaut ~1000 notes (tout `Food.csv`, pas seulement les 7 de
-l'amorce littérature — voir la section FooDB plus haut) ; `--curated-only` restreint aux 7
-pour une itération plus rapide.
+`ingest-foodb` n'exige plus de télécharger le dump FooDB à la main : sans argument, il
+télécharge et extrait automatiquement `foodb_2020_04_07_csv.tar.gz` (~950 Mo, licence
+CC BY-NC-SA non commerciale — voir plus haut) dans `data/foodb_2020_04_07_csv/` s'il n'y
+est pas déjà (idempotent : ne retélécharge rien au run suivant). `hopmatch ingest-foodb
+<dossier>` reste possible pour pointer vers un dump déjà téléchargé ailleurs. Il ingère par
+défaut ~1000 notes (tout `Food.csv`, pas seulement les 7 de l'amorce littérature — voir la
+section FooDB plus haut) ; `--curated-only` restreint aux 7 pour une itération plus rapide.
 
 ### CLI
 
@@ -524,7 +558,9 @@ hopmatch list                     # notes et houblons disponibles
 
 hopmatch amplify yuzu             # cas A — prolonger
 hopmatch amplify basilic --oav    # + prior de seuil
-hopmatch contrast yuzu            # cas A — contraster
+hopmatch contrast yuzu            # cas A — contraster (note curée)
+hopmatch contrast --descriptors citrus,herbal   # ou décrire la note à la main
+hopmatch contrast-blend --descriptors citrus,herbal --max-hops 3   # + blend parcimonieux
 hopmatch combine mangue           # cas B — recomposer
 hopmatch combine fruit-passion --max-hops 2
 hopmatch combine rose --biotransform   # géraniol->citronellol compte pour le résidu
@@ -532,7 +568,7 @@ hopmatch combine rose --biotransform   # géraniol->citronellol compte pour le r
 hopmatch descriptors              # vocabulaire de descripteurs disponible
 hopmatch by-descriptor citrus,tropical   # découverte, sans note requise
 
-pytest -q                         # 33 tests (nécessite l'extra [dev])
+pytest -q                         # 45 tests (nécessite l'extra [dev])
 ```
 
 ### GUI navigateur
@@ -546,7 +582,9 @@ streamlit run src/hopmatch/app.py
 
 Les quatre modes (amplify/contrast/combine/by-descriptor) et les options
 (`--oav`, `--biotransform`, `max_hops`) sont dans la barre latérale ; `app.py`
-importe directement `matching`/`schema`, pas de couche API intermédiaire. Pour
+importe directement `matching`/`schema`, pas de couche API intermédiaire. En
+mode `contrast`, un choix « note curée / sélection manuelle de descripteurs »
+remplace le sélecteur de note habituel, avec un blend proposé en dessous. Pour
 pointer vers une autre base : `streamlit run src/hopmatch/app.py -- --db chemin.db`.
 
 ---

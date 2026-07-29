@@ -30,7 +30,11 @@
 ## Côté note (ingrédient → molécules)
 
 **FooDB** — https://foodb.ca
-- Accès : dump bulk téléchargeable (XML/CSV). Version figée au 2020-04-07.
+- Accès : dump bulk téléchargeable (XML/CSV). Version figée au 2020-04-07. URL directe
+  vérifiée : `foodb.ca/public/system/downloads/foodb_2020_4_7_csv.tar.gz`, HTTP 200 sans
+  authentification, ~950 Mo. `ingest.download_foodb_dump` la télécharge et l'extrait
+  automatiquement (idempotent, skip si `data/foodb_2020_04_07_csv/Food.csv` existe déjà) —
+  `ingest_foodb` l'appelle si aucun dossier n'est fourni explicitement.
 - Qualité : >28 000 composés / >1000 aliments ; concentrations **lacunaires** (14,4 % des
   liens compound↔aliment ont une concentration, mesuré sur l'ensemble du dump via
   `tools/audit_foodb.py`, pas juste un échantillon). Lié à PubChem/HMDB/ChEBI.
@@ -51,13 +55,27 @@
   fruit-passion, mangue) : yuzu absent de FooDB, rose n'a que "Rose hip" (faux ami), pin-résine
   n'est pas un aliment. Mais ce mapping n'est qu'une **surcharge de nommage** pour ces 7 notes,
   pas une restriction : `ingest_foodb` (`all_foods=True` par défaut) ingère ensuite tout le
-  reste de `Food.csv` (~1000 aliments, ~850 avec ≥1 composé whitelisté sur le dump 2020-04-07)
-  comme note à part entière, nom = celui de FooDB en minuscule. Run réel : 854 notes distinctes
-  au total, 38 126 liens note→molécule. Ces notes auto-dérivées n'ont pas de descripteurs curés
-  (`note_descriptors`/`CONTRAST_AFFINITY` restent réservés aux 7 littérature) : `amplify`/
-  `combine` fonctionnent en molécules-seules, `matching.contrast` lève une erreur explicite
-  plutôt qu'un résultat vide. `hopmatch ingest-foodb --curated-only` revient au périmètre des
-  7 notes (démo/tests rapides).
+  reste de `Food.csv` (~1000 aliments sur le dump 2020-04-07) comme note à part entière, nom =
+  celui de FooDB en minuscule.
+  **Filtre de distinctivité** : un aliment auto-dérivé est écarté s'il n'a AUCUN composé à
+  concentration mesurée (`foodb:conc`). Vérifié sur le dump réel : deux aliments sans rapport
+  (capers/chervil) partagent 99,2% de leurs composés listés (5961/6011) — sans concentration,
+  FooDB cite un gabarit générique plutôt qu'une composition mesurée pour cet aliment précis, et
+  le poids retombe sur la table de seuils globale (identique entre aliments sans lien). Run réel
+  (avec filtre) : 647 notes distinctes (4 curées + 643 auto-dérivées distinctives), 21 958 liens
+  note→molécule — contre 854 notes / 38 126 liens sans le filtre.
+  **Généraliser les descripteurs a été testé et rejeté** : agréger les descripteurs Flavornet des
+  molécules d'une note (pondéré par poids, puis par IDF, puis restreint aux seuls composés
+  distinctifs) reproduit systématiquement la même dégénérescence que le problème ci-dessus — soit
+  convergence vers les mêmes mots génériques entre notes sans rapport, soit profil vide dès qu'on
+  se limite aux composés vraiment food-specific. `note_descriptors`/`CONTRAST_AFFINITY` restent
+  donc curés à la main (7 notes littérature) — `amplify`/`combine` dégradent en molécules-seules
+  pour les autres notes. `contrast` généralisé différemment : `matching.contrast(descriptors=)`
+  laisse l'utilisateur décrire sa note à la main (vocabulaire réel `hop_descriptors`, comme
+  `by_descriptor`) au lieu de dépendre de `note_descriptors` — couvre alors n'importe quelle
+  note sans rien inventer. `matching.contrast_blend` en tire une combinaison parcimonieuse
+  (couverture ensembliste, pas de NNLS) avec résidu rapporté. `hopmatch ingest-foodb
+  --curated-only` revient au périmètre des 7 notes (démo/tests rapides).
 
 **Flavornet** — http://www.flavornet.org
 - Accès : une page HTML statique unique triée par indice de Kovats (`d_kovats_ov101.html`,
