@@ -533,16 +533,33 @@ def _tier_weight(mass, thr, conc_max, thr_max):
 
 
 def ingest_foodb(out_db: str, foodb_csv_dir: str,
-                 notes: dict[str, str] | None = None, chunksize: int = 300_000) -> None:
+                 notes: dict[str, str] | None = None, all_foods: bool = True,
+                 chunksize: int = 300_000) -> None:
     """
     Remplace/enrichit l'amorce note->molécule par le dump bulk FooDB (foodb.ca),
     FILTRÉ via la whitelist Flavornet (ingest_flavornet doit avoir tourné avant :
     sinon >90% des ~6000 composés/aliment sont du bruit nutritionnel, cf. CLAUDE.md
     et tools/audit_foodb.py).
 
-    `notes` : {note: nom Food.csv} à ingérer, défaut reference.NOTE_TO_FOODB (les
-    seules correspondances propres identifiées sur le dump 2020-04-07 ; yuzu/rose/
-    pin-resine restent volontairement hors mapping, voir le commentaire associé).
+    `notes` : {note: nom Food.csv} — surcharge de nommage pour les notes de
+    l'amorce littérature (reference.NOTE_TO_FOODB par défaut : "basilic" ->
+    "Sweet basil", etc., les seules correspondances propres identifiées sur le
+    dump 2020-04-07 ; yuzu/rose/pin-resine restent volontairement hors mapping,
+    voir le commentaire associé). Le profil moléculaire de ces notes-là fusionne
+    l'amorce littérature ET FooDB.
+
+    `all_foods` (True par défaut) : au-delà de cette surcharge, ingère AUSSI
+    tous les autres aliments de Food.csv (~1000 sur le dump 2020-04-07) comme
+    note à part entière, nom = celui de Food.csv en minuscule. Pipeline non
+    supervisé : rien dans le filtrage/pondération FooDB n'est spécifique aux
+    7 notes curées, c'est uniquement `notes` qui restreignait artificiellement
+    la couverture. Limite honnête de ces notes auto-dérivées : pas de
+    `note_descriptors` ni de `reference.CONTRAST_AFFINITY` (curés à la main
+    pour les 7 notes littérature seulement) — `amplify`/`combine` dégradent
+    proprement en scoring molécules-seules, `contrast` lève une ValueError
+    explicite pour elles (matching.contrast) plutôt qu'un résultat vide
+    silencieux qui laisserait croire qu'aucun houblon ne contraste.
+    `all_foods=False` retombe sur le comportement restreint (démo/tests rapides).
 
     FUSIONNE avec l'amorce existante par (note, molécule) au lieu de l'effacer :
     FooDB est lacunaire (14-16% des liens ont une concentration, cf. audit) et peut
@@ -594,6 +611,12 @@ def ingest_foodb(out_db: str, foodb_csv_dir: str,
             print(f"  !! {note!r} : aliment {food_name!r} introuvable dans Food.csv, ignoré")
             continue
         food_id_to_note[int(m.iloc[0]["id"])] = note
+    n_curated = len(food_id_to_note)
+    if all_foods:
+        for _, r in fdf.iterrows():
+            fid = int(r["id"])
+            if fid not in food_id_to_note:
+                food_id_to_note[fid] = str(r["name"]).strip().lower()
     if not food_id_to_note:
         print("Aucun aliment résolu, rien à ingérer."); con.close(); return
 
@@ -621,11 +644,14 @@ def ingest_foodb(out_db: str, foodb_csv_dir: str,
     content["mass"] = [parsers.mass_mg_per_100g(v, u) for v, u in
                        zip(content["orig_content"], content["orig_unit"])]
     best = content.groupby(["food_id", "source_id"])["mass"].max().reset_index()
+    # groupby unique (au lieu d'un filtre par aliment répété dans la boucle) :
+    # nécessaire dès que food_id_to_note passe de 7 à ~1000 entrées.
+    by_food = {fid: g for fid, g in best.groupby("food_id")}
 
     written, no_hit = 0, []
     for food_id, note in food_id_to_note.items():
-        sub = best[best["food_id"] == food_id]
-        if sub.empty:
+        sub = by_food.get(food_id)
+        if sub is None or sub.empty:
             no_hit.append(note); continue
         recs = []
         for _, r in sub.iterrows():
@@ -644,6 +670,11 @@ def ingest_foodb(out_db: str, foodb_csv_dir: str,
                         (compound, odor_by_compound.get(compound), None, None))
             written += 1
     con.commit(); con.close()
-    print(f"FooDB : {written} liens note->molécule ingérés sur {len(food_id_to_note)} aliments.")
+    print(f"FooDB : {written} liens note->molécule ingérés sur {len(food_id_to_note)} aliments "
+         f"({n_curated} curés, {len(food_id_to_note) - n_curated} auto-dérivés de Food.csv).")
     if no_hit:
-        print("  aucun composé whitelisté pour :", ", ".join(no_hit))
+        if len(no_hit) <= 15:
+            print("  aucun composé whitelisté pour :", ", ".join(no_hit))
+        else:
+            print(f"  aucun composé whitelisté pour {len(no_hit)} aliments (aucun composé "
+                 f"Flavornet trouvé, ignorés).")

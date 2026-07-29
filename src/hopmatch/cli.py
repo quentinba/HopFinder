@@ -77,6 +77,9 @@ def main(argv=None):
 
     fb = sub.add_parser("ingest-foodb", help="ingérer le dump FooDB local (filtré par la whitelist Flavornet)")
     fb.add_argument("foodb_dir", help="dossier du dump FooDB CSV")
+    fb.add_argument("--curated-only", action="store_true",
+                    help="limiter aux 7 notes de l'amorce littérature au lieu de tout Food.csv "
+                         "(~1000 notes par défaut) — plus rapide, utile en démo/test")
     fb.add_argument("--db", default=DEFAULT_DB)
 
     f2 = sub.add_parser("ingest-flavordb2", help="seuils olfactifs FlavorDB2 (bornés à la whitelist Flavornet)")
@@ -120,7 +123,7 @@ def main(argv=None):
     if a.cmd == "resolve-pubchem-cids":
         ingest.resolve_pubchem_cids(a.db, sleep=a.sleep); return 0
     if a.cmd == "ingest-foodb":
-        ingest.ingest_foodb(a.db, a.foodb_dir); return 0
+        ingest.ingest_foodb(a.db, a.foodb_dir, all_foods=not a.curated_only); return 0
     if a.cmd == "ingest-flavordb2":
         ingest.ingest_flavordb2(a.db, sleep=a.sleep); return 0
 
@@ -145,7 +148,7 @@ def main(argv=None):
         elif a.cmd == "by-descriptor":
             selected = [d.strip().lower() for d in a.descriptors.split(",") if d.strip()]
             _print_by_descriptor(matching.by_descriptor(con, selected, top=a.top), selected)
-    except KeyError as e:
+    except (KeyError, ValueError) as e:
         print(e); return 1
     finally:
         con.close()

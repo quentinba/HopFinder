@@ -162,6 +162,16 @@ et *ce qu'elle vaut*.
   (Passion fruit), mangue (Mango). Yuzu est absent de FooDB ; rose n'a que "Rose hip" (faux
   ami, plus acidulé que floral) ; pin-résine n'est pas un aliment. Ces trois restent sur
   l'amorce littérature.
+- **Pas limité aux 7 notes.** Ce mapping n'est qu'une surcharge de nommage pour l'amorce
+  littérature — le filtrage/pondération FooDB n'est spécifique à aucune note. Par défaut
+  (`all_foods=True`), `ingest_foodb` ingère aussi tout le reste de `Food.csv` (~1000 aliments
+  sur le dump 2020-04-07, ~850 avec au moins un composé de la whitelist Flavornet), une note
+  par aliment, nom = celui de FooDB en minuscule. Sur un run réel : **854 notes distinctes**,
+  38 126 liens note→molécule. Limite honnête de ces notes auto-dérivées : pas de descripteurs
+  curés (`note_descriptors`/`reference.CONTRAST_AFFINITY`, réservés aux 7 littérature) —
+  `amplify`/`combine` dégradent proprement en scoring molécules-seules, `contrast` lève une
+  erreur explicite plutôt qu'un résultat vide silencieux. `hopmatch ingest-foodb --curated-only`
+  revient au périmètre des 7 notes (plus rapide, utile en démo/test).
   (Outils : `tools/audit_foodb.py`, `tools/foodb_impact_check.py`.)
 
 **Flavornet** — *le filtre « odeur-active ».*
@@ -502,6 +512,10 @@ hopmatch ingest-foodb <dossier_dump_foodb_csv>   # note→molécule filtré (dum
 L'ordre ci-dessus est celui des dépendances réelles entre commandes (`ingest-flavornet`
 avant `resolve-pubchem-cids` avant `ingest-flavordb2`/`ingest-foodb`) ; les deux crawls
 houblon (`crawl-barthhaas`/`crawl-yakima`) sont indépendants et dans n'importe quel ordre.
+
+`ingest-foodb` ingère par défaut ~1000 notes (tout `Food.csv`, pas seulement les 7 de
+l'amorce littérature — voir la section FooDB plus haut) ; `--curated-only` restreint aux 7
+pour une itération plus rapide.
 
 ### CLI
 

@@ -65,7 +65,10 @@ def _amplify(con, note):
 
 
 def _contrast(con, note):
-    r = matching.contrast(con, note)
+    try:
+        r = matching.contrast(con, note)
+    except ValueError as e:
+        st.error(str(e)); return
     st.caption("Cible d'affinité : " + ", ".join(r["affinity_target"]))
     if not r["ranked"]:
         st.write("Aucun houblon ne recoupe cette cible.")

@@ -49,7 +49,15 @@
   chimique vérifiée), `reference.ALIASES` ne gardant que les agrégations sans CID propre
   (« thiols »). `reference.NOTE_TO_FOODB` ne couvre que 4/7 notes-amorce (kumquat, basilic,
   fruit-passion, mangue) : yuzu absent de FooDB, rose n'a que "Rose hip" (faux ami), pin-résine
-  n'est pas un aliment.
+  n'est pas un aliment. Mais ce mapping n'est qu'une **surcharge de nommage** pour ces 7 notes,
+  pas une restriction : `ingest_foodb` (`all_foods=True` par défaut) ingère ensuite tout le
+  reste de `Food.csv` (~1000 aliments, ~850 avec ≥1 composé whitelisté sur le dump 2020-04-07)
+  comme note à part entière, nom = celui de FooDB en minuscule. Run réel : 854 notes distinctes
+  au total, 38 126 liens note→molécule. Ces notes auto-dérivées n'ont pas de descripteurs curés
+  (`note_descriptors`/`CONTRAST_AFFINITY` restent réservés aux 7 littérature) : `amplify`/
+  `combine` fonctionnent en molécules-seules, `matching.contrast` lève une erreur explicite
+  plutôt qu'un résultat vide. `hopmatch ingest-foodb --curated-only` revient au périmètre des
+  7 notes (démo/tests rapides).
 
 **Flavornet** — http://www.flavornet.org
 - Accès : une page HTML statique unique triée par indice de Kovats (`d_kovats_ov101.html`,

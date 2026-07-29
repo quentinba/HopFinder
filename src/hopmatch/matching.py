@@ -171,6 +171,12 @@ def amplify(con, note: str, w_mol: float = 0.5, w_desc: float = 0.5, use_oav=Fal
 def contrast(con, note: str, top=8):
     hops, comp, hop_desc, _ = load(con)
     ndesc = get_note_descriptors(con, note)
+    if not ndesc:
+        raise ValueError(
+            f"contrast indisponible pour {note!r} : pas de descripteurs curés "
+            f"(note_descriptors). Ce mode ne couvre que l'amorce littérature "
+            f"(reference.NOTE_DESCRIPTORS/CONTRAST_AFFINITY, curées à la main) — "
+            f"pas les notes auto-dérivées de FooDB. Essayer amplify/combine.")
     # descripteurs qui contrastent bien avec ceux de la note
     target = set()
     for d in ndesc:

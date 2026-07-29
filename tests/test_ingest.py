@@ -1,4 +1,7 @@
+import pandas as pd
+
 from hopmatch import ingest
+from hopmatch.schema import connect, init_db
 
 
 def test_canonical_compound_prefers_structural_cid_match():
@@ -29,3 +32,59 @@ def test_build_cas_to_hop_name_from_pubchem_cids_table():
     assert mapping["78-70-6"] == "linalool"
     assert "000-00-0" not in mapping
     con.close()
+
+
+def _foodb_fixture(tmp_path):
+    pd.DataFrame({"id": [1, 2], "name": ["Sweet basil", "Mango"]}).to_csv(
+        tmp_path / "Food.csv", index=False)
+    pd.DataFrame({"id": [10, 11], "cas_number": ["78-70-6", "5989-27-5"]}).to_csv(
+        tmp_path / "Compound.csv", index=False)
+    pd.DataFrame({
+        "source_type": ["Compound", "Compound"], "food_id": [1, 2], "source_id": [10, 11],
+        "orig_content": [5.0, 3.0], "orig_unit": ["mg/100g", "mg/100g"],
+    }).to_csv(tmp_path / "Content.csv", index=False)
+    return tmp_path
+
+
+def test_ingest_foodb_all_foods_adds_notes_beyond_curated_mapping(tmp_path):
+    db_path = tmp_path / "test.db"
+    con = connect(str(db_path))
+    init_db(con)
+    con.execute("INSERT INTO flavornet_compounds VALUES (?,?,?)",
+               ("78-70-6", "linalool", "floral, citrus"))
+    con.execute("INSERT INTO flavornet_compounds VALUES (?,?,?)",
+               ("5989-27-5", "limonene", "citrus"))
+    con.commit(); con.close()
+
+    foodb_dir = _foodb_fixture(tmp_path)
+    ingest.ingest_foodb(str(db_path), str(foodb_dir), notes={"basilic": "Sweet basil"})
+
+    con = connect(str(db_path))
+    notes = {r[0] for r in con.execute("SELECT DISTINCT note FROM aroma_notes")}
+    con.close()
+    # "basilic" : nom curé (surcharge NOTE_TO_FOODB-style) ; "mango" : auto-dérivé
+    # de Food.csv en minuscule, jamais mentionné dans `notes` -> preuve que
+    # all_foods=True dépasse bien la liste curée.
+    assert "basilic" in notes
+    assert "mango" in notes
+
+
+def test_ingest_foodb_curated_only_when_all_foods_false(tmp_path):
+    db_path = tmp_path / "test.db"
+    con = connect(str(db_path))
+    init_db(con)
+    con.execute("INSERT INTO flavornet_compounds VALUES (?,?,?)",
+               ("78-70-6", "linalool", "floral, citrus"))
+    con.execute("INSERT INTO flavornet_compounds VALUES (?,?,?)",
+               ("5989-27-5", "limonene", "citrus"))
+    con.commit(); con.close()
+
+    foodb_dir = _foodb_fixture(tmp_path)
+    ingest.ingest_foodb(str(db_path), str(foodb_dir), notes={"basilic": "Sweet basil"},
+                        all_foods=False)
+
+    con = connect(str(db_path))
+    notes = {r[0] for r in con.execute("SELECT DISTINCT note FROM aroma_notes")}
+    con.close()
+    assert "basilic" in notes
+    assert "mango" not in notes

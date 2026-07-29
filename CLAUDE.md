@@ -72,8 +72,18 @@ scorings DIFFÉRENTS :
   explicite pour ne jamais mélanger un seuil sourcé et un seuil deviné) → sinon présence
   pure. 3 paliers disjoints, jamais mélangés entre eux.
   FUSIONNE avec l'amorce littérature (molécule par molécule), ne l'efface pas.
-  `reference.NOTE_TO_FOODB` : 4/7 notes-amorce seulement (kumquat, basilic, fruit-passion,
-  mangue) — yuzu absent de FooDB, rose = faux ami ("Rose hip"), pin-résine pas un aliment.
+  `reference.NOTE_TO_FOODB` : 4/7 notes-amorce littérature (kumquat, basilic,
+  fruit-passion, mangue) — yuzu absent de FooDB, rose = faux ami ("Rose hip"),
+  pin-résine pas un aliment. **Ne borne plus l'ingestion** : `ingest_foodb`
+  (`all_foods=True` par défaut) parcourt TOUT `Food.csv` (~1000 aliments sur le
+  dump 2020-04-07, ~850 avec ≥1 composé whitelisté) et crée une note par aliment
+  (nom en minuscule), au-delà de la surcharge de nommage `NOTE_TO_FOODB` —
+  pipeline non supervisé, rien dans le filtrage/pondération n'est spécifique aux
+  7 notes curées. Limite honnête : ces notes auto-dérivées n'ont ni
+  `note_descriptors` ni `reference.CONTRAST_AFFINITY` (curés à la main pour les
+  7 seulement) — `amplify`/`combine` dégradent en molécules-seules,
+  `matching.contrast` lève une `ValueError` explicite pour elles plutôt qu'un
+  résultat vide silencieux. `--curated-only` (CLI) revient aux 7 notes.
   Voir `tools/{audit_foodb,foodb_impact_check}.py`.
 - **Flavornet** : 738 composés odeur-actifs (GC-O) + descripteurs, 734 CAS uniques
   (page HTML statique unique `d_kovats_ov101.html`, pas de pagination). Sert de whitelist
