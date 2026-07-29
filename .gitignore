@@ -7,6 +7,7 @@ dist/
 .venv/
 venv/
 *.db
+*.db-journal
 .pytest_cache/
 # données volumineuses non versionnées
 data/foodb_*/

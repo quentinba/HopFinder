@@ -568,15 +568,27 @@ CAS→CID, avec repli sur le nom du composé — cf. `parsers.pubchem_name_fallb
 CAS seul ne résout rien ; remplace la table d'alias manuelle pour les synonymes purs et la
 recherche par nom exact de `ingest_flavordb2`), option `--biotransform` sur `amplify`/`combine`
 (portée étroite, deux voies sourcées — détail dans la [section dédiée](#option---biotransform)),
-GUI Streamlit (`src/hopmatch/app.py`, lecture seule). Reste :
+GUI Streamlit (`src/hopmatch/app.py`, lecture seule).
 
-1. Résolution PubChem par InChIKey/SMILES quand ni le CAS ni le nom ne suffisent (Flavornet ne
-   fournit ni l'un ni l'autre nativement — nécessiterait une source supplémentaire), et
-   jointure au-delà des ~734 composés Flavornet si le vocabulaire s'élargit.
-2. Extension éventuelle de `reference.BIOTRANSFORMATIONS` si une étude comparant explicitement
+**Résidu PubChem accepté, pas une piste ouverte.** 6/734 CAS restent sans CID (0,8%) après CAS
++ repli par nom : recherché aussi par CAS comme identifiant d'enregistrement PubChem (endpoint
+`xref/RegistryID`, distinct de la recherche par nom) — sans succès. Vérifié individuellement
+pour deux cas : `methylethylpyrazine` désigne plusieurs isomères réels distincts (2-éthyl-3/5/
+6-méthylpyrazine…) sans indication de lequel dans le nom Flavornet ; `dehydrocarveol`
+(synonyme `p-menthatrien-2-ol` confirmé par des fournisseurs chimiques externes) ne répond sur
+aucune des variantes de nom essayées — probablement absent de PubChem, pas juste mal nommé.
+Coder un CID à la main pour ces cas ne serait pas une donnée vérifiée comme les autres entrées
+manuelles du projet (`reference.ALIASES`, `reference.BIOTRANSFORMATIONS`) : ce serait une
+supposition sans confirmation possible. Laissé non résolu.
+
+Reste :
+
+1. Extension éventuelle de `reference.BIOTRANSFORMATIONS` si une étude comparant explicitement
    des souches commerciales (pas des codes de collection académique) sur ces mêmes composés
    devient disponible — pas de drapeau par souche individuelle en attendant (voir
    [section dédiée](#option---biotransform) pour le raisonnement).
+2. Jointure au-delà des ~734 composés Flavornet si le vocabulaire s'élargit beaucoup (crawl
+   Yakima déjà réel, plus d'aliments FooDB).
 
 ---
 

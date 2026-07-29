@@ -97,7 +97,13 @@ scorings DIFFÉRENTS :
   Flavornet ne donne ni InChIKey ni SMILES, rien d'autre à essayer ; pas de recherche floue
   au-delà). C'est le "liant" structural qui remplace la table d'alias manuelle et la recherche
   par nom exact — voir `_canonical_compound` et `ingest_flavordb2` ci-dessus. Domaine public,
-  limite 5 req/s.
+  limite 5 req/s. RÉSIDU ACCEPTÉ : 6/734 CAS restent sans CID (aussi testé via
+  `xref/RegistryID`, pas juste `name` — sans succès). Vérifié individuellement que ce n'est PAS
+  un problème de terme de recherche à corriger : `methylethylpyrazine` désigne plusieurs
+  isomères réels distincts (aucun moyen de savoir lequel), `dehydrocarveol` (synonyme
+  `p-menthatrien-2-ol` confirmé ailleurs) ne répond sur aucune variante essayée — probablement
+  absent de PubChem. Coder un CID à la main ici serait une supposition non vérifiable, pas une
+  donnée comme `reference.ALIASES`/`BIOTRANSFORMATIONS`. Ne pas retenter sans nouvelle piste.
 - **Licence** : le CODE est MIT ; FooDB et FlavorDB2 sont NON COMMERCIALES. Un usage
   commercial imposerait de retirer/renégocier ces sources.
 
@@ -113,9 +119,7 @@ sur le nom, voir `docs/FEATURE_NOTES.md` pour le détail de spec de by-descripto
 `--biotransform` (`amplify`/`combine`, portée étroite — voir décision ci-dessus), GUI Streamlit
 (`src/hopmatch/app.py`). Reste :
 1. Jointure FooDB/hop_composition au-delà des ~734 composés Flavornet si le vocabulaire
-   s'élargit beaucoup (crawl Yakima déjà réel, plus d'aliments FooDB). Les CAS encore sans CID
-   après le repli sur le nom (`pubchem_name_fallbacks`) resteraient un gap résiduel sans
-   nouvelle source (Flavornet ne donne ni InChIKey ni SMILES à essayer).
+   s'élargit beaucoup (crawl Yakima déjà réel, plus d'aliments FooDB).
 2. Extension de `reference.BIOTRANSFORMATIONS` SI une étude comparant des souches
    commerciales entre elles (pas des codes de collection académique TUM/CBS/NCYC) sur
    ces mêmes composés devient disponible. Pas de drapeau par souche individuelle en
