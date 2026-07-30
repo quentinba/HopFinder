@@ -4,7 +4,7 @@
 questions concrètes : *quel houblon accorder à un ajout* (yuzu, basilic…), et *un goût
 est-il reproductible avec du houblon seul* ?
 
-> État : `pytest` vert (45 tests). Toutes les sources tournent contre les sites externes :
+> État : `pytest` vert (48 tests). Toutes les sources tournent contre les sites externes :
 > `crawl_barthhaas`, `crawl_yakima`, `ingest_flavornet`, `ingest_foodb`, `ingest_flavordb2`,
 > `resolve_pubchem_cids`, `by-descriptor`, `--biotransform` (portée volontairement étroite,
 > deux voies sourcées) — voir [Feuille de route](#feuille-de-route).
@@ -73,7 +73,7 @@ et *ce qu'elle vaut*.
 
 | Base | Monde | Rôle | Accès | Qualité / limite | Licence |
 |---|---|---|---|---|---|
-| **BarthHaas** | houblon | composition (dont thiols) | HTML servi | propre, producteur | données producteur |
+| **BarthHaas** | houblon | composition (dont thiols) | HTML servi | propre, producteur ; pas de descripteurs fiables | données producteur |
 | **Yakima Chief** | houblon | β-pinène, sélinène, roue d'arôme | API Algolia (checkpoint devant le HTML) | propre, labo ASBC | données producteur |
 | **FooDB** | ingrédient→molécule | composition + concentration | dump bulk | lacunaire, bruitée, figée 2020 | **non commerciale** |
 | **Flavornet** | molécule | whitelist odeur-active | HTML statique | curée mais petite/ancienne | académique |
@@ -93,6 +93,13 @@ et *ce qu'elle vaut*.
   myrcène, humulène, caryophyllène, farnésène, linalol, géraniol, cétones, isobutyrate,
   thiols, huile totale, acides alpha/bêta.
 - **Limite.** Pas de β-pinène ni de sélinène (que Yakima donne). D'où la fusion.
+- **Descripteurs d'arôme non fiables sur ce site.** Vérifié en direct sur plusieurs variétés
+  (admiral, tango, dolcita-hops...) : la section « Aroma Profile » n'est plus une liste courte
+  séparée par virgules mais un paragraphe descriptif libre. `parsers.parse_descriptors` détecte
+  ce cas (présence d'un point final) et renvoie une liste vide plutôt que d'extraire un faux
+  descripteur — sans ce garde-fou, la quasi-totalité des variétés récupéraient un descripteur
+  bruit (« typical aroma profile », un millésime de récolte comme « 2023 »). BarthHaas reste la
+  source de composition ; **Yakima est la seule source fiable pour les descripteurs**.
 
 **Yakima Chief (YCH)** — *source secondaire, complémentaire.*
 - **Pourquoi.** Complète BarthHaas avec le **β-pinène** et le **sélinène**, et fournit une
@@ -568,7 +575,7 @@ hopmatch combine rose --biotransform   # géraniol->citronellol compte pour le r
 hopmatch descriptors              # vocabulaire de descripteurs disponible
 hopmatch by-descriptor citrus,tropical   # découverte, sans note requise
 
-pytest -q                         # 45 tests (nécessite l'extra [dev])
+pytest -q                         # 48 tests (nécessite l'extra [dev])
 ```
 
 ### GUI navigateur

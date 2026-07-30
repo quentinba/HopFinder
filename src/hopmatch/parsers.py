@@ -82,12 +82,37 @@ def parse_composition(text: str, label_map: dict) -> dict[str, tuple]:
     return out
 
 
+_BARE_YEAR_RE = re.compile(r"^\d{4}$")
+
+
 def parse_descriptors(text: str) -> list[str]:
-    """Extrait la roue d'arôme : la ligne suivant 'AROMA PROFILE'."""
+    """
+    Extrait la roue d'arôme : la ligne suivant 'AROMA PROFILE'.
+
+    Sur le site BarthHaas réel (vérifié en direct sur plusieurs variétés,
+    ex. 'admiral', 'tango'), 1 ou 2 lignes de bruit s'intercalent parfois avant
+    le vrai contenu — un sous-titre 'Typical Aroma Profile' et/ou une année
+    brute ('2023', millésime de récolte) — on les saute. Le contenu réel qui
+    suit n'est PLUS une liste courte séparée par virgules comme dans les
+    fixtures historiques, mais un paragraphe descriptif complet (ex. « The
+    flavour profile of Admiral... contribute to the overall impression. »).
+    Miner ce texte libre pour en extraire de faux descripteurs serait de la
+    précision-déchet (CLAUDE.md) ; un paragraphe se repère par un point final,
+    absent d'une vraie liste de descripteurs courts — dans ce cas, aucun
+    descripteur n'est retourné plutôt qu'un mot inventé. Yakima
+    (imported_fields.aromas, JSON structuré) reste la source fiable pour
+    hop_descriptors sur les variétés qu'il couvre.
+    """
     lines = [l.strip() for l in text.splitlines() if l.strip()]
     for i, l in enumerate(lines[:-1]):
         if l.upper().startswith("AROMA PROFILE"):
-            return [d.strip().lower() for d in re.split(r"[,;]", lines[i + 1]) if d.strip()]
+            j = i + 1
+            while j < len(lines) and (
+                    "AROMA PROFILE" in lines[j].upper() or _BARE_YEAR_RE.match(lines[j])):
+                j += 1
+            if j >= len(lines) or "." in lines[j]:
+                return []
+            return [d.strip().lower() for d in re.split(r"[,;]", lines[j]) if d.strip()]
     return []
 
 

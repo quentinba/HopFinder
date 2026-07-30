@@ -20,6 +20,30 @@ def test_yakima_pinene_and_descriptors():
     assert comp["myrcene"] == (50.0, 70.0, "pct_oil")
     assert parsers.parse_descriptors(text) == ["citrus", "stone fruit"]
 
+def test_parse_descriptors_rejects_barthhaas_prose_paragraph():
+    # gabarit calqué sur le site BarthHaas réel (variété 'admiral', vérifié en
+    # direct) : un sous-titre 'Typical Aroma Profile' puis un PARAGRAPHE, pas
+    # une liste courte -> aucun descripteur inventé depuis du texte libre.
+    text = ("Aroma Profile\nTypical Aroma Profile\n"
+           "The flavour profile of Admiral in the raw hops is characterised by "
+           "green grassy and nuances, fruit tea and sweet ripe kiwi. Also "
+           "refreshing citrus along with versatile herbal and earthy aromas "
+           "contribute to the overall impression.\nAnalyses\n")
+    assert parsers.parse_descriptors(text) == []
+
+def test_parse_descriptors_skips_crop_year_before_prose():
+    # gabarit calqué sur la variété 'tango' (vérifié en direct) : une année de
+    # récolte brute s'intercale AVANT le sous-titre.
+    text = ("Aroma Profile\n2023\nTypical Aroma Profile\n"
+           "Some descriptive paragraph about the hop.\nAnalyses\n")
+    assert parsers.parse_descriptors(text) == []
+
+def test_parse_descriptors_still_works_if_barthhaas_gives_a_clean_list():
+    # si une variété a effectivement une liste courte après le sous-titre
+    # (pas de point final), elle reste extraite normalement.
+    text = "Aroma Profile\nTypical Aroma Profile\nCitrus, Herbal\nAnalyses\n"
+    assert parsers.parse_descriptors(text) == ["citrus", "herbal"]
+
 def test_parse_flavornet():
     # gabarit calqué sur d_kovats_ov101.html (RI x4, lien CAS, descripteurs)
     html = """

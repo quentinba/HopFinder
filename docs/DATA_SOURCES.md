@@ -5,7 +5,17 @@
 **BarthHaas** — https://www.barthhaas.com/hops-and-products/hop-varieties-overview
 - Accès : HTML servi côté serveur (TYPO3), ~90 variétés énumérables, bloc « Analyses » label/valeur régulier. `requests` + BeautifulSoup suffit.
 - Qualité : données producteur (« médiane des 4 dernières années »), propres. **Inclut les thiols (µg/kg)**, cétones, isobutyrate — ce que les autres n'ont pas.
-- Statut : `ingest.crawl_barthhaas` implémenté.
+- **Descripteurs d'arôme non fiables sur le site actuel** : vérifié en direct sur plusieurs
+  variétés (admiral, tango, dolcita-hops, huell-classic, luna) que la section « Aroma Profile »
+  a été remplacée par un paragraphe descriptif libre (« The flavour profile of Admiral... »),
+  plus une liste courte séparée par virgules comme avant. `parsers.parse_descriptors` détecte ce
+  cas (présence d'un point final) et renvoie `[]` plutôt que d'extraire un faux descripteur
+  depuis du texte libre — vérifié : sans ce garde-fou, ~80% des variétés récupéraient un
+  descripteur bruit (« typical aroma profile », un millésime de récolte comme « 2023 »...). La
+  roue d'arôme est en fait rendue en `<canvas>` avec des valeurs numériques par axe
+  (`data-values="3,6,4,..."`) mais les libellés d'axes sont injectés en JS, pas dans le HTML
+  statique — piste non résolue. **Yakima reste la source fiable pour `hop_descriptors`.**
+- Statut : `ingest.crawl_barthhaas` implémenté (composition fiable, descripteurs indisponibles).
 
 **Yakima Chief** — https://www.yakimachief.com/variety/{slug}
 - Accès : le site a un vrai rempart anti-bot devant le HTML (Vercel Security Checkpoint) —

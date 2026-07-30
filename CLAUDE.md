@@ -144,17 +144,28 @@ scrappés sales. Sur BarthHaas/Yakima (propres) elle ne se déclenche pas — c'
 filet de sécurité, pas une valeur active.
 
 ## Prochaines tâches (ordre d'utilité)
-Fait : `ingest.ingest_flavornet`, `ingest.ingest_foodb`, `by-descriptor`, `ingest.crawl_yakima`,
-`ingest.ingest_flavordb2`, `ingest.resolve_pubchem_cids` (jointure structurale CAS->CID + repli
-sur le nom, voir `docs/FEATURE_NOTES.md` pour le détail de spec de by-descriptor), option
-`--biotransform` (`amplify`/`combine`, portée étroite — voir décision ci-dessus), GUI Streamlit
-(`src/hopmatch/app.py`). Reste :
+Fait : `ingest.ingest_flavornet`, `ingest.ingest_foodb` (généralisé à `all_foods=True` par défaut
++ filtre de distinctivité + `download_foodb_dump` automatique), `by-descriptor`,
+`ingest.crawl_yakima`, `ingest.ingest_flavordb2`, `ingest.resolve_pubchem_cids` (jointure
+structurale CAS->CID + repli sur le nom, voir `docs/FEATURE_NOTES.md` pour le détail de spec de
+by-descriptor), option `--biotransform` (`amplify`/`combine`, portée étroite — voir décision
+ci-dessus), GUI Streamlit (`src/hopmatch/app.py`), `contrast`/`contrast_blend` généralisés par
+sélection manuelle de descripteurs (`matching.contrast(descriptors=[...])`, sans dépendre de
+`note_descriptors`). Reste :
 1. Jointure FooDB/hop_composition au-delà des ~734 composés Flavornet si le vocabulaire
    s'élargit beaucoup (crawl Yakima déjà réel, plus d'aliments FooDB).
 2. Extension de `reference.BIOTRANSFORMATIONS` SI une étude comparant des souches
    commerciales entre elles (pas des codes de collection académique TUM/CBS/NCYC) sur
    ces mêmes composés devient disponible. Pas de drapeau par souche individuelle en
    attendant — voir le raisonnement dans README.md#option---biotransform.
+3. `parsers.parse_descriptors` (BarthHaas) renvoie désormais `[]` pour la plupart des variétés :
+   le site réel a remplacé sa liste courte de descripteurs par un paragraphe descriptif (vérifié
+   en direct sur plusieurs variétés, ex. 'admiral', 'tango' — voir le commentaire de la fonction).
+   Piste non explorée : les pages exposent une roue d'arôme en `<canvas>` avec des valeurs
+   numériques par axe (`data-values="3,6,4,..."`) — les libellés d'axes ne sont pas dans le HTML
+   statique (rendu JS), pas retrouvés. Si retrouvés, remplacerait avantageusement l'ancien format
+   texte par des poids QUANTITATIFS par descripteur. Yakima (`imported_fields.aromas`) reste la
+   source fiable de `hop_descriptors` en attendant.
 
 ## Conventions
 - Commentaires/docstrings en français (cohérent avec l'existant).

@@ -650,8 +650,10 @@ def ingest_foodb(out_db: str, foodb_csv_dir: str | None = None,
     souvent un gabarit générique plutôt qu'une composition mesurée pour cet
     aliment précis) ; sans concentration, tout retombe sur la table de seuils
     GLOBALE, donnant des poids identiques à deux aliments sans lien. Sur le dump
-    2020-04-07 : exactement 427/854 candidats auto-dérivés (50%) écartés par ce
-    filtre. Limite honnête des ~427 restants : pas de
+    2020-04-07 : 345 des 847 candidats auto-dérivés avec au moins un composé
+    whitelisté (41%) écartés par ce filtre (992 aliments au total, 141 sans
+    aucun composé whitelisté — voir `no_hit` ci-dessous, 502 auto-dérivés
+    distinctifs conservés). Limite honnête de ces ~502 restants : pas de
     `note_descriptors` ni de `reference.CONTRAST_AFFINITY` (curés à la main
     pour les 7 notes littérature seulement) — `amplify`/`combine` dégradent
     proprement en scoring molécules-seules, `contrast` lève une ValueError
@@ -749,7 +751,7 @@ def ingest_foodb(out_db: str, foodb_csv_dir: str | None = None,
     # nécessaire dès que food_id_to_note passe de 7 à ~1000 entrées.
     by_food = {fid: g for fid, g in best.groupby("food_id")}
 
-    written, no_hit, no_signal = 0, [], []
+    written, no_hit, no_signal, kept_curated, kept_auto = 0, [], [], 0, 0
     for food_id, note in food_id_to_note.items():
         sub = by_food.get(food_id)
         if sub is None or sub.empty:
@@ -768,10 +770,9 @@ def ingest_foodb(out_db: str, foodb_csv_dir: str | None = None,
         # depuis la table de seuils GLOBALE : deux aliments au même ensemble de
         # composés produisent alors des poids identiques, sans signal food-specific.
         # Exiger >=1 composé en palier concentration (mesure réelle pour CET aliment,
-        # pas un seuil partagé) écarte ce bruit. Seuil non arbitraire : sur le dump
-        # réel, c'est exactement la frontière 0/1 (427/854 notes auto à 0 composé
-        # concentration, aucune à exactement 1 en bordure ambiguë).
-        if food_id not in curated_food_ids:
+        # pas un seuil partagé) écarte ce bruit.
+        is_curated = food_id in curated_food_ids
+        if not is_curated:
             has_conc = any(mass and mass > 0 for _, mass, _ in recs)
             if not has_conc:
                 no_signal.append(note); continue
@@ -785,11 +786,19 @@ def ingest_foodb(out_db: str, foodb_csv_dir: str | None = None,
             con.execute("INSERT OR IGNORE INTO molecules VALUES (?,?,?,?)",
                         (compound, odor_by_compound.get(compound), None, None))
             written += 1
+        if is_curated:
+            kept_curated += 1
+        else:
+            kept_auto += 1
     con.commit(); con.close()
+    # kept_curated + kept_auto (comptés au fil de la boucle, pas dérivés par
+    # soustraction) : dériver "aliments gardés" depuis len(food_id_to_note) en ne
+    # soustrayant que no_signal, sans soustraire aussi no_hit, avait donné un
+    # total FAUX (647 au lieu de 506 sur un run réel — no_hit était doublement
+    # absent du compte final, jamais soustrait).
     print(f"FooDB : {written} liens note->molécule ingérés sur "
-         f"{len(food_id_to_note) - len(no_signal)} aliments "
-         f"({n_curated} curés, {len(food_id_to_note) - n_curated - len(no_signal)} auto-dérivés "
-         f"distinctifs de Food.csv).")
+         f"{kept_curated + kept_auto} aliments "
+         f"({kept_curated} curés, {kept_auto} auto-dérivés distinctifs de Food.csv).")
     if no_signal:
         print(f"  {len(no_signal)} aliments auto-dérivés écartés : aucun composé à concentration "
              f"mesurée (que du bruit générique FooDB, cf. docstring).")

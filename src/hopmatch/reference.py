@@ -1,13 +1,16 @@
 """
 Données de référence — la couche "note → molécules / descripteurs".
 
-⚠️ AMORCE : ces tables sont saisies à la main depuis la littérature. C'est
-exactement la moitié que le projet vise à remplacer par des sources réelles
-(FooDB pour la composition, Flavornet pour les composés odeur-actifs, FlavorDB2
-pour les seuils). Voir ingest.py (scaffolds foodb/flavornet) et docs/DATA_SOURCES.md.
-
-Tant que ces sources ne sont pas branchées, l'app tourne sur cette amorce — utile
-pour la démo et les tests, insuffisante pour un usage sérieux.
+⚠️ AMORCE : ces tables (MOLECULES, AROMA_NOTES, NOTE_DESCRIPTORS) sont saisies
+à la main depuis la littérature, pour 7 notes. FooDB (composition), Flavornet
+(composés odeur-actifs) et FlavorDB2 (seuils) sont branchés (voir ingest.py) et
+ENRICHISSENT cette amorce sans l'effacer (`ingest_foodb`, `all_foods=True` par
+défaut, généralise même au-delà de ces 7 notes à ~500 notes auto-dérivées de
+FooDB — voir docs/DATA_SOURCES.md). L'amorce reste la seule source pour
+`note_descriptors`/`CONTRAST_AFFINITY` (mode `contrast` par note) : dériver ça
+depuis FooDB a été tenté et rejeté (données trop génériques). `contrast` reste
+utilisable au-delà des 7 notes via une sélection manuelle de descripteurs
+(`matching.contrast(descriptors=[...])`), pas via cette amorce.
 """
 
 # molécule -> (descripteur odeur, seuil olfactif ppb | None, PubChem CID | None)
