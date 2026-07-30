@@ -90,9 +90,6 @@ def main(argv=None):
     fb.add_argument("foodb_dir", nargs="?", default=None,
                     help="dossier du dump FooDB CSV déjà extrait ; omis = téléchargé "
                          "automatiquement (~950 Mo, licence CC BY-NC-SA non commerciale)")
-    fb.add_argument("--curated-only", action="store_true",
-                    help="limiter aux 7 notes de l'amorce littérature au lieu de tout Food.csv "
-                         "(~1000 notes par défaut) — plus rapide, utile en démo/test")
     fb.add_argument("--db", default=DEFAULT_DB)
 
     f2 = sub.add_parser("ingest-flavordb2", help="seuils olfactifs FlavorDB2 (bornés à la whitelist Flavornet)")
@@ -115,7 +112,7 @@ def main(argv=None):
         s = sub.add_parser(name, help="cas d'usage : contraster"
                                      + (" (combinaison parcimonieuse)" if "blend" in name else ""))
         s.add_argument("note", nargs="?", default=None,
-                       help="note curée (amorce littérature) ; omis si --descriptors fourni")
+                       help="note avec note_descriptors déjà peuplé ; omis si --descriptors fourni")
         s.add_argument("--descriptors",
                        help="sélection manuelle de descripteurs séparés par virgule (contourne "
                             "note_descriptors, généralise à toute note — voir `hopmatch descriptors`), "
@@ -148,7 +145,7 @@ def main(argv=None):
     if a.cmd == "resolve-pubchem-cids":
         ingest.resolve_pubchem_cids(a.db, sleep=a.sleep); return 0
     if a.cmd == "ingest-foodb":
-        ingest.ingest_foodb(a.db, a.foodb_dir, all_foods=not a.curated_only); return 0
+        ingest.ingest_foodb(a.db, a.foodb_dir); return 0
     if a.cmd == "ingest-flavordb2":
         ingest.ingest_flavordb2(a.db, sleep=a.sleep); return 0
 

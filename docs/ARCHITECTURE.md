@@ -66,10 +66,12 @@ BarthHaas/Yakima (propres) ; utile si tu ingères un dataset brut.
 - `amplify` = w_mol·(molécules) + w_desc·(descripteurs). Cas A, prolonger.
 - `contrast` = affinités descripteurs (carte curée). Cas A, contraster. **Non
   moléculaire** : le contraste ne se dérive pas des composés partagés. Par
-  `note`, seules les 7 notes littérature ont des `note_descriptors` curés —
-  `ValueError` explicite sinon (dériver des descripteurs depuis FooDB a été
-  tenté et rejeté, données trop génériques, voir docs/DATA_SOURCES.md). Généralisé
-  via `descriptors=[...]` : sélection manuelle par l'utilisateur sur le
+  `note`, exige `note_descriptors` peuplé pour cette note — vide par défaut
+  pour toutes les notes (pas d'amorce littérature dans ce projet, retirée à la
+  demande explicite de l'utilisateur ; dériver des descripteurs depuis FooDB a
+  aussi été tenté et rejeté, données trop génériques, voir
+  docs/DATA_SOURCES.md) — `ValueError` explicite dans ce cas. Le chemin normal
+  est `descriptors=[...]` : sélection manuelle par l'utilisateur sur le
   vocabulaire réel `hop_descriptors` (même principe que `by_descriptor`),
   fonctionne pour n'importe quelle note sans curation. `contrast_blend` propose
   une combinaison parcimonieuse (couverture ensembliste gloutonne, pas de NNLS)

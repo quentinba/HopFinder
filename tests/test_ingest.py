@@ -62,9 +62,9 @@ def test_ingest_foodb_all_foods_adds_notes_beyond_curated_mapping(tmp_path):
     con = connect(str(db_path))
     notes = {r[0] for r in con.execute("SELECT DISTINCT note FROM aroma_notes")}
     con.close()
-    # "basilic" : nom curé (surcharge NOTE_TO_FOODB-style) ; "mango" : auto-dérivé
+    # "basilic" : nom donné via `notes` (surcharge additive) ; "mango" : auto-dérivé
     # de Food.csv en minuscule, jamais mentionné dans `notes` -> preuve que
-    # all_foods=True dépasse bien la liste curée.
+    # all_foods=True dépasse bien la liste passée dans `notes`.
     assert "basilic" in notes
     assert "mango" in notes
 
@@ -173,3 +173,28 @@ def test_ingest_foodb_keeps_curated_note_even_without_concentration(tmp_path):
     notes = {r[0] for r in con.execute("SELECT DISTINCT note FROM aroma_notes")}
     con.close()
     assert "herbe-curee" in notes
+
+
+def test_ingest_foodb_curated_and_auto_names_coexist_for_same_food(tmp_path):
+    # "basilic" (curé, fusionné à l'amorce littérature) et "sweet basil" (nom
+    # brut FooDB, auto-dérivé) doivent tous les deux exister : la surcharge de
+    # nommage est additive, elle ne doit jamais faire disparaître la note
+    # auto-dérivée au profit de la note curée (cf. retour utilisateur réel :
+    # "mango" absent, seule "mangue" présente).
+    db_path = tmp_path / "test.db"
+    con = connect(str(db_path))
+    init_db(con)
+    con.execute("INSERT INTO flavornet_compounds VALUES (?,?,?)",
+               ("78-70-6", "linalool", "floral, citrus"))
+    con.execute("INSERT INTO flavornet_compounds VALUES (?,?,?)",
+               ("5989-27-5", "limonene", "citrus"))
+    con.commit(); con.close()
+
+    foodb_dir = _foodb_fixture(tmp_path)
+    ingest.ingest_foodb(str(db_path), str(foodb_dir), notes={"basilic": "Sweet basil"})
+
+    con = connect(str(db_path))
+    notes = {r[0] for r in con.execute("SELECT DISTINCT note FROM aroma_notes")}
+    con.close()
+    assert "basilic" in notes
+    assert "sweet basil" in notes

@@ -7,9 +7,31 @@ FIX = os.path.join(os.path.dirname(__file__), "..", "data", "fixtures")
 
 @pytest.fixture(scope="module")
 def db():
+    # build_from_fixtures ne seed plus aucune note (reference.AROMA_NOTES/
+    # NOTE_DESCRIPTORS ont été retirés, cf. reference.py) : les notes de test
+    # sont insérées ici directement, comme des données de test locales plutôt
+    # que via une amorce littérature globale.
     path = os.path.join(tempfile.mkdtemp(), "t.db")
     ingest.build_from_fixtures(FIX, path)
     con = connect(path)
+    con.executemany("INSERT INTO aroma_notes VALUES (?,?,?,?)", [
+        # mirrors l'ancienne note "yuzu" : limonene absent du houblon (orphelin
+        # garanti), linalool/myrcene présents dans les fixtures.
+        ("_citrus", "limonene", 1.0, "test"),
+        ("_citrus", "linalool", 0.7, "test"),
+        ("_citrus", "myrcene", 0.4, "test"),
+        # mirrors l'ancienne note "fruit-passion" : thiols (barthhaas only).
+        ("_passion", "thiols", 1.0, "test"),
+        ("_passion", "myrcene", 0.3, "test"),
+        # mirrors l'ancienne note "rose" : citronellol jamais mesuré côté
+        # houblon (nécessite --biotransform pour être couvert via géraniol).
+        ("_rose", "geraniol", 1.0, "test"),
+        ("_rose", "citronellol", 0.9, "test"),
+    ])
+    con.executemany("INSERT INTO note_descriptors VALUES (?,?)", [
+        ("_citrus", "citrus"), ("_citrus", "floral"),
+    ])
+    con.commit()
     yield con
     con.close()
 
@@ -21,17 +43,17 @@ def test_merge_multisource(db):
     assert set(comp["citra"]["myrcene"]["sources"]) == {"barthhaas", "yakima"}
 
 def test_amplify_ranks(db):
-    r = matching.amplify(db, "yuzu")
+    r = matching.amplify(db, "_citrus")
     assert r["ranked"], "au moins un houblon"
     assert 0 <= r["coverage"] <= 1
 
 def test_combine_returns_blend_and_residual(db):
-    r = matching.combine(db, "fruit-passion", max_hops=2)
+    r = matching.combine(db, "_passion", max_hops=2)
     assert "residual" in r
     assert isinstance(r["blend"], list)
 
 def test_orphans_flagged(db):
-    r = matching.amplify(db, "yuzu")
+    r = matching.amplify(db, "_citrus")
     # limonène n'existe pas dans le houblon -> orphelin
     assert "limonene" in r["orphan"]
 
@@ -75,7 +97,7 @@ def test_coverage_biotransform_unlocks_alpha_terpineol(db):
 
 def test_coverage_biotransform_unlocks_citronellol(db):
     _, comp, _, _ = matching.load(db)
-    profile = matching.get_note(db, "rose")
+    profile = matching.get_note(db, "_rose")
     _, orphan_off, _ = matching.coverage(profile, comp)
     assert "citronellol" in orphan_off  # aucun houblon ne mesure le citronellol
 
@@ -84,15 +106,15 @@ def test_coverage_biotransform_unlocks_citronellol(db):
     assert "citronellol" not in orphan_on
 
 def test_combine_biotransform_removes_citronellol_from_residual(db):
-    r_off = matching.combine(db, "rose", max_hops=2)
-    r_on = matching.combine(db, "rose", max_hops=2, biotransform=True)
+    r_off = matching.combine(db, "_rose", max_hops=2)
+    r_on = matching.combine(db, "_rose", max_hops=2, biotransform=True)
     assert "citronellol" in r_off["orphan"]
     assert "citronellol" not in r_on["orphan"]
     assert r_off["biotransform"] is False
     assert r_on["biotransform"] is True
 
 def test_amplify_biotransform_flag_echoed(db):
-    r = matching.amplify(db, "rose", biotransform=True)
+    r = matching.amplify(db, "_rose", biotransform=True)
     assert r["biotransform"] is True
 
 def test_contrast_requires_note_or_descriptors(db):
@@ -105,22 +127,23 @@ def test_contrast_raises_for_note_without_curated_descriptors(db):
         matching.contrast(db, note="pas-une-note-curee")
 
 def test_contrast_manual_descriptors_match_note_based_equivalent(db):
-    # "yuzu" a reference.NOTE_DESCRIPTORS = ["citrus", "floral"] -> passer les
-    # mêmes descripteurs à la main doit reproduire exactement la même cible/rang,
-    # preuve que la généralisation ne change rien pour les notes déjà curées.
-    r_note = matching.contrast(db, note="yuzu")
+    # "_citrus" a note_descriptors = ["citrus", "floral"] (insérées par la
+    # fixture `db`) -> passer les mêmes descripteurs à la main doit reproduire
+    # exactement la même cible/rang : la sélection manuelle et note_descriptors
+    # sont deux chemins vers le même calcul, pas deux logiques différentes.
+    r_note = matching.contrast(db, note="_citrus")
     r_manual = matching.contrast(db, descriptors=["citrus", "floral"])
     assert r_manual["affinity_target"] == r_note["affinity_target"]
     assert [h["variety"] for h in r_manual["ranked"]] == [h["variety"] for h in r_note["ranked"]]
 
 def test_contrast_manual_descriptors_generalize_beyond_curated_notes(db):
     # aucune note requise du tout : la sélection manuelle fonctionne pour
-    # n'importe quel descripteur du vocabulaire réel, curé ou non.
+    # n'importe quel descripteur du vocabulaire réel, note existante ou non.
     r = matching.contrast(db, descriptors=["woody"])
     assert r["affinity_target"] == sorted(set(reference.CONTRAST_AFFINITY["woody"]))
 
 def test_contrast_blend_covers_target_within_max_hops(db):
-    r = matching.contrast_blend(db, note="yuzu", max_hops=2)
+    r = matching.contrast_blend(db, note="_citrus", max_hops=2)
     assert len(r["blend"]) <= 2
     assert set(r["covered"]) | set(r["residual"]) == set(r["affinity_target"])
     covered_via_blend = set()

@@ -1,16 +1,21 @@
 """
-Données de référence — la couche "note → molécules / descripteurs".
+Données de référence — propriétés MOLÉCULE et vocabulaire DESCRIPTEUR, pas de
+notes pré-remplies : toutes les notes viennent du pipeline (`ingest_foodb`,
+`all_foods=True` par défaut — voir docs/DATA_SOURCES.md). Une amorce
+littérature de 7 notes (yuzu, basilic...) a existé ici avant que le pipeline
+FooDB ne soit branché ; retirée une fois ce pipeline suffisant, pour ne garder
+qu'une seule source de vérité par note plutôt que deux qui se recouvrent
+partiellement (choix explicite de l'utilisateur — les 3 notes sans équivalent
+FooDB, yuzu/rose/pin-resine, disparaissent avec : aucune ne reviendra tant
+qu'aucune source réelle ne les couvre).
 
-⚠️ AMORCE : ces tables (MOLECULES, AROMA_NOTES, NOTE_DESCRIPTORS) sont saisies
-à la main depuis la littérature, pour 7 notes. FooDB (composition), Flavornet
-(composés odeur-actifs) et FlavorDB2 (seuils) sont branchés (voir ingest.py) et
-ENRICHISSENT cette amorce sans l'effacer (`ingest_foodb`, `all_foods=True` par
-défaut, généralise même au-delà de ces 7 notes à ~500 notes auto-dérivées de
-FooDB — voir docs/DATA_SOURCES.md). L'amorce reste la seule source pour
-`note_descriptors`/`CONTRAST_AFFINITY` (mode `contrast` par note) : dériver ça
-depuis FooDB a été tenté et rejeté (données trop génériques). `contrast` reste
-utilisable au-delà des 7 notes via une sélection manuelle de descripteurs
-(`matching.contrast(descriptors=[...])`), pas via cette amorce.
+Reste : `MOLECULES` (propriétés par molécule, indépendantes de toute note),
+`ALIASES`/`BIOTRANSFORMATIONS` (résolution de composés, indépendantes des
+notes), `DESCRIPTOR_ALIASES`/`CONTRAST_AFFINITY` (vocabulaire descripteur,
+indépendant des notes — `CONTRAST_AFFINITY` est déjà keyed par descripteur,
+pas par note, donc `contrast` reste utilisable pour N'IMPORTE QUELLE note via
+une sélection manuelle de descripteurs, `matching.contrast(descriptors=[...])`
+— voir ce module).
 """
 
 # molécule -> (descripteur odeur, seuil olfactif ppb | None, PubChem CID | None)
@@ -74,41 +79,6 @@ ALIASES: dict[str, str] = {
 BIOTRANSFORMATIONS: dict[str, str] = {
     "citronellol": "geraniol",
     "alpha-terpineol": "linalool",
-}
-
-# note -> {molécule: poids de contribution au caractère (0-1)}
-AROMA_NOTES: dict[str, dict[str, float]] = {
-    "yuzu":          {"limonene": 1.0, "linalool": 0.7, "myrcene": 0.4, "terpinolene": 0.3, "beta-pinene": 0.3, "geraniol": 0.2},
-    "kumquat":       {"limonene": 1.0, "myrcene": 0.6, "beta-pinene": 0.4, "caryophyllene": 0.3, "linalool": 0.2},
-    "basilic":       {"linalool": 1.0, "methyl-chavicol": 0.9, "caryophyllene": 0.4},
-    "rose":          {"geraniol": 1.0, "citronellol": 0.9, "linalool": 0.3},
-    "fruit-passion": {"thiols": 1.0, "myrcene": 0.3},
-    "mangue":        {"myrcene": 1.0, "terpinolene": 0.6, "caryophyllene": 0.3},
-    "pin-resine":    {"beta-pinene": 1.0, "myrcene": 0.5, "humulene": 0.3},
-}
-
-# note -> descripteurs sensoriels (pour la couche descripteurs, primaire)
-NOTE_DESCRIPTORS: dict[str, list[str]] = {
-    "yuzu":          ["citrus", "floral"],
-    "kumquat":       ["citrus"],
-    "basilic":       ["herbal", "spicy"],
-    "rose":          ["floral"],
-    "fruit-passion": ["tropical"],
-    "mangue":        ["tropical", "stone fruit"],
-    "pin-resine":    ["woody", "resinous"],
-}
-
-# note -> nom d'aliment FooDB (Food.name) à ingérer via ingest_foodb.
-# Uniquement les correspondances propres et sans ambiguïté (vérifié sur le dump 2020-04-07) :
-#   - yuzu : absent de FooDB (aucune entrée), reste sur l'amorce littérature.
-#   - rose : FooDB n'a que "Rose hip" (le fruit de l'églantier, note plus acidulée que
-#     florale) — mapper "rose" dessus serait un faux ami, on s'abstient.
-#   - pin-resine : pas un aliment (note résineuse pure), aucun candidat FooDB pertinent.
-NOTE_TO_FOODB: dict[str, str] = {
-    "kumquat":       "Kumquat",
-    "basilic":       "Sweet basil",
-    "fruit-passion": "Passion fruit",
-    "mangue":        "Mango",
 }
 
 # Normalisation des variantes de descripteurs entre sources (pluriel, formulation).

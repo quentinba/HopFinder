@@ -74,37 +74,46 @@ scorings DIFFÉRENTS :
   `flavordb2_thresholds` UNIQUEMENT — JAMAIS `molecules`/`reference.MOLECULES`, décision
   explicite pour ne jamais mélanger un seuil sourcé et un seuil deviné) → sinon présence
   pure. 3 paliers disjoints, jamais mélangés entre eux.
-  FUSIONNE avec l'amorce littérature (molécule par molécule), ne l'efface pas.
-  `reference.NOTE_TO_FOODB` : 4/7 notes-amorce littérature (kumquat, basilic,
-  fruit-passion, mangue) — yuzu absent de FooDB, rose = faux ami ("Rose hip"),
-  pin-résine pas un aliment. **Ne borne plus l'ingestion** : `ingest_foodb`
-  (`all_foods=True` par défaut) parcourt TOUT `Food.csv` (~1000 aliments sur le
-  dump 2020-04-07) et crée une note par aliment (nom en minuscule), au-delà de la
-  surcharge de nommage `NOTE_TO_FOODB` — pipeline non supervisé, rien dans le
-  filtrage/pondération n'est spécifique aux 7 notes curées.
-  **Filtre de distinctivité** (notes auto-dérivées uniquement) : un aliment sans
-  AUCUN composé à concentration mesurée est écarté — vérifié sur le dump réel que
-  deux aliments sans rapport (capers/chervil) partagent 99,2% de leurs composés
-  listés (5961/6011) : sans concentration, FooDB cite un gabarit générique, pas
-  une composition mesurée pour cet aliment précis, et retombe sur la table de
-  seuils GLOBALE (poids identiques entre aliments sans lien). 427/854 (puis
-  345/851 après le filtre no-hit) candidats auto-dérivés écartés sur le dump réel.
-  **Descripteurs auto-dérivés testés et rejetés** : agréger les descripteurs
-  Flavornet des molécules d'une note (même pondérés par IDF, même restreints aux
-  composés distinctifs post-filtre) reproduit la même dégénérescence — converge
-  vers les mêmes mots génériques entre notes sans rapport, ou devient vide dès
-  qu'on restreint aux seuls composés à concentration réelle. Confirmé PAS
-  viable ; voir `matching.contrast`.
-  `note_descriptors`/`reference.CONTRAST_AFFINITY` restent donc curés à la main
-  (7 notes littérature seulement) — `amplify`/`combine` dégradent en
-  molécules-seules pour les autres. **`contrast` généralisé autrement** :
-  `matching.contrast(con, descriptors=[...])` accepte une sélection manuelle de
-  l'utilisateur (vocabulaire réel `hop_descriptors`, comme `by_descriptor`) au
-  lieu d'exiger `note_descriptors` — fonctionne pour N'IMPORTE QUELLE note, curée
-  ou non, sans rien inventer côté données. `matching.contrast_blend` propose en
-  plus une combinaison parcimonieuse (couverture ensembliste gloutonne sur
-  `hop_descriptors`, PAS de NNLS — contrast reste non-moléculaire) avec résidu
-  rapporté. `--curated-only` (CLI ingest-foodb) revient aux 7 notes.
+  **Seule source de notes du pipeline** : `ingest_foodb` (`all_foods=True` par défaut)
+  parcourt TOUT `Food.csv` (~1000 aliments sur le dump 2020-04-07) et crée une note par
+  aliment (nom en minuscule) — pipeline non supervisé, rien dans le filtrage/pondération
+  n'est spécifique à une note en particulier. Une amorce littérature de 7 notes
+  (yuzu, kumquat, basilic, rose, fruit-passion, mangue, pin-resine, dans
+  `reference.AROMA_NOTES`/`NOTE_DESCRIPTORS`/`NOTE_TO_FOODB`) a existé pendant le
+  développement puis a été **retirée à la demande explicite de l'utilisateur** une fois ce
+  pipeline suffisant — une seule source de vérité par note plutôt que deux qui se
+  recouvrent. Conséquence assumée : yuzu/rose/pin-resine n'ont pas d'équivalent FooDB
+  (yuzu absent, rose = faux ami "Rose hip", pin-resine n'est pas un aliment) et ont donc
+  disparu du pipeline — aucune ne reviendra tant qu'aucune source réelle ne les couvre.
+  `notes` (paramètre optionnel, additif, vide par défaut) reste disponible pour qui veut
+  quand même donner un nom choisi à un aliment — `food_entries` est une LISTE de
+  (food_id, note, is_curated), pas un dict par food_id : un aliment peut porter plusieurs
+  noms sans que l'un écrase l'autre (bug corrigé en le construisant : "mangue" curée
+  écrasait silencieusement "mango" auto-dérivée).
+  **Filtre de distinctivité** (n'épargne que les entrées de `notes`, si fournies) : un
+  aliment est écarté s'il n'a AUCUN composé à concentration mesurée — vérifié sur le dump
+  réel que deux aliments sans rapport (capers/chervil) partagent 99,2% de leurs composés
+  listés (5961/6011) : sans concentration, FooDB cite un gabarit générique, pas une
+  composition mesurée pour cet aliment précis, et retombe sur la table de seuils GLOBALE
+  (poids identiques entre aliments sans lien). 345/847 candidats avec ≥1 composé
+  whitelisté écartés sur le dump réel (992 aliments au total, 141 sans aucun composé
+  whitelisté, ~510 notes distinctes conservées).
+  **Descripteurs auto-dérivés testés et rejetés** : agréger les descripteurs Flavornet des
+  molécules d'une note (même pondérés par IDF, même restreints aux composés distinctifs
+  post-filtre) reproduit la même dégénérescence — converge vers les mêmes mots génériques
+  entre notes sans rapport, ou devient vide dès qu'on restreint aux seuls composés à
+  concentration réelle. Confirmé PAS viable ; voir `matching.contrast`.
+  `note_descriptors` est donc VIDE par défaut pour toute note — `amplify`/`combine`
+  fonctionnent en molécules-seules pour toutes les notes désormais (plus de traitement
+  spécial pour un sous-ensemble curé). **`contrast` généralisé par sélection manuelle** :
+  `matching.contrast(con, descriptors=[...])` laisse l'utilisateur décrire sa note à la
+  main (vocabulaire réel `hop_descriptors`, comme `by_descriptor`) au lieu d'exiger
+  `note_descriptors` — fonctionne pour N'IMPORTE QUELLE note sans rien inventer côté
+  données ; `contrast(note=...)` reste disponible mais lève `ValueError` tant que
+  `note_descriptors` n'est pas peuplé pour cette note (jamais par défaut désormais).
+  `matching.contrast_blend` propose en plus une combinaison parcimonieuse (couverture
+  ensembliste gloutonne sur `hop_descriptors`, PAS de NNLS — contrast reste
+  non-moléculaire) avec résidu rapporté.
   Voir `tools/{audit_foodb,foodb_impact_check}.py`.
 - **Flavornet** : 738 composés odeur-actifs (GC-O) + descripteurs, 734 CAS uniques
   (page HTML statique unique `d_kovats_ov101.html`, pas de pagination). Sert de whitelist
@@ -145,13 +154,14 @@ filet de sécurité, pas une valeur active.
 
 ## Prochaines tâches (ordre d'utilité)
 Fait : `ingest.ingest_flavornet`, `ingest.ingest_foodb` (généralisé à `all_foods=True` par défaut
-+ filtre de distinctivité + `download_foodb_dump` automatique), `by-descriptor`,
-`ingest.crawl_yakima`, `ingest.ingest_flavordb2`, `ingest.resolve_pubchem_cids` (jointure
-structurale CAS->CID + repli sur le nom, voir `docs/FEATURE_NOTES.md` pour le détail de spec de
-by-descriptor), option `--biotransform` (`amplify`/`combine`, portée étroite — voir décision
-ci-dessus), GUI Streamlit (`src/hopmatch/app.py`), `contrast`/`contrast_blend` généralisés par
-sélection manuelle de descripteurs (`matching.contrast(descriptors=[...])`, sans dépendre de
-`note_descriptors`). Reste :
++ filtre de distinctivité + `download_foodb_dump` automatique — seule source de notes du
+pipeline, amorce littérature retirée), `by-descriptor`, `ingest.crawl_yakima`,
+`ingest.ingest_flavordb2`, `ingest.resolve_pubchem_cids` (jointure structurale CAS->CID + repli
+sur le nom, voir `docs/FEATURE_NOTES.md` pour le détail de spec de by-descriptor), option
+`--biotransform` (`amplify`/`combine`, portée étroite — voir décision ci-dessus), GUI Streamlit
+(`src/hopmatch/app.py`), `contrast`/`contrast_blend` généralisés par sélection manuelle de
+descripteurs (`matching.contrast(descriptors=[...])`, sans dépendre de `note_descriptors`).
+Reste :
 1. Jointure FooDB/hop_composition au-delà des ~734 composés Flavornet si le vocabulaire
    s'élargit beaucoup (crawl Yakima déjà réel, plus d'aliments FooDB).
 2. Extension de `reference.BIOTRANSFORMATIONS` SI une étude comparant des souches
@@ -171,5 +181,8 @@ sélection manuelle de descripteurs (`matching.contrast(descriptors=[...])`, san
 - Commentaires/docstrings en français (cohérent avec l'existant).
 - Ne jamais fabriquer de données houblon en dur : passer par un parseur + source tracée.
 - `pytest` doit rester vert. Ajouter un test quand on touche un solveur ou un parseur.
-- Commandes : `pip install -e ".[dev]"` ; `pytest -q` ; `hopmatch build` puis
-  `hopmatch amplify|contrast|combine <note>` ou `hopmatch by-descriptor <descripteurs>`.
+- Commandes : `pip install -e ".[dev]"` ; `pytest -q` ; `hopmatch build` (démo, 4 houblons,
+  0 note — `build` ne seed plus de note, seul `ingest-foodb` en crée) puis `hopmatch
+  ingest-flavornet` puis `hopmatch ingest-foodb` (télécharge le dump si besoin) avant de
+  pouvoir utiliser `hopmatch amplify|contrast|combine <note>` ; `hopmatch by-descriptor
+  <descripteurs>` ne dépend d'aucune note et fonctionne dès `build`.

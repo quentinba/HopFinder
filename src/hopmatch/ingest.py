@@ -30,16 +30,13 @@ from .schema import init_db, validate_and_repair, DROP_COMPOUNDS
 
 
 # --------------------------------------------------------------------------- #
-# Référence (couche note) — amorce
+# Référence (couche molécule/descripteur — pas de notes, voir reference.py)
 # --------------------------------------------------------------------------- #
 def seed_reference(con: sqlite3.Connection) -> None:
+    """Charge les propriétés molécule (reference.MOLECULES : odeur/seuil/CID).
+    Ne seed plus aucune note : toutes les notes viennent d'ingest_foodb."""
     con.executemany("INSERT OR REPLACE INTO molecules VALUES (?,?,?,?)",
                     [(c, o, t, cid) for c, (o, t, cid) in reference.MOLECULES.items()])
-    con.executemany("INSERT OR REPLACE INTO aroma_notes VALUES (?,?,?,?)",
-                    [(n, m, w, "seed:litt")
-                     for n, prof in reference.AROMA_NOTES.items() for m, w in prof.items()])
-    con.executemany("INSERT OR REPLACE INTO note_descriptors VALUES (?,?)",
-                    [(n, d) for n, ds in reference.NOTE_DESCRIPTORS.items() for d in ds])
 
 
 # --------------------------------------------------------------------------- #
@@ -619,55 +616,50 @@ def ingest_foodb(out_db: str, foodb_csv_dir: str | None = None,
                  notes: dict[str, str] | None = None, all_foods: bool = True,
                  chunksize: int = 300_000) -> None:
     """
-    Remplace/enrichit l'amorce note->molécule par le dump bulk FooDB (foodb.ca),
-    FILTRÉ via la whitelist Flavornet (ingest_flavornet doit avoir tourné avant :
-    sinon >90% des ~6000 composés/aliment sont du bruit nutritionnel, cf. CLAUDE.md
-    et tools/audit_foodb.py).
+    Peuple note->molécule depuis le dump bulk FooDB (foodb.ca), FILTRÉ via la
+    whitelist Flavornet (ingest_flavornet doit avoir tourné avant : sinon >90%
+    des ~6000 composés/aliment sont du bruit nutritionnel, cf. CLAUDE.md et
+    tools/audit_foodb.py). Seule source de notes du pipeline (pas d'amorce
+    littérature à fusionner : reference.AROMA_NOTES/NOTE_DESCRIPTORS/
+    NOTE_TO_FOODB ont existé puis ont été retirés une fois ce pipeline
+    suffisant — décision explicite : une seule source de vérité par note).
 
     `foodb_csv_dir` : dossier du dump CSV déjà extrait. Si `None` (défaut),
     `download_foodb_dump()` le télécharge et l'extrait automatiquement dans
     `FOODB_DUMP_DIR` (idempotent : ne retélécharge pas s'il est déjà présent) —
     l'utilisateur n'a plus besoin de récupérer le dump à la main.
 
-    `notes` : {note: nom Food.csv} — surcharge de nommage pour les notes de
-    l'amorce littérature (reference.NOTE_TO_FOODB par défaut : "basilic" ->
-    "Sweet basil", etc., les seules correspondances propres identifiées sur le
-    dump 2020-04-07 ; yuzu/rose/pin-resine restent volontairement hors mapping,
-    voir le commentaire associé). Le profil moléculaire de ces notes-là fusionne
-    l'amorce littérature ET FooDB.
+    `notes` : {note: nom Food.csv} — surcharge de nommage OPTIONNELLE et
+    ADDITIVE (vide par défaut) : ajoute une note sous un nom choisi (fusionnant
+    alors le profil `all_foods`, s'il en génère un pour le même aliment, avec
+    ce nom-là AUSSI — les deux noms coexistent, ni l'un ni l'autre n'écrase
+    l'autre : `food_entries` est une LISTE de (food_id, note, is_curated), pas
+    un dict par food_id, précisément pour permettre à un même aliment de porter
+    plusieurs notes plutôt que la dernière écrite gagne silencieusement).
 
-    `all_foods` (True par défaut) : au-delà de cette surcharge, ingère AUSSI
-    tous les autres aliments de Food.csv (~1000 sur le dump 2020-04-07) comme
-    note à part entière, nom = celui de Food.csv en minuscule. Pipeline non
-    supervisé : rien dans le filtrage/pondération FooDB n'est spécifique aux
-    7 notes curées, c'est uniquement `notes` qui restreignait artificiellement
-    la couverture.
+    `all_foods` (True par défaut) : parcourt tout `Food.csv` (~1000 aliments
+    sur le dump 2020-04-07) et crée une note par aliment, nom = celui de
+    Food.csv en minuscule. Pipeline non supervisé : rien dans le
+    filtrage/pondération FooDB n'est spécifique à une note en particulier.
 
-    **Filtre de distinctivité** (notes auto-dérivées uniquement, jamais sur les
-    notes curées) : un aliment est écarté s'il n'a AUCUN composé à concentration
-    mesurée (`foodb:conc`) — vérifié sur le dump réel que deux aliments sans
-    rapport (capers/chervil) partagent 99,2% de leurs composés listés (FooDB cite
-    souvent un gabarit générique plutôt qu'une composition mesurée pour cet
-    aliment précis) ; sans concentration, tout retombe sur la table de seuils
-    GLOBALE, donnant des poids identiques à deux aliments sans lien. Sur le dump
-    2020-04-07 : 345 des 847 candidats auto-dérivés avec au moins un composé
-    whitelisté (41%) écartés par ce filtre (992 aliments au total, 141 sans
-    aucun composé whitelisté — voir `no_hit` ci-dessous, 502 auto-dérivés
-    distinctifs conservés). Limite honnête de ces ~502 restants : pas de
-    `note_descriptors` ni de `reference.CONTRAST_AFFINITY` (curés à la main
-    pour les 7 notes littérature seulement) — `amplify`/`combine` dégradent
-    proprement en scoring molécules-seules, `contrast` lève une ValueError
-    explicite pour elles (matching.contrast) plutôt qu'un résultat vide
-    silencieux qui laisserait croire qu'aucun houblon ne contraste.
-    `all_foods=False` retombe sur le comportement restreint (démo/tests rapides).
-
-    FUSIONNE avec l'amorce existante par (note, molécule) au lieu de l'effacer :
-    FooDB est lacunaire (14-16% des liens ont une concentration, cf. audit) et peut
-    rater des composés-signature que l'amorce littérature connaît. Écraser l'amorce
-    perdrait cette information ; on ne remplace donc que les molécules que FooDB
-    fournit réellement, molécule par molécule (voir aussi _canonical_compound : les
-    synonymes/préfixes grecs Flavornet sont réalignés sur le vocabulaire houblon
-    existant, pour fusionner plutôt que dupliquer une même molécule sous deux noms).
+    **Filtre de distinctivité** (n'épargne QUE les entrées de `notes`, si
+    fournies — sinon s'applique à tout) : un aliment est écarté s'il n'a AUCUN
+    composé à concentration mesurée (`foodb:conc`) — vérifié sur le dump réel
+    que deux aliments sans rapport (capers/chervil) partagent 99,2% de leurs
+    composés listés (FooDB cite souvent un gabarit générique plutôt qu'une
+    composition mesurée pour cet aliment précis) ; sans concentration, tout
+    retombe sur la table de seuils GLOBALE, donnant des poids identiques à deux
+    aliments sans lien. Sur le dump 2020-04-07 (all_foods, sans surcharge
+    `notes`) : 345 des 847 candidats avec au moins un composé whitelisté (41%)
+    écartés par ce filtre (992 aliments au total, 141 sans aucun composé
+    whitelisté — voir `no_hit` ci-dessous, ~510 notes distinctes conservées).
+    Limite honnête : aucune note (curée ou non) n'a de `note_descriptors` par
+    défaut désormais — `amplify`/`combine` fonctionnent en scoring
+    molécules-seules pour toutes, `contrast` par `note` lève une ValueError
+    explicite (matching.contrast) plutôt qu'un résultat vide silencieux ;
+    `contrast` reste utilisable via une sélection manuelle de descripteurs
+    (`matching.contrast(descriptors=[...])`, indépendante des notes).
+    `all_foods=False` restreint à `notes` seul (démo/tests rapides).
 
     Poids : concentration (mg/100g, familles d'unités comparables uniquement, cf.
     parsers.mass_mg_per_100g) là où elle existe, sinon prior de seuil (1/seuil_ppb,
@@ -680,7 +672,7 @@ def ingest_foodb(out_db: str, foodb_csv_dir: str | None = None,
 
     if foodb_csv_dir is None:
         foodb_csv_dir = download_foodb_dump()
-    notes = notes or reference.NOTE_TO_FOODB
+    notes = notes or {}
     con = connect(out_db)
     if not con.execute("SELECT name FROM sqlite_master WHERE name='hops'").fetchone():
         init_db(con); seed_reference(con); con.commit()
@@ -706,21 +698,23 @@ def ingest_foodb(out_db: str, foodb_csv_dir: str | None = None,
                              "WHERE threshold_ppb IS NOT NULL")}
 
     fdf = pd.read_csv(_find_csv(foodb_csv_dir, "food"), usecols=["id", "name"])
-    food_id_to_note = {}
+    # Liste de (food_id, note, is_curated), PAS un dict food_id->note : un même
+    # aliment peut légitimement porter DEUX notes distinctes (ex. "mangue",
+    # curée + fusionnée à l'amorce littérature, ET "mango", auto-dérivée pure
+    # FooDB) — la surcharge de nommage `notes` est additive, pas un
+    # remplacement. Un dict écraserait silencieusement l'une des deux.
+    food_entries: list[tuple[int, str, bool]] = []
     for note, food_name in notes.items():
         m = fdf[fdf["name"].str.lower() == food_name.lower()]
         if m.empty:
             print(f"  !! {note!r} : aliment {food_name!r} introuvable dans Food.csv, ignoré")
             continue
-        food_id_to_note[int(m.iloc[0]["id"])] = note
-    n_curated = len(food_id_to_note)
-    curated_food_ids = set(food_id_to_note)
+        food_entries.append((int(m.iloc[0]["id"]), note, True))
+    n_curated = len(food_entries)
     if all_foods:
         for _, r in fdf.iterrows():
-            fid = int(r["id"])
-            if fid not in food_id_to_note:
-                food_id_to_note[fid] = str(r["name"]).strip().lower()
-    if not food_id_to_note:
+            food_entries.append((int(r["id"]), str(r["name"]).strip().lower(), False))
+    if not food_entries:
         print("Aucun aliment résolu, rien à ingérer."); con.close(); return
 
     cdf = pd.read_csv(_find_csv(foodb_csv_dir, "compound"))
@@ -728,7 +722,7 @@ def ingest_foodb(out_db: str, foodb_csv_dir: str | None = None,
     cdf["_cas"] = cdf[cas_col].astype(str).str.strip()
     cdf = cdf[cdf["_cas"].isin(whitelist)]
     compound_id_to_cas = dict(zip(cdf["id"], cdf["_cas"]))
-    target_food_ids = set(food_id_to_note)
+    target_food_ids = {fid for fid, _, _ in food_entries}
     target_compound_ids = set(compound_id_to_cas)
 
     usecols = ["source_type", "food_id", "source_id", "orig_content", "orig_unit"]
@@ -748,11 +742,11 @@ def ingest_foodb(out_db: str, foodb_csv_dir: str | None = None,
                        zip(content["orig_content"], content["orig_unit"])]
     best = content.groupby(["food_id", "source_id"])["mass"].max().reset_index()
     # groupby unique (au lieu d'un filtre par aliment répété dans la boucle) :
-    # nécessaire dès que food_id_to_note passe de 7 à ~1000 entrées.
+    # nécessaire dès que food_entries passe de 7 à ~1000+ entrées.
     by_food = {fid: g for fid, g in best.groupby("food_id")}
 
     written, no_hit, no_signal, kept_curated, kept_auto = 0, [], [], 0, 0
-    for food_id, note in food_id_to_note.items():
+    for food_id, note, is_curated in food_entries:
         sub = by_food.get(food_id)
         if sub is None or sub.empty:
             no_hit.append(note); continue
@@ -771,7 +765,6 @@ def ingest_foodb(out_db: str, foodb_csv_dir: str | None = None,
         # composés produisent alors des poids identiques, sans signal food-specific.
         # Exiger >=1 composé en palier concentration (mesure réelle pour CET aliment,
         # pas un seuil partagé) écarte ce bruit.
-        is_curated = food_id in curated_food_ids
         if not is_curated:
             has_conc = any(mass and mass > 0 for _, mass, _ in recs)
             if not has_conc:
@@ -792,10 +785,9 @@ def ingest_foodb(out_db: str, foodb_csv_dir: str | None = None,
             kept_auto += 1
     con.commit(); con.close()
     # kept_curated + kept_auto (comptés au fil de la boucle, pas dérivés par
-    # soustraction) : dériver "aliments gardés" depuis len(food_id_to_note) en ne
-    # soustrayant que no_signal, sans soustraire aussi no_hit, avait donné un
-    # total FAUX (647 au lieu de 506 sur un run réel — no_hit était doublement
-    # absent du compte final, jamais soustrait).
+    # soustraction) : une version antérieure dérivait "aliments gardés" par
+    # soustraction et avait donné un total FAUX (647 au lieu de 506 sur un run
+    # réel — un des deux motifs d'exclusion n'était jamais soustrait).
     print(f"FooDB : {written} liens note->molécule ingérés sur "
          f"{kept_curated + kept_auto} aliments "
          f"({kept_curated} curés, {kept_auto} auto-dérivés distinctifs de Food.csv).")

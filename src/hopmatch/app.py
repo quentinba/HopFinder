@@ -65,29 +65,15 @@ def _amplify(con, note):
 
 
 def _contrast(con):
-    # contrast n'a de note_descriptors curés que pour les 7 notes littérature
-    # (voir matching.contrast) : les notes auto-dérivées de FooDB n'en ont pas et
-    # ça ne peut pas être dérivé fiablement (données FooDB majoritairement
-    # génériques, cf. docs/DATA_SOURCES.md). Plutôt qu'échouer sur ces notes-là,
-    # on laisse l'utilisateur décrire sa note à la main avec le vocabulaire réel
-    # de la roue d'arôme (même source que by-descriptor) — généralise contrast à
+    # contrast a besoin de note_descriptors pour une note, table vide par
+    # défaut (pas d'amorce littérature dans ce projet, cf. reference.py) —
+    # l'utilisateur décrit donc sa note à la main avec le vocabulaire réel de
+    # la roue d'arôme (même source que by-descriptor), ce qui fonctionne pour
     # n'importe quelle note sans rien inventer.
-    source = st.radio("Décrire la note via", ["note curée (amorce littérature)",
-                                              "sélection manuelle de descripteurs"])
-    if source.startswith("note"):
-        notes = _notes(con)
-        if not notes:
-            st.error("Aucune note en base."); return
-        note = st.selectbox("Note", notes)
-        try:
-            r = matching.contrast(con, note=note)
-        except ValueError as e:
-            st.error(str(e)); return
-    else:
-        selected = st.multiselect("Descripteurs de la note à contraster", _descriptors(con))
-        if not selected:
-            st.write("Choisis au moins un descripteur."); return
-        r = matching.contrast(con, descriptors=selected)
+    selected = st.multiselect("Descripteurs de la note à contraster", _descriptors(con))
+    if not selected:
+        st.write("Choisis au moins un descripteur."); return
+    r = matching.contrast(con, descriptors=selected)
 
     st.caption("Cible d'affinité : " + ", ".join(r["affinity_target"]))
     if not r["ranked"]:
@@ -101,10 +87,7 @@ def _contrast(con):
 
     st.subheader("Proposer un blend")
     max_hops = st.slider("Nombre de houblons max", 1, 6, 3)
-    if source.startswith("note"):
-        blend = matching.contrast_blend(con, note=note, max_hops=max_hops)
-    else:
-        blend = matching.contrast_blend(con, descriptors=selected, max_hops=max_hops)
+    blend = matching.contrast_blend(con, descriptors=selected, max_hops=max_hops)
     if not blend["blend"]:
         st.write("Aucune combinaison trouvée.")
         return

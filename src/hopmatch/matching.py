@@ -170,17 +170,19 @@ def amplify(con, note: str, w_mol: float = 0.5, w_desc: float = 0.5, use_oav=Fal
 # --------------------------------------------------------------------------- #
 def contrast(con, note: str | None = None, descriptors: list[str] | None = None, top=8):
     """
-    `note` : notes de l'amorce littérature (note_descriptors curés à la main, 7
-    notes) — lève ValueError si la note n'en a pas (notes auto-dérivées FooDB,
-    voir ingest_foodb : pas de moyen fiable de dériver des descripteurs depuis
-    des données FooDB majoritairement génériques, cf. docs/DATA_SOURCES.md).
+    `note` : nécessite que `note_descriptors` contienne déjà des descripteurs
+    pour cette note — lève ValueError sinon. Aucune note n'en a par défaut
+    (pas d'amorce littérature dans ce projet, cf. reference.py : dériver ça
+    depuis FooDB a été tenté et rejeté, données trop génériques, voir
+    docs/DATA_SOURCES.md) ; `note_descriptors` reste peuplable manuellement
+    (hors de ce module) pour qui veut ce raccourci sur une note précise.
 
     `descriptors` : sélection manuelle par l'utilisateur (contourne
-    note_descriptors entièrement) — généralise contrast à N'IMPORTE QUELLE note,
-    curée ou non, tant que l'utilisateur sait décrire son goût avec le
-    vocabulaire réel de la roue d'arôme (même vocabulaire que `by_descriptor`,
-    grounded sur `hop_descriptors`, pas inventé). Prioritaire sur `note` si les
-    deux sont fournis.
+    note_descriptors entièrement) — le chemin normal de `contrast`, fonctionne
+    pour N'IMPORTE QUELLE note tant que l'utilisateur sait décrire son goût
+    avec le vocabulaire réel de la roue d'arôme (même vocabulaire que
+    `by_descriptor`, grounded sur `hop_descriptors`, pas inventé). Prioritaire
+    sur `note` si les deux sont fournis.
     """
     hops, comp, hop_desc, _ = load(con)
     if descriptors:
@@ -191,16 +193,15 @@ def contrast(con, note: str | None = None, descriptors: list[str] | None = None,
         ndesc = get_note_descriptors(con, note)
         if not ndesc:
             raise ValueError(
-                f"contrast indisponible pour {note!r} : pas de descripteurs curés "
-                f"(note_descriptors). Ce mode ne couvre que l'amorce littérature "
-                f"(reference.NOTE_DESCRIPTORS/CONTRAST_AFFINITY, curées à la main) — "
-                f"pas les notes auto-dérivées de FooDB. Passer `descriptors=` pour "
+                f"contrast indisponible pour {note!r} : pas de descripteurs dans "
+                f"note_descriptors pour cette note (table vide par défaut, aucune "
+                f"amorce littérature dans ce projet). Passer `descriptors=` pour "
                 f"décrire la note à la main (voir `hopmatch descriptors`), ou "
                 f"essayer amplify/combine.")
         label = note
     else:
-        raise ValueError("contrast nécessite soit `note` (note curée), soit "
-                         "`descriptors` (sélection manuelle).")
+        raise ValueError("contrast nécessite soit `note` (avec note_descriptors "
+                         "peuplé), soit `descriptors` (sélection manuelle).")
     # descripteurs qui contrastent bien avec ceux de la note
     target = set()
     for d in ndesc:
