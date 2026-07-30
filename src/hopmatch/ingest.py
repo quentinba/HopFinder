@@ -542,9 +542,17 @@ FOODB_DUMP_DIR = "data/foodb_2020_04_07_csv"
 def _extract_foodb_tarball(tar_path: str, extract_root: str) -> None:
     """Extraction pure (testable sans réseau) : sépare le téléchargement de son
     dépaquetage. `filter="data"` (PEP 706) écarte les chemins absolus/`..` d'une
-    archive malveillante — défense en profondeur pour un fichier tiers distant."""
+    archive malveillante — défense en profondeur pour un fichier tiers distant.
+
+    Mode `"r:*"` (auto-détection), PAS `"r:gz"` : vérifié sur le fichier réel
+    (`file` + `tar -tvf`) que `foodb_2020_4_7_csv.tar.gz` est en fait un tar
+    NON compressé malgré son nom (`.tar.gz` trompeur côté foodb.ca — même le
+    magic number diffère : `._foodb_2020_04_07_csv` en tête, pas 0x1f 0x8b).
+    `"r:gz"` échouait donc systématiquement (`BadGzipFile`) quel que soit le
+    téléchargement ; `"r:*"` fonctionne pour ce cas réel et resterait correct
+    si foodb.ca compressait un jour vraiment le fichier."""
     import tarfile
-    with tarfile.open(tar_path, "r:gz") as tar:
+    with tarfile.open(tar_path, "r:*") as tar:
         tar.extractall(extract_root, filter="data")
 
 
@@ -555,9 +563,11 @@ def download_foodb_dump(dest_dir: str = FOODB_DUMP_DIR, url: str = FOODB_DUMP_UR
     localement, pour que `ingest_foodb` fonctionne sans étape manuelle de
     téléchargement. Dump figé au 2020-04-07 (dernière version publique du site,
     vérifié : `foodb.ca/public/system/downloads/...` répond 200 sans authentification),
-    ~950 Mo compressé (tar.gz), extrait ~2,3 Go. Licence **CC BY-NC-SA (non
-    commerciale)** — voir CLAUDE.md/README, ce script ne contourne aucune
-    protection, le lien est celui exposé publiquement par le site.
+    ~950 Mo (malgré le nom `.tar.gz`, c'est un tar NON compressé côté serveur —
+    vérifié via `file`/`tar -tvf` sur le fichier réel, voir `_extract_foodb_tarball`
+    — donc extrait ~950 Mo aussi, pas de gain de compression à attendre). Licence
+    **CC BY-NC-SA (non commerciale)** — voir CLAUDE.md/README, ce script ne
+    contourne aucune protection, le lien est celui exposé publiquement par le site.
 
     Idempotent : si `dest_dir/Food.csv` existe déjà, ne retélécharge rien (sauf
     `force=True`). Le tar.gz est écrit dans un fichier temporaire (jamais dans
