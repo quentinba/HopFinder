@@ -148,36 +148,97 @@ def test_parse_yakima_hit():
     assert region == "United Kingdom"
     assert descriptors == ["orange", "resinous", "tea"]
     # Ce gabarit est la variété Admiral RÉELLE (vérifié en direct sur l'index
-    # Algolia YCH) : son entrée ARO01 (HopAroma) a un alpha 54-62% chimiquement
-    # impossible (aucune variété commerciale ne dépasse ~25%) -> rejetée par
-    # _is_plausible_brewing_entry, composition prise sur PEL02 à la place
-    # (alpha 13-16%, cohérent avec BarthHaas pour cette même variété).
+    # Algolia YCH). PEL02 (Type 90 Pellets) gagne par priorité normale (voir
+    # _BREWING_VALUE_PRIORITY) — pas seulement parce que ARO01 (HopAroma) a un
+    # alpha 54-62% chimiquement impossible (aucune variété commerciale ne
+    # dépasse ~25%, cf. test dédié à la plausibilité), mais parce que PEL02 est
+    # la forme préférée par défaut de toute façon.
     assert comp["myrcene"] == (39.0, 48.0, "pct_oil")
     assert comp["alpha_acid"] == (13.0, 16.0, "pct")
     assert "beta-pinene" not in comp   # absent de l'entrée PEL02 de ce gabarit
     assert "total_oil" not in comp     # idem
     assert "selinene" not in comp  # low/high = None -> pas ingéré
 
-def test_parse_yakima_hit_falls_back_without_aro01():
+def test_parse_yakima_hit_prefers_pel02_over_everything():
+    # vérifié sur les 152 variétés réelles de l'index Algolia YCH : PEL02
+    # (Type 90 Pellets, la forme que le brasseur utilise réellement) existe
+    # sur 148/152 ; ARO01 n'existe que sur 1/152 (admiral, et corrompue). PEL02
+    # doit gagner même face à un ARO01 par ailleurs parfaitement plausible —
+    # ce n'est pas juste un repli sur échec de plausibilité, c'est la priorité
+    # normale (`_BREWING_VALUE_PRIORITY`).
+    hit = {
+        "url": "/variety/normal-hop",
+        "imported_fields": {
+            "display_name": "Normal Hop", "aromas": [],
+            "brewing_values": [
+                {"code": "ARO01", "alpha": {"low": 10, "ave": 12, "high": 14},
+                 "oil": {"low": 1, "ave": 1.5, "high": 2}},
+                {"code": "PEL02", "alpha": {"low": 11, "ave": 13, "high": 15},
+                 "oil": {"low": 1.2, "ave": 1.6, "high": 2.1}},
+            ],
+        },
+    }
+    _, _, _, comp, _ = parsers.parse_yakima_hit(hit)
+    assert comp["total_oil"] == (1.2, 2.1, "ml_100g")  # PEL02, pas ARO01
+
+def test_parse_yakima_hit_falls_back_to_con02_without_pel02():
     hit = {
         "url": "/variety/blend-x",
         "imported_fields": {
             "display_name": "Blend X", "aromas": [],
-            "brewing_values": [{"code": "PEL02", "myrcene": {"low": 10, "ave": 12, "high": 14}}],
+            "brewing_values": [{"code": "CON02", "myrcene": {"low": 10, "ave": 12, "high": 14}}],
         },
     }
     _, _, _, comp, _ = parsers.parse_yakima_hit(hit)
     assert comp["myrcene"] == (10.0, 14.0, "pct_oil")
 
-def test_parse_yakima_hit_rejects_implausible_aro01_alpha_acid():
-    # gabarit calqué EXACTEMENT sur la variété 'admiral' réelle (vérifié en
-    # direct sur l'index Algolia YCH) : l'entrée ARO01 annonce alpha 54-62%
-    # (chimiquement impossible, aucune variété commerciale ne dépasse ~25%) et
-    # oil 5-9 ml/100g, tandis que les 3 entrées produit (CON02/CON04/PEL02,
-    # mutuellement cohérentes) s'accordent à alpha 13-16% / oil 1-1.7 ml/100g —
-    # confirmé indépendamment par BarthHaas (1,0-1,7). Sans garde-fou, ARO01
-    # est choisie aveuglément et gonfle total_oil, donc amount() pour CHAQUE
-    # composé de cette variété.
+def test_parse_yakima_hit_avoids_derivative_products_like_cryo_or_co2_extract():
+    # PEL06 (Cryo Hops, lupuline concentrée) et EXT01 (extrait CO2) sont des
+    # produits dérivés à composition fondamentalement différente (alpha/huile
+    # bien plus concentrés) — pas "le même houblon dans un autre emballage".
+    # Ne doivent être choisis que si RIEN d'autre n'existe pour la variété.
+    hit = {
+        "url": "/variety/derivative-only",
+        "imported_fields": {
+            "display_name": "Derivative Only", "aromas": [],
+            "brewing_values": [
+                {"code": "EXT01", "alpha": {"low": 58, "ave": 61, "high": 64},
+                 "oil": {"low": 3, "ave": 4.5, "high": 6}},
+                {"code": "PEL06", "alpha": {"low": 21, "ave": 24.5, "high": 28},
+                 "oil": {"low": 2, "ave": 4, "high": 6}},
+                {"code": "PEL02", "alpha": {"low": 10, "ave": 13, "high": 16},
+                 "oil": {"low": 1, "ave": 2, "high": 3}},
+            ],
+        },
+    }
+    _, _, _, comp, _ = parsers.parse_yakima_hit(hit)
+    assert comp["total_oil"] == (1.0, 3.0, "ml_100g")  # PEL02, pas EXT01/PEL06
+
+def test_parse_yakima_hit_rejects_implausible_aro01_in_favor_of_other_plausible_entry():
+    # ARO01 (implausible, alpha 54-62%) et PEL06 (Cryo, un produit dérivé donc
+    # hors _BREWING_VALUE_PRIORITY mais plausible) : aucun code prioritaire
+    # n'est utilisable ici, donc on retombe sur "la première entrée plausible
+    # qui reste" (PEL06) plutôt que sur ARO01 malgré son rang de priorité —
+    # la plausibilité prime toujours sur la position dans la liste.
+    hit = {
+        "url": "/variety/admiral-like",
+        "imported_fields": {
+            "display_name": "Admiral-like", "aromas": [],
+            "brewing_values": [
+                {"code": "ARO01", "alpha": {"low": 54, "ave": 58, "high": 62},
+                 "oil": {"low": 5, "ave": 7, "high": 9}},
+                {"code": "PEL06", "alpha": {"low": 21, "ave": 24.5, "high": 28},
+                 "oil": {"low": 2, "ave": 4, "high": 6}},
+            ],
+        },
+    }
+    _, _, _, comp, _ = parsers.parse_yakima_hit(hit)
+    assert comp["total_oil"] == (2.0, 6.0, "ml_100g")  # PEL06, pas ARO01
+
+def test_parse_yakima_hit_uses_sole_implausible_entry_as_last_resort():
+    # aucune entrée plausible du tout : on préfère quand même la retenir
+    # (variété suspecte) plutôt que la faire disparaître silencieusement de
+    # la base — comportement volontairement conservé de la version précédente.
     hit = {
         "url": "/variety/admiral",
         "imported_fields": {
@@ -186,33 +247,28 @@ def test_parse_yakima_hit_rejects_implausible_aro01_alpha_acid():
                 {"code": "ARO01", "alpha": {"low": 54, "ave": 58, "high": 62},
                  "oil": {"low": 5, "ave": 7, "high": 9},
                  "myrcene": {"low": 48, "ave": 51, "high": 54}},
+            ],
+        },
+    }
+    _, _, _, comp, _ = parsers.parse_yakima_hit(hit)
+    assert comp["total_oil"] == (5.0, 9.0, "ml_100g")
+
+def test_parse_yakima_hit_pel02_implausible_falls_back_to_con02():
+    # la plausibilité s'applique à N'IMPORTE QUEL code, pas seulement ARO01.
+    hit = {
+        "url": "/variety/bad-pel02",
+        "imported_fields": {
+            "display_name": "Bad Pel02", "aromas": [],
+            "brewing_values": [
+                {"code": "PEL02", "alpha": {"low": 50, "ave": 55, "high": 60},
+                 "oil": {"low": 5, "ave": 7, "high": 9}},
                 {"code": "CON02", "alpha": {"low": 13, "ave": 14.5, "high": 16},
-                 "oil": {"low": 1, "ave": 1.4, "high": 1.7},
-                 "myrcene": {"low": 39, "ave": 43.5, "high": 48}},
-                {"code": "PEL02", "alpha": {"low": 13, "ave": 14.5, "high": 16},
-                 "oil": {"low": 1, "ave": 1.4, "high": 1.7},
-                 "myrcene": {"low": 39, "ave": 43.5, "high": 48}},
+                 "oil": {"low": 1, "ave": 1.4, "high": 1.7}},
             ],
         },
     }
     _, _, _, comp, _ = parsers.parse_yakima_hit(hit)
     assert comp["total_oil"] == (1.0, 1.7, "ml_100g")
-    assert comp["myrcene"] == (39.0, 48.0, "pct_oil")
-
-def test_parse_yakima_hit_keeps_aro01_when_plausible():
-    _, _, _, comp, _ = parsers.parse_yakima_hit({
-        "url": "/variety/normal-hop",
-        "imported_fields": {
-            "display_name": "Normal Hop", "aromas": [],
-            "brewing_values": [
-                {"code": "ARO01", "alpha": {"low": 10, "ave": 12, "high": 14},
-                 "oil": {"low": 1, "ave": 1.5, "high": 2}},
-                {"code": "PEL02", "alpha": {"low": 10, "ave": 12, "high": 14},
-                 "oil": {"low": 1, "ave": 1.5, "high": 2}},
-            ],
-        },
-    })
-    assert comp["total_oil"] == (1.0, 2.0, "ml_100g")
 
 def test_pubchem_name_fallbacks():
     # échantillons réels : CAS non résolus par PubChem, noms Flavornet en cause

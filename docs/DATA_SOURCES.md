@@ -32,17 +32,25 @@
   fusionnerait jamais avec le slug BarthHaas (`citra`). Mais le catalogue a aussi de vrais
   doublons de SKU sans rapport (`perle` ET `perle-per03` coexistent) — `crawl_yakima` ne
   déprefixe `-brand` que hors collision avec un autre slug du même lot.
-- **Piège qualité vérifié en direct** : `parse_yakima_hit` préfère l'entrée
-  `brewing_values[code=ARO01]` ('HopAroma') aux entrées produit (pellets/leaf/baled) — sauf
-  que pour `admiral`, cette entrée est CORROMPUE côté YCH lui-même (alpha 54-62%,
-  chimiquement impossible — aucune variété commerciale ne dépasse ~25% — et oil 5-9 ml/100g)
-  alors que les 3 entrées produit s'accordent entre elles à alpha 13-16% / oil 1-1,7,
-  confirmé par BarthHaas indépendamment. Sans concentration réelle plausible, `amount()`
-  gonflait chaque composé de la variété via ce total_oil erroné, la faisant remonter en
-  tête de presque tous les classements moléculaires (repéré par l'utilisateur en usage
-  réel). `parsers._is_plausible_brewing_entry` écarte une entrée dont l'alpha dépasse 30%
-  et retombe sur une entrée produit. Balayé sur les 152 variétés réelles : Admiral est la
-  SEULE affectée — anomalie isolée côté YCH, pas un bug de parsing systémique.
+- **Choix de forme produit corrigé (vérifié en direct, signalé par l'utilisateur)** :
+  `parse_yakima_hit` préférait `brewing_values[code=ARO01]` ('HopAroma'), en supposant
+  que c'était « l'analyse brute de la variété ». Faux sur le catalogue réel : ARO01
+  n'existe que sur 1/152 variétés (`admiral`), et cette entrée est CORROMPUE côté YCH
+  lui-même (alpha 54-62%, chimiquement impossible — aucune variété commerciale ne dépasse
+  ~25% — et oil 5-9 ml/100g) alors que ses 3 entrées produit s'accordent entre elles à
+  alpha 13-16% / oil 1-1,7, confirmé par BarthHaas indépendamment. Sur les 151 autres
+  variétés sans ARO01, le code retombait sur `brewing[0]`, qui résout à **CON02 (Leaf
+  Hops, Baled) dans 145/152 cas** — pas la forme utilisée en brasserie.
+  `parsers._BREWING_VALUE_PRIORITY` préfère désormais explicitement **PEL02 (Type 90
+  Pellets, présent sur 148/152 variétés, LA forme standard en brasserie — demandé par
+  l'utilisateur)**, repli CON02/CON04 puis ARO01 en dernier rang parmi les codes de
+  confiance, chaque niveau filtré par `_is_plausible_brewing_entry` (alpha ≤30%). Exclut
+  par défaut les produits dérivés à composition fondamentalement différente — PEL06 (Cryo
+  Hops®, lupuline concentrée), PEL07 (American Noble Hops®), EXT01 (extrait CO2, alpha
+  jusqu'à 64%), ARO17/19/24/25 (Boost/huile d'essai, huile jusqu'à 99%+) — sauf si c'est
+  vraiment tout ce qui existe pour une variété. Réingestion réelle : **18/152 variétés
+  changent de valeurs** (CON02 et PEL02 différaient réellement pour elles, pas juste une
+  question de source de `admiral`).
 - Statut : `ingest.crawl_yakima` implémenté. Fragile par construction (clé/index Algolia non
   documentés publiquement, peuvent changer si YCH modifie son frontend).
 

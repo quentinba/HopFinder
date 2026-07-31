@@ -121,6 +121,16 @@ et *ce qu'elle vaut*.
   uniquement lorsque ça ne rentre pas en collision avec un autre slug du même lot — sinon le
   slug reste tel quel, pour ne jamais fusionner silencieusement deux fiches distinctes.
 - **Limite.** Pas de thiols. Complémentarité exacte avec BarthHaas.
+- **Forme produit.** Chaque variété expose plusieurs analyses selon la forme commerciale
+  (`brewing_values[].code`) : pellets T90 (`PEL02`), feuille en balle/entière (`CON02`/`CON04`),
+  et des produits dérivés très différents (Cryo Hops® concentré en lupuline, extrait CO2,
+  huiles d'essai). `ingest.crawl_yakima` prend **PEL02 en priorité** — la forme réellement
+  utilisée en brasserie — avec repli sur les formes feuille (quasi toujours identiques,
+  vérifié : seulement 9/148 variétés diffèrent réellement entre les deux) plutôt que sur un
+  produit dérivé à composition différente. Chaque niveau de repli est filtré par un contrôle
+  de plausibilité (acide alpha ≤30%, aucune variété commerciale connue ne dépasse ~25%) —
+  découvert en vérifiant que la variété `admiral` avait une entrée corrompue côté YCH lui-même
+  (voir `docs/DATA_SOURCES.md`).
 
 > **Fusion.** Une variété peut recevoir des mesures des deux sources ; hopmatch les stocke
 > toutes (schéma EAV) et les *réconcilie à la lecture* (moyenne des milieux de fourchette,

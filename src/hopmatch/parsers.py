@@ -246,6 +246,24 @@ def parse_flavordb2_detail(html: str) -> tuple[list[str], float | None]:
 
 _MAX_PLAUSIBLE_ALPHA_ACID = 30.0  # aucune variété commerciale connue ne dépasse ~24-25%
 
+# Priorité de forme produit dans brewing_values[].code, vérifiée en direct sur
+# l'index Algolia YCH (152 variétés réelles) :
+#   - PEL02 (Type 90 Hop Pellets) : présent sur 148/152 variétés — LA forme
+#     commerciale standard utilisée en brasserie, celle qu'on veut par défaut.
+#   - CON02/CON04 (Leaf Hops, Baled / Whole Leaf, Packed) : quasi toujours
+#     identiques à PEL02 (myrcène/alpha/huile égaux sur tous les cas vérifiés
+#     sauf 9/148, où ça diffère réellement) — repli raisonnable si PEL02 manque.
+#   - ARO01 ('HopAroma') : présent sur SEULEMENT 1/152 variétés (Admiral) — et
+#     c'est précisément l'entrée trouvée corrompue (voir _is_plausible_brewing_entry).
+#     Repli de dernier rang parmi les codes "de confiance", pas le choix par défaut.
+# Explicitement PAS dans cette liste (donc jamais choisis sauf si c'est
+# vraiment tout ce qui existe pour une variété) : PEL06 (Cryo Hops®, lupuline
+# concentrée), PEL07 (American Noble Hops®), EXT01 (extrait CO2), ARO17/19/24/25
+# (produits "Boost"/huile pure d'essai) — des produits dérivés à composition
+# fondamentally différente (alpha jusqu'à 64%, huile jusqu'à 99%+ pour un
+# extrait pur), pas "le même houblon dans un autre emballage".
+_BREWING_VALUE_PRIORITY = ["PEL02", "CON02", "CON04", "ARO01"]
+
 
 def _is_plausible_brewing_entry(b: dict) -> bool:
     """
@@ -263,19 +281,31 @@ def _is_plausible_brewing_entry(b: dict) -> bool:
     return alpha is None or alpha <= _MAX_PLAUSIBLE_ALPHA_ACID
 
 
+def _select_brewing_entry(brewing: list[dict]) -> dict:
+    """Choisit l'entrée `brewing_values` selon `_BREWING_VALUE_PRIORITY`
+    (première présente ET plausible), puis à défaut la première entrée
+    plausible qui reste (y compris un produit dérivé, en dernier recours),
+    puis la toute première quand même (mieux vaut une variété suspecte que
+    silencieusement absente)."""
+    if not brewing:
+        return {}
+    by_code = {b.get("code"): b for b in brewing}
+    for code in _BREWING_VALUE_PRIORITY:
+        b = by_code.get(code)
+        if b and _is_plausible_brewing_entry(b):
+            return b
+    return next((b for b in brewing if _is_plausible_brewing_entry(b)), brewing[0])
+
+
 def parse_yakima_hit(hit: dict) -> tuple[str, str, str, dict, list[str]]:
     """
     Extrait (variety, name, region, comp, descriptors) d'un hit Algolia YCH
     (index contentstack--name-asc, _content_type='variety'). Renvoie comp au
     même format que parse_composition ({compound: (vmin, vmax, unit)}).
 
-    La composition vient de imported_fields.brewing_values[code='ARO01']
-    ('HopAroma', l'analyse brute de la variété) — pas d'une forme produit
-    (pellets/leaf/baled), qui ne diffère qu'en présentation, pas en variété ;
-    SAUF si cette entrée est implausible (`_is_plausible_brewing_entry`), auquel
-    cas on retombe sur une entrée produit plutôt que sur des valeurs corrompues.
-    À défaut de toute entrée plausible, la première entrée disponible quand même
-    (mieux vaut une variété suspecte que silencieusement absente).
+    La composition vient de imported_fields.brewing_values, forme produit
+    choisie par `_select_brewing_entry` (Type 90 Pellets en priorité — voir
+    `_BREWING_VALUE_PRIORITY` — pas un produit dérivé type Cryo/CO2/extrait).
     """
     imp = hit.get("imported_fields") or {}
     variety = (hit.get("url") or "").rsplit("/", 1)[-1]
@@ -284,9 +314,7 @@ def parse_yakima_hit(hit: dict) -> tuple[str, str, str, dict, list[str]]:
     descriptors = [d.strip().lower() for d in (imp.get("aromas") or []) if d and d.strip()]
 
     brewing = imp.get("brewing_values") or []
-    ordered = sorted(brewing, key=lambda b: b.get("code") != "ARO01")  # ARO01 en priorité
-    bv = next((b for b in ordered if _is_plausible_brewing_entry(b)),
-             brewing[0] if brewing else {})
+    bv = _select_brewing_entry(brewing)
     comp: dict = {}
     for field, (compound, unit) in YAKIMA_API_FIELDS.items():
         rng = bv.get(field) or {}
