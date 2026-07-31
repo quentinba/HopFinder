@@ -10,6 +10,12 @@ DEFAULT_DB = "aromahops.db"
 FIXTURES = os.path.join(os.path.dirname(__file__), "..", "..", "data", "fixtures")
 
 
+def _split_descriptors(raw: str | None) -> list[str] | None:
+    if not raw:
+        return None
+    return [d.strip().lower() for d in raw.split(",") if d.strip()]
+
+
 def _print_amplify(r):
     print(f"\n[AMPLIFY] {r['note']}  — couverture moléculaire {r['coverage']*100:.0f}%")
     if r.get("biotransform"):
@@ -104,6 +110,11 @@ def main(argv=None):
         s.add_argument("--db", default=DEFAULT_DB)
         if name == "amplify":
             s.add_argument("--oav", action="store_true", help="prior de seuil (approx.)")
+            s.add_argument("--descriptors",
+                           help="active la couche descripteurs pour cette note (vide par "
+                                "défaut, pas d'amorce littérature) : sélection manuelle sur "
+                                "le vocabulaire réel — voir `hopmatch descriptors` — séparés "
+                                "par virgule, ex: herbal,woody")
         if name == "combine":
             s.add_argument("--max-hops", type=int, default=3)
         s.add_argument("--biotransform", action="store_true",
@@ -159,11 +170,11 @@ def main(argv=None):
             print("Notes :", ", ".join(sorted(notes)))
             print("Houblons :", ", ".join(sorted(hops)))
         elif a.cmd == "amplify":
+            descriptors = _split_descriptors(a.descriptors)
             _print_amplify(matching.amplify(con, a.note.lower(), use_oav=a.oav,
-                                            biotransform=a.biotransform))
+                                            biotransform=a.biotransform, descriptors=descriptors))
         elif a.cmd in ("contrast", "contrast-blend"):
-            descriptors = ([d.strip().lower() for d in a.descriptors.split(",") if d.strip()]
-                          if a.descriptors else None)
+            descriptors = _split_descriptors(a.descriptors)
             note = a.note.lower() if a.note else None
             if a.cmd == "contrast":
                 _print_contrast(matching.contrast(con, note, descriptors))

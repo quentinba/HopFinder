@@ -317,15 +317,23 @@ un houblon qui *prolonge* le caractère.
 
 **Méthode.**
 1. Récupérer le profil moléculaire de la note (`aroma_notes` : molécule→poids) et ses
-   descripteurs (`note_descriptors`).
+   descripteurs (`note_descriptors` — vide par défaut pour toute note, voir juste en dessous).
 2. **Couche moléculaire** : score TF-IDF ci-dessus, sur les molécules que le houblon possède
    réellement. Normalisé 0-1.
 3. **Couche descripteurs** : recoupement entre les descripteurs de la note et la roue d'arôme du
    houblon (fraction des descripteurs de la note présents dans le houblon).
 4. **Score final** = `w_mol × score_moléculaire + w_desc × score_descripteurs` (0,5 / 0,5 par
-   défaut).
+   défaut) — sauf si la note n'a aucun descripteur (`note_descriptors` vide, le cas par défaut
+   pour toute note) : `w_mol=1` automatiquement plutôt que de plafonner silencieusement le
+   score à `w_mol × 100` par défaut.
 5. **Sortie** : houblons classés, avec les molécules qui contribuent le plus, la couverture, et
    les molécules orphelines (dans la note mais absentes du houblon — ici purement informatives).
+
+**Activer la couche descripteurs.** `note_descriptors` étant vide par défaut, `amplify` accepte
+aussi `descriptors=[...]` (comme `contrast`) : `hopmatch amplify mango --descriptors citrus,tropical`
+sélectionne à la main les descripteurs de la note sur le vocabulaire réel `hop_descriptors`,
+éphémère (ne persiste rien) — le seul moyen d'activer cette couche puisqu'aucune source ne
+fournit ça automatiquement (voir « pourquoi la sélection manuelle » sous `contrast`).
 
 `hopmatch amplify mango` → houblons classés par recoupement molécules/descripteurs avec le
 profil FooDB de "mango" (myrcène, terpinolène...).
@@ -573,6 +581,7 @@ hopmatch list                     # notes et houblons disponibles
 
 hopmatch amplify mango                    # cas A — prolonger
 hopmatch amplify "sweet basil" --oav      # + prior de seuil
+hopmatch amplify mango --descriptors citrus,tropical  # + couche descripteurs (sélection manuelle)
 hopmatch contrast --descriptors citrus,herbal        # cas A — contraster (sélection manuelle)
 hopmatch contrast-blend --descriptors citrus,herbal --max-hops 3   # + blend parcimonieux
 hopmatch combine mango                    # cas B — recomposer
@@ -598,8 +607,11 @@ Les quatre modes (amplify/contrast/combine/by-descriptor) et les options
 (`--oav`, `--biotransform`, `max_hops`) sont dans la barre latérale ; `app.py`
 importe directement `matching`/`schema`, pas de couche API intermédiaire. Le mode
 `contrast` remplace le sélecteur de note habituel par une sélection de descripteurs
-(vocabulaire réel `hop_descriptors`), avec un blend proposé en dessous. Pour
-pointer vers une autre base : `streamlit run src/hopmatch/app.py -- --db chemin.db`.
+(vocabulaire réel `hop_descriptors`), avec un blend proposé en dessous. Le mode
+`amplify` garde le sélecteur de note, avec en plus une sélection de descripteurs
+optionnelle (même vocabulaire) pour activer la couche descripteurs — sinon `note`
+seule donne un score 100% moléculaire. Pour pointer vers une autre base :
+`streamlit run src/hopmatch/app.py -- --db chemin.db`.
 
 ---
 

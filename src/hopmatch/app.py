@@ -45,7 +45,14 @@ def _amplify(con, note):
     use_oav = st.sidebar.checkbox("--oav (prior de seuil, approx.)", value=False)
     biotransform = st.sidebar.checkbox(
         "--biotransform (fermentation levure standard)", value=False)
-    r = matching.amplify(con, note, use_oav=use_oav, biotransform=biotransform)
+    # note_descriptors est vide par défaut pour toute note (pas d'amorce
+    # littérature, cf. reference.py) : sans sélection manuelle ici, la couche
+    # descripteurs ne peut jamais contribuer au score.
+    selected_desc = st.multiselect(
+        "Descripteurs de la note (optionnel — active la couche descripteurs)",
+        _descriptors(con))
+    r = matching.amplify(con, note, use_oav=use_oav, biotransform=biotransform,
+                         descriptors=selected_desc or None)
 
     st.metric("Couverture moléculaire", f"{r['coverage']*100:.0f}%")
     if r["biotransform"]:

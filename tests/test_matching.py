@@ -167,3 +167,18 @@ def test_amplify_falls_back_to_pure_molecular_score_without_descriptors(db):
 def test_amplify_uses_descriptors_when_available(db):
     r = matching.amplify(db, "_citrus")
     assert r["has_descriptors"] is True
+
+def test_amplify_manual_descriptors_activates_desc_layer(db):
+    # "_passion" n'a pas de note_descriptors -> sans descriptors=, desc=0 partout
+    # (déjà couvert par test_amplify_falls_back_to_pure_molecular_score_without_descriptors).
+    # Avec descriptors= fourni à la main, la couche descripteurs doit contribuer.
+    r = matching.amplify(db, "_passion", descriptors=["citrus", "tropical"])
+    assert r["has_descriptors"] is True
+    assert any(h["desc"] > 0 for h in r["ranked"])
+
+def test_amplify_manual_descriptors_override_note_descriptors(db):
+    # "_citrus" a note_descriptors=["citrus","floral"] -> passer une sélection
+    # manuelle différente doit primer dessus (même contrat que contrast()).
+    r_manual = matching.amplify(db, "_citrus", descriptors=["woody"])
+    r_note = matching.amplify(db, "_citrus")
+    assert r_manual != r_note

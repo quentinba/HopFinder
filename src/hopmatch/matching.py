@@ -99,6 +99,14 @@ def get_note_descriptors(con, note: str) -> set[str]:
         "SELECT descriptor FROM note_descriptors WHERE note=?", (note,))}
 
 
+def _normalize_descriptors(descriptors: list[str]) -> set[str]:
+    """Vocabulaire réel `hop_descriptors` (comme `by_descriptor`), pas inventé —
+    même normalisation utilisée par `amplify`/`contrast` pour une sélection
+    manuelle de descripteurs."""
+    return {reference.DESCRIPTOR_ALIASES.get(d.strip().lower(), d.strip().lower())
+           for d in descriptors if d.strip()}
+
+
 # --------------------------------------------------------------------------- #
 # Couches de score
 # --------------------------------------------------------------------------- #
@@ -142,10 +150,19 @@ def coverage(note_profile, comp, biotransform: bool = False):
 # CAS A — amplify
 # --------------------------------------------------------------------------- #
 def amplify(con, note: str, w_mol: float = 0.5, w_desc: float = 0.5, use_oav=False, top=8,
-           biotransform=False):
+           biotransform=False, descriptors: list[str] | None = None):
+    """
+    `descriptors` : sélection manuelle par l'utilisateur des descripteurs de la
+    note, sur le vocabulaire réel `hop_descriptors` (comme `contrast`/
+    `by_descriptor`) — prioritaire sur `note_descriptors` si fourni. Seul moyen
+    d'activer la couche descripteurs pour une note puisque `note_descriptors`
+    est vide par défaut pour toutes (pas d'amorce littérature, pas de
+    dérivation fiable depuis FooDB — voir reference.py/docs/DATA_SOURCES.md).
+    Éphémère : n'écrit rien dans `note_descriptors`, ne vaut que pour cet appel.
+    """
     hops, comp, hop_desc, mols = load(con)
     profile = get_note(con, note)
-    ndesc = get_note_descriptors(con, note)
+    ndesc = _normalize_descriptors(descriptors) if descriptors else get_note_descriptors(con, note)
     # note_descriptors est vide par défaut pour TOUTE note désormais (pas d'amorce
     # littérature, cf. reference.py) : sans ce garde-fou, la couche descripteurs
     # calcule silencieusement ds=0 pour chaque houblon et le score plafonne à
@@ -197,8 +214,7 @@ def contrast(con, note: str | None = None, descriptors: list[str] | None = None,
     """
     hops, comp, hop_desc, _ = load(con)
     if descriptors:
-        ndesc = {reference.DESCRIPTOR_ALIASES.get(d.strip().lower(), d.strip().lower())
-                 for d in descriptors if d.strip()}
+        ndesc = _normalize_descriptors(descriptors)
         label = ", ".join(sorted(ndesc)) if ndesc else "(vide)"
     elif note:
         ndesc = get_note_descriptors(con, note)
