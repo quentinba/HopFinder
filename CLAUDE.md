@@ -44,6 +44,18 @@ scorings DIFFÉRENTS :
   JSON déjà structuré (composition + roue d'arôme), pas de parsing HTML. Piège nommage :
   slugs `-brand` (`citra-brand`) à déprefixer pour fusionner avec BarthHaas (`citra`),
   SAUF collision avec un vrai doublon de SKU déjà existant (`perle`/`perle-per03`).
+  **Piège qualité vérifié en direct** : `parse_yakima_hit` préfère l'entrée
+  `brewing_values[code=ARO01]` ('HopAroma') aux entrées produit (pellets/leaf/baled).
+  Pour la variété `admiral`, cette entrée ARO01 est CORROMPUE côté YCH lui-même — alpha
+  54-62% (chimiquement impossible, aucune variété commerciale ne dépasse ~25%), oil
+  5-9 ml/100g — alors que les 3 entrées produit (CON02/CON04/PEL02, mutuellement
+  cohérentes) donnent alpha 13-16% / oil 1-1,7, confirmé indépendamment par BarthHaas.
+  Sans garde-fou, `amount()` multiplie chaque composé par ce total_oil gonflé, faisant
+  remonter la variété en tête de presque tous les classements moléculaires (repéré par
+  l'utilisateur : Admiral systématiquement présent). `parsers._is_plausible_brewing_entry`
+  écarte une entrée dont l'alpha dépasse 30% et retombe sur une entrée produit. Balayé
+  sur les 152 variétés réelles : Admiral est la SEULE affectée (0,7%) — anomalie isolée
+  côté YCH, pas un problème de parsing systémique.
   `ingest.crawl_yakima` IMPLÉMENTÉ. Fragile (clé/index Algolia non documentés).
 - **FooDB** : source note→molécule. Dump bulk, figé 2020-04-07, licence NON COMMERCIALE.
   `ingest.download_foodb_dump` télécharge+extrait automatiquement le tar.gz

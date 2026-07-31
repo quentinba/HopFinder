@@ -32,6 +32,17 @@
   fusionnerait jamais avec le slug BarthHaas (`citra`). Mais le catalogue a aussi de vrais
   doublons de SKU sans rapport (`perle` ET `perle-per03` coexistent) — `crawl_yakima` ne
   déprefixe `-brand` que hors collision avec un autre slug du même lot.
+- **Piège qualité vérifié en direct** : `parse_yakima_hit` préfère l'entrée
+  `brewing_values[code=ARO01]` ('HopAroma') aux entrées produit (pellets/leaf/baled) — sauf
+  que pour `admiral`, cette entrée est CORROMPUE côté YCH lui-même (alpha 54-62%,
+  chimiquement impossible — aucune variété commerciale ne dépasse ~25% — et oil 5-9 ml/100g)
+  alors que les 3 entrées produit s'accordent entre elles à alpha 13-16% / oil 1-1,7,
+  confirmé par BarthHaas indépendamment. Sans concentration réelle plausible, `amount()`
+  gonflait chaque composé de la variété via ce total_oil erroné, la faisant remonter en
+  tête de presque tous les classements moléculaires (repéré par l'utilisateur en usage
+  réel). `parsers._is_plausible_brewing_entry` écarte une entrée dont l'alpha dépasse 30%
+  et retombe sur une entrée produit. Balayé sur les 152 variétés réelles : Admiral est la
+  SEULE affectée — anomalie isolée côté YCH, pas un bug de parsing systémique.
 - Statut : `ingest.crawl_yakima` implémenté. Fragile par construction (clé/index Algolia non
   documentés publiquement, peuvent changer si YCH modifie son frontend).
 

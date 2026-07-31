@@ -244,6 +244,25 @@ def parse_flavordb2_detail(html: str) -> tuple[list[str], float | None]:
     return cas_list, threshold
 
 
+_MAX_PLAUSIBLE_ALPHA_ACID = 30.0  # aucune variété commerciale connue ne dépasse ~24-25%
+
+
+def _is_plausible_brewing_entry(b: dict) -> bool:
+    """
+    Écarte une entrée `brewing_values` dont l'acide alpha est chimiquement
+    impossible — vérifié en direct sur Admiral (YCH, index Algolia) : l'entrée
+    ARO01 ('HopAroma') annonce alpha 54-62%, tandis que les trois entrées
+    produit (CON02/CON04/PEL02, mutuellement cohérentes à 13-16%) s'accordent
+    avec BarthHaas (indépendant, 1,0-1,7 ml/100g d'huile — contre 5-9 pour
+    ARO01). Erreur de saisie sur le site YCH lui-même pour cette variété, pas
+    un bug de notre côté ; sans ce garde-fou, `amount()` multiplie CHAQUE
+    composé par un total_oil gonflé (ARO01 : 5-9 contre ~1-2 ailleurs), faisant
+    remonter la variété en tête de presque tous les classements moléculaires.
+    """
+    alpha = (b.get("alpha") or {}).get("high")
+    return alpha is None or alpha <= _MAX_PLAUSIBLE_ALPHA_ACID
+
+
 def parse_yakima_hit(hit: dict) -> tuple[str, str, str, dict, list[str]]:
     """
     Extrait (variety, name, region, comp, descriptors) d'un hit Algolia YCH
@@ -253,7 +272,10 @@ def parse_yakima_hit(hit: dict) -> tuple[str, str, str, dict, list[str]]:
     La composition vient de imported_fields.brewing_values[code='ARO01']
     ('HopAroma', l'analyse brute de la variété) — pas d'une forme produit
     (pellets/leaf/baled), qui ne diffère qu'en présentation, pas en variété ;
-    à défaut, la première entrée disponible.
+    SAUF si cette entrée est implausible (`_is_plausible_brewing_entry`), auquel
+    cas on retombe sur une entrée produit plutôt que sur des valeurs corrompues.
+    À défaut de toute entrée plausible, la première entrée disponible quand même
+    (mieux vaut une variété suspecte que silencieusement absente).
     """
     imp = hit.get("imported_fields") or {}
     variety = (hit.get("url") or "").rsplit("/", 1)[-1]
@@ -262,7 +284,9 @@ def parse_yakima_hit(hit: dict) -> tuple[str, str, str, dict, list[str]]:
     descriptors = [d.strip().lower() for d in (imp.get("aromas") or []) if d and d.strip()]
 
     brewing = imp.get("brewing_values") or []
-    bv = next((b for b in brewing if b.get("code") == "ARO01"), brewing[0] if brewing else {})
+    ordered = sorted(brewing, key=lambda b: b.get("code") != "ARO01")  # ARO01 en priorité
+    bv = next((b for b in ordered if _is_plausible_brewing_entry(b)),
+             brewing[0] if brewing else {})
     comp: dict = {}
     for field, (compound, unit) in YAKIMA_API_FIELDS.items():
         rng = bv.get(field) or {}
