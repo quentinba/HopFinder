@@ -98,11 +98,22 @@ scorings DIFFÉRENTS :
   (poids identiques entre aliments sans lien). 345/847 candidats avec ≥1 composé
   whitelisté écartés sur le dump réel (992 aliments au total, 141 sans aucun composé
   whitelisté, ~510 notes distinctes conservées).
-  **Descripteurs auto-dérivés testés et rejetés** : agréger les descripteurs Flavornet des
-  molécules d'une note (même pondérés par IDF, même restreints aux composés distinctifs
-  post-filtre) reproduit la même dégénérescence — converge vers les mêmes mots génériques
-  entre notes sans rapport, ou devient vide dès qu'on restreint aux seuls composés à
-  concentration réelle. Confirmé PAS viable ; voir `matching.contrast`.
+  **Descripteurs auto-dérivés testés et rejetés, DEUX FOIS, pour deux raisons
+  différentes** : (1) agréger les descripteurs Flavornet des molécules d'une note (même
+  pondérés par IDF, même restreints aux composés distinctifs post-filtre) reproduit la
+  même dégénérescence sur la note MÉDIANE — converge vers les mêmes mots génériques entre
+  notes sans rapport, ou devient vide dès qu'on restreint aux seuls composés à
+  concentration réelle (peu de notes en ont beaucoup). (2) Reproduit vérifié même sur les
+  notes les PLUS riches en composés concentration (rosemary 38, carrot 45, red wine 49...) :
+  toutes convergent quand même vers citrus/spicy/floral (carrot et wild carrot obtiennent
+  un score "citrus" identique à 2 décimales près). Cause identifiée : des composés
+  génériques RÉELS et correctement mesurés (aldéhydes à chaîne moyenne — heptanal,
+  nonanal, octanal...) apparaissent comme composés concentration dans énormément
+  d'aliments chimiquement sans rapport, et portent "citrus" comme descripteur Flavornet ;
+  aucun filtre sur la RICHESSE des données ne peut compenser ça, le problème n'est plus
+  la rareté du signal mais l'ubiquité chimique réelle de certains composés triviaux qui
+  noient la signature propre à l'aliment. Définitivement PAS viable, ne pas retenter sans
+  changer de vocabulaire source (pas Flavornet) ; voir `matching.contrast`.
   `note_descriptors` est donc VIDE par défaut pour toute note — `amplify`/`combine`
   fonctionnent en molécules-seules pour toutes les notes désormais (plus de traitement
   spécial pour un sous-ensemble curé). **`contrast` généralisé par sélection manuelle** :

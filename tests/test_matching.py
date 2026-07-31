@@ -150,3 +150,20 @@ def test_contrast_blend_covers_target_within_max_hops(db):
     for h in r["blend"]:
         covered_via_blend.update(h["covers"])
     assert covered_via_blend == set(r["covered"])
+
+def test_amplify_falls_back_to_pure_molecular_score_without_descriptors(db):
+    # "_passion" n'a pas de note_descriptors (contrairement à "_citrus") : sans
+    # garde-fou, le score par défaut plafonnerait à w_mol*100=50 pour un houblon
+    # pourtant parfait sur le plan moléculaire, ce qui se lirait à tort comme
+    # "aucun houblon ne recoupe les descripteurs" plutôt que "cette note n'a
+    # aucun descripteur enregistré". Vérifie que has_descriptors est signalé et
+    # que le score n'est pas plafonné artificiellement.
+    r = matching.amplify(db, "_passion")
+    assert r["has_descriptors"] is False
+    assert all(h["desc"] == 0 for h in r["ranked"])
+    top = r["ranked"][0]
+    assert top["score"] == pytest.approx(round(100 * top["mol"], 1))
+
+def test_amplify_uses_descriptors_when_available(db):
+    r = matching.amplify(db, "_citrus")
+    assert r["has_descriptors"] is True

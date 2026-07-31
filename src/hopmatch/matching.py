@@ -146,6 +146,16 @@ def amplify(con, note: str, w_mol: float = 0.5, w_desc: float = 0.5, use_oav=Fal
     hops, comp, hop_desc, mols = load(con)
     profile = get_note(con, note)
     ndesc = get_note_descriptors(con, note)
+    # note_descriptors est vide par défaut pour TOUTE note désormais (pas d'amorce
+    # littérature, cf. reference.py) : sans ce garde-fou, la couche descripteurs
+    # calcule silencieusement ds=0 pour chaque houblon et le score plafonne à
+    # w_mol*100 (50 par défaut) sans que rien ne l'indique — lisible à tort comme
+    # "aucun houblon ne partage les descripteurs de la note" plutôt que "cette
+    # note n'a aucun descripteur enregistré". Repli honnête : score 100%
+    # moléculaire (w_mol=1) quand il n'y a structurellement rien à recouper.
+    has_descriptors = bool(ndesc)
+    if not has_descriptors:
+        w_mol, w_desc = 1.0, 0.0
 
     mol = molecular_scores(profile, comp, use_oav=use_oav, mols=mols, biotransform=biotransform)
     mmax = max((s for s, _ in mol.values()), default=1.0) or 1.0
@@ -162,7 +172,8 @@ def amplify(con, note: str, w_mol: float = 0.5, w_desc: float = 0.5, use_oav=Fal
     ranked.sort(key=lambda r: -r["score"])
     _, orphan, cov = coverage(profile, comp, biotransform)
     return {"mode": "amplify", "note": note, "coverage": cov, "orphan": orphan,
-           "biotransform": biotransform, "ranked": ranked[:top]}
+           "biotransform": biotransform, "has_descriptors": has_descriptors,
+           "ranked": ranked[:top]}
 
 
 # --------------------------------------------------------------------------- #

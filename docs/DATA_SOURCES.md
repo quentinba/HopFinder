@@ -80,11 +80,22 @@
   retombe sur la table de seuils globale (identique entre aliments sans lien). Run réel : 345/847
   candidats avec ≥1 composé whitelisté écartés (992 aliments au total, 141 sans aucun composé
   whitelisté, ~510 notes distinctes conservées).
-  **Généraliser les descripteurs a été testé et rejeté** : agréger les descripteurs Flavornet des
-  molécules d'une note (pondéré par poids, puis par IDF, puis restreint aux seuls composés
-  distinctifs) reproduit systématiquement la même dégénérescence que le problème ci-dessus — soit
-  convergence vers les mêmes mots génériques entre notes sans rapport, soit profil vide dès qu'on
-  se limite aux composés vraiment food-specific. `note_descriptors` reste donc VIDE par défaut
+  **Généraliser les descripteurs a été testé et rejeté DEUX FOIS.** (1) Agréger les
+  descripteurs Flavornet des molécules d'une note (pondéré par poids, puis par IDF, puis
+  restreint aux seuls composés distinctifs) reproduit systématiquement la même
+  dégénérescence que le problème ci-dessus sur la note médiane — convergence vers les
+  mêmes mots génériques entre notes sans rapport, ou profil vide dès qu'on se limite aux
+  composés vraiment food-specific (peu de notes en ont beaucoup). (2) Retesté sur les
+  notes les PLUS riches en composés à concentration réelle (rosemary : 38, carrot : 45,
+  red wine : 49...) — toujours dégénéré : carrot et wild carrot obtiennent un score
+  "citrus" identique à 2 décimales près, rosemary/red wine/common oregano convergent tous
+  vers citrus/spicy/floral malgré des profils olfactifs sans rapport. Cause identifiée :
+  des composés génériques RÉELS et correctement mesurés (aldéhydes à chaîne moyenne —
+  heptanal, nonanal, octanal...) apparaissent comme composés concentration dans énormément
+  d'aliments chimiquement sans rapport et portent "citrus" comme descripteur Flavornet —
+  le problème n'est plus la rareté du signal (filtré par le point 1) mais l'ubiquité
+  chimique réelle de composés triviaux qui noient la signature propre à l'aliment. Aucun
+  filtre de richesse ne peut compenser ça. `note_descriptors` reste donc VIDE par défaut
   pour toute note — `amplify`/`combine` fonctionnent en molécules-seules pour toutes les notes
   désormais. `contrast` est généralisé différemment : `matching.contrast(descriptors=)` laisse
   l'utilisateur décrire sa note à la main (vocabulaire réel `hop_descriptors`, comme

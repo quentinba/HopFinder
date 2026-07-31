@@ -14,6 +14,8 @@ def _print_amplify(r):
     print(f"\n[AMPLIFY] {r['note']}  — couverture moléculaire {r['coverage']*100:.0f}%")
     if r.get("biotransform"):
         print("  (hypothèse : fermentation levure standard, géraniol->citronellol)")
+    if not r.get("has_descriptors", True):
+        print("  (pas de descripteurs pour cette note : score 100% moléculaire)")
     if r["orphan"]:
         print("  orphelines (ajout requis) :", ", ".join(r["orphan"]))
     for i, h in enumerate(r["ranked"], 1):

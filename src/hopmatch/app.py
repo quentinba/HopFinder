@@ -51,6 +51,9 @@ def _amplify(con, note):
     if r["biotransform"]:
         st.info("Hypothèse active : fermentation levure standard "
                 "(géraniol→citronellol, linalol→alpha-terpinéol).")
+    if not r.get("has_descriptors", True):
+        st.caption("Pas de descripteurs pour cette note : score 100% moléculaire "
+                  "(pas de w_desc appliqué).")
     if r["orphan"]:
         st.warning("Orphelines (portées par l'ajout, pas le houblon) : "
                    + ", ".join(r["orphan"]))
