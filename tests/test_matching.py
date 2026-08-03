@@ -182,3 +182,29 @@ def test_amplify_manual_descriptors_override_note_descriptors(db):
     r_manual = matching.amplify(db, "_citrus", descriptors=["woody"])
     r_note = matching.amplify(db, "_citrus")
     assert r_manual != r_note
+
+def test_molecular_scores_matches_naive_specificity_computation(db):
+    # Non-régression pour le cache de specificity() dans molecular_scores()
+    # (perf : O(n_houblons) au lieu de O(n_houblons²), voir le commentaire dans
+    # matching.py) : compare au calcul naïf non mis en cache, molécule par
+    # molécule, houblon par houblon, pour vérifier que la mise en cache ne
+    # change RIEN au résultat (specificity ne dépend que de la molécule/comp,
+    # jamais du houblon en cours de scoring).
+    _, comp, _, _ = matching.load(db)
+    profile = matching.get_note(db, "_citrus")
+    scores = matching.molecular_scores(profile, comp)
+
+    max_amt = {m: max((matching.amount(h, m, comp) for h in comp), default=0.0)
+              for m in profile}
+    for h in comp:
+        contribs = {}
+        for m, w in profile.items():
+            a = matching.amount(h, m, comp)
+            if a <= 0 or not max_amt[m]:
+                continue
+            contribs[m] = w * (a / max_amt[m]) * matching.specificity(m, comp)
+        if contribs:
+            assert h in scores
+            assert scores[h][0] == pytest.approx(sum(contribs.values()))
+        else:
+            assert h not in scores

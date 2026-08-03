@@ -114,6 +114,15 @@ def molecular_scores(note_profile, comp, use_oav=False, mols=None, biotransform=
     """Similarité moléculaire normalisée-par-composé (TF-IDF). -> {variety: (score, contribs)}."""
     max_amt = {m: max((amount(h, m, comp, biotransform) for h in comp), default=0.0)
               for m in note_profile}
+    # specificity(m, comp, biotransform) ne dépend PAS du houblon `h` — seulement
+    # de la molécule et de `comp` dans son ensemble. Précalculée une fois par
+    # molécule ici (même principe que max_amt juste au-dessus) plutôt que
+    # recalculée à chaque paire (houblon, molécule) : passait par une boucle
+    # interne O(n_houblons) à CHAQUE itération de la boucle externe `for h in
+    # comp`, donc O(n_houblons²) au total. Mesuré sur la base réelle (203
+    # houblons) : amplify() ~1s avant, ~30-50ms après, résultat identique
+    # (spécificité est une fonction pure de la molécule, pas du houblon scoré).
+    spec = {m: specificity(m, comp, biotransform) for m in note_profile}
     out = {}
     for h in comp:
         contribs = {}
@@ -121,7 +130,7 @@ def molecular_scores(note_profile, comp, use_oav=False, mols=None, biotransform=
             a = amount(h, m, comp, biotransform)
             if a <= 0 or not max_amt[m]:
                 continue
-            s = w * (a / max_amt[m]) * specificity(m, comp, biotransform)
+            s = w * (a / max_amt[m]) * spec[m]
             if use_oav and mols:
                 thr = mols.get(hop_compound(m, biotransform), {}).get("threshold_ppb")
                 s *= (REFERENCE_THRESHOLD_PPB / thr) if thr else 1.0
