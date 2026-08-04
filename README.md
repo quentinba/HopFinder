@@ -4,7 +4,7 @@
 questions concrètes : *quel houblon accorder à un ajout* (yuzu, basilic…), et *un goût
 est-il reproductible avec du houblon seul* ?
 
-> État : `pytest` vert (48 tests). Toutes les sources tournent contre les sites externes :
+> État : `pytest` vert (79 tests). Toutes les sources tournent contre les sites externes :
 > `crawl_barthhaas`, `crawl_yakima`, `ingest_flavornet`, `ingest_foodb`, `ingest_flavordb2`,
 > `resolve_pubchem_cids`, `by-descriptor`, `--biotransform` (portée volontairement étroite,
 > deux voies sourcées) — voir [Feuille de route](#feuille-de-route).
@@ -601,7 +601,7 @@ hopmatch combine <note> --biotransform    # géraniol->citronellol compte pour l
 hopmatch descriptors              # vocabulaire de descripteurs disponible
 hopmatch by-descriptor citrus,tropical   # découverte, sans note requise
 
-pytest -q                         # 48 tests (nécessite l'extra [dev])
+pytest -q                         # 79 tests (nécessite l'extra [dev])
 ```
 
 ### GUI navigateur

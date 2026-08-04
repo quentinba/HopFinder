@@ -26,7 +26,7 @@ l'implémentation ([ ] à faire, [x] fait — voir le commit associé).
   fabriquées) + avertir explicitement quand un descripteur choisi n'a pas
   d'entrée dans la carte, plutôt que de le laisser disparaître en silence.
 
-- [ ] **T3 — Pas de test automatisé pour cli.py/app.py**
+- [x] **T3 — Pas de test automatisé pour cli.py/app.py**
   `test_cli.py`/`test_app.py` n'existent pas : le câblage argparse→matching
   et la logique du dispatch ne sont vérifiés que manuellement. Ajouter des
   tests de fumée sur une base jouet (même pattern que `test_combine.py`).

@@ -71,7 +71,7 @@ def _amplify(con, note):
         [{"Houblon": h["name"], "Score": h["score"], "Mol.": h["mol"], "Desc.": h["desc"],
           "Contribue via": ", ".join(h["why"]), "Sources": h["sources"]}
          for h in r["ranked"]],
-        use_container_width=True, hide_index=True)
+        width="stretch", hide_index=True)
 
 
 def _contrast(con):
@@ -134,7 +134,7 @@ def _combine(con, note):
     st.dataframe(
         [{"Houblon": h["name"], "Proportion": f"{h['proportion']*100:.1f}%"}
          for h in r["blend"]],
-        use_container_width=True, hide_index=True)
+        width="stretch", hide_index=True)
 
 
 def _by_descriptor(con):
@@ -158,7 +158,7 @@ def _by_descriptor(con):
                     [{"Composé": c["compound"], "Valeur": round(c["mid"], 2),
                       "Unité": c["unit"], "Sources": ", ".join(c["sources"])}
                      for c in h["compounds"][:8]],
-                    use_container_width=True, hide_index=True)
+                    width="stretch", hide_index=True)
 
 
 def main():
