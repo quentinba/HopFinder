@@ -16,7 +16,7 @@ l'implémentation ([ ] à faire, [x] fait — voir le commit associé).
   au-dessus dans le code) — gain attendu proche de 20-50x, comportement
   identique (résultats inchangés, juste moins recalculés).
 
-- [ ] **T2 — `CONTRAST_AFFINITY` ne couvre que 10/~39 descripteurs réels**
+- [x] **T2 — `CONTRAST_AFFINITY` ne couvre que 10/~39 descripteurs réels**
   Le vocabulaire réel de `hop_descriptors` sur la base construite (Yakima)
   a ~39 termes distincts ; `CONTRAST_AFFINITY` n'en couvre que 10. Un
   utilisateur qui choisit "grapefruit", "pine", "mint", "lemon", "rose"...

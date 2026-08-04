@@ -95,8 +95,27 @@ DESCRIPTOR_ALIASES: dict[str, str] = {
 # Carte d'affinités descripteurs pour le MODE CONTRASTE (cas A).
 # Le contraste ne se dérive pas des molécules partagées : ce sont des paires de
 # descripteurs connues pour bien s'accorder. Amorce curée, à enrichir (idéalement
-# depuis un corpus de recettes → co-occurrence).
+# depuis un corpus de recettes → co-occurrence) — prior heuristique explicitement
+# signalé comme tel (voir README, section "Ce qui est un prior, pas une donnée"),
+# jamais traité comme une donnée houblon vérifiée.
+#
+# Deux groupes de clés :
+#   1. Les 10 catégories "cœur" (citrus...earthy) : servent À LA FOIS de clé ET de
+#      valeur possible — un maillage fermé entre elles, le noyau original.
+#   2. Les descripteurs plus étroits du vocabulaire réel `hop_descriptors`
+#      (vérifié sur la base construite : 38 descripteurs distincts au total,
+#      seuls 10 couverts avant cet ajout — un utilisateur choisissant "grapefruit"
+#      ou "pine" en `contrast --descriptors` obtenait une cible vide sans
+#      explication). Chacun est rattaché aux catégories cœur les plus proches par
+#      logique d'accord classique (fruit vif/agrume ↔ registre boisé-résineux-
+#      terreux ; floral ↔ épicé-terreux ; herbacé ↔ fruité-floral), PAS à d'autres
+#      descripteurs étroits entre eux — ça garderait la cible de contraste sur des
+#      catégories assez larges pour recouper la roue d'arôme réelle d'un houblon
+#      (les tags étroits comme "grapefruit" sont rares sur un houblon donné, les
+#      catégories cœur beaucoup plus fréquentes). `matching.contrast` signale
+#      explicitement un descripteur choisi sans entrée ici (voir `unmapped`).
 CONTRAST_AFFINITY: dict[str, list[str]] = {
+    # -- catégories cœur (maillage fermé) --
     "citrus":      ["resinous", "woody", "herbal"],
     "tropical":    ["resinous", "dank", "spicy"],
     "floral":      ["earthy", "woody", "spicy"],
@@ -107,4 +126,40 @@ CONTRAST_AFFINITY: dict[str, list[str]] = {
     "spicy":       ["tropical", "floral", "stone fruit"],
     "dank":        ["tropical", "citrus"],
     "earthy":      ["floral"],
+    # -- sous-familles agrume -> mêmes cibles que "citrus" --
+    "grapefruit":  ["resinous", "woody", "herbal"],
+    "lemon":       ["resinous", "woody", "herbal"],
+    "lime":        ["resinous", "woody", "herbal"],
+    "orange":      ["resinous", "woody", "herbal"],
+    "lemongrass":  ["resinous", "woody", "herbal"],
+    # -- sous-familles fruit à noyau -> mêmes cibles que "stone fruit" --
+    "apricot":     ["spicy", "woody"],
+    "peach":       ["spicy", "woody"],
+    "pear":        ["spicy", "woody"],
+    # -- sous-familles tropical/fruité -> mêmes cibles que "tropical" --
+    "pineapple":    ["resinous", "dank", "spicy"],
+    "passion fruit": ["resinous", "dank", "spicy"],
+    "melon":        ["resinous", "dank", "spicy"],
+    "coconut":      ["resinous", "dank", "spicy"],
+    "bubblegum":    ["resinous", "dank", "spicy"],
+    "fruity":       ["resinous", "dank", "spicy"],
+    # -- registre baie/fruit sombre -> plus proche du dank/terreux que du tropical --
+    "berry":        ["earthy", "dank", "woody"],
+    "black currant": ["earthy", "woody", "spicy"],
+    "dried fruit":  ["woody", "spicy", "earthy"],
+    # -- sous-familles florales -> mêmes cibles que "floral" --
+    "rose":            ["earthy", "woody", "spicy"],
+    "sweet aromatic":  ["earthy", "woody", "spicy"],
+    "white wine":      ["earthy", "woody", "spicy"],
+    # -- sous-familles herbacées -> mêmes cibles que "herbal" --
+    "grassy":   ["citrus", "floral"],
+    "hay":      ["citrus", "floral"],
+    "mint":     ["citrus", "floral"],
+    "tea":      ["citrus", "floral"],
+    "green tea": ["citrus", "floral"],
+    # -- sous-familles boisées/résineuses --
+    "cedar":    ["citrus", "tropical", "floral"],   # -> mêmes cibles que "woody"
+    "pine":     ["citrus", "tropical"],             # -> mêmes cibles que "resinous"
+    # -- épicé --
+    "black pepper": ["tropical", "floral", "stone fruit"],  # -> mêmes cibles que "spicy"
 }

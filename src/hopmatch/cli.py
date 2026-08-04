@@ -31,12 +31,18 @@ def _print_amplify(r):
 
 def _print_contrast(r):
     print(f"\n[CONTRAST] {r['note']}  — cible d'affinité : {', '.join(r['affinity_target'])}")
+    if r.get("unmapped"):
+        print("  (pas de carte d'affinité pour :", ", ".join(r["unmapped"]),
+             "— ignorés, pas d'effet sur la cible)")
     for i, h in enumerate(r["ranked"], 1):
         print(f"  {i:<2}{h['name']:<14}{h['score']:>6}  via {', '.join(h['contrast_via'])}")
 
 
 def _print_contrast_blend(r):
     print(f"\n[CONTRAST-BLEND] {r['note']}  — cible d'affinité : {', '.join(r['affinity_target'])}")
+    if r.get("unmapped"):
+        print("  (pas de carte d'affinité pour :", ", ".join(r["unmapped"]),
+             "— ignorés, pas d'effet sur la cible)")
     if not r["blend"]:
         print("  aucune combinaison trouvée.")
     for h in r["blend"]:

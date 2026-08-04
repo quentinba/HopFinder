@@ -208,3 +208,35 @@ def test_molecular_scores_matches_naive_specificity_computation(db):
             assert scores[h][0] == pytest.approx(sum(contribs.values()))
         else:
             assert h not in scores
+
+def test_contrast_flags_unmapped_descriptors_without_dropping_mapped_ones(db):
+    # "citrus" a une entrée CONTRAST_AFFINITY, "nonexistent-descriptor" n'en a
+    # aucune -> doit apparaître dans `unmapped` sans empêcher "citrus" de
+    # produire une cible d'affinité normalement (pas de suppression totale).
+    r = matching.contrast(db, descriptors=["citrus", "nonexistent-descriptor"])
+    assert r["unmapped"] == ["nonexistent-descriptor"]
+    assert r["affinity_target"] == sorted(set(reference.CONTRAST_AFFINITY["citrus"]))
+
+def test_contrast_full_real_vocabulary_has_no_unmapped_descriptor():
+    # Vérifie que CONTRAST_AFFINITY couvre bien tout le vocabulaire réel
+    # hop_descriptors observé sur la base construite (38 descripteurs) —
+    # non-régression pour l'extension de couverture (T2 du backlog).
+    real_vocabulary = {
+        "apricot", "berry", "black currant", "black pepper", "bubblegum", "cedar",
+        "citrus", "coconut", "dank", "dried fruit", "earthy", "floral", "fruity",
+        "grapefruit", "grassy", "green tea", "hay", "herbal", "lemon", "lemongrass",
+        "lime", "melon", "mint", "orange", "passion fruit", "peach", "pear", "pine",
+        "pineapple", "resinous", "rose", "spicy", "stone fruit", "sweet aromatic",
+        "tea", "tropical", "white wine", "woody",
+    }
+    assert real_vocabulary <= set(reference.CONTRAST_AFFINITY)
+    # toutes les valeurs restent dans le noyau fermé des 10 catégories cœur
+    # (pas de chaîne de dépendance vers un descripteur étroit lui-même non couvert)
+    core = {"citrus", "tropical", "floral", "stone fruit", "herbal", "woody",
+           "resinous", "spicy", "dank", "earthy"}
+    for targets in reference.CONTRAST_AFFINITY.values():
+        assert set(targets) <= core
+
+def test_contrast_blend_propagates_unmapped(db):
+    r = matching.contrast_blend(db, descriptors=["citrus", "nonexistent-descriptor"])
+    assert r["unmapped"] == ["nonexistent-descriptor"]

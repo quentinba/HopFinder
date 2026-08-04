@@ -220,6 +220,13 @@ def contrast(con, note: str | None = None, descriptors: list[str] | None = None,
     avec le vocabulaire réel de la roue d'arôme (même vocabulaire que
     `by_descriptor`, grounded sur `hop_descriptors`, pas inventé). Prioritaire
     sur `note` si les deux sont fournis.
+
+    Retourne aussi `unmapped` : les descripteurs choisis qui n'ont AUCUNE
+    entrée dans `reference.CONTRAST_AFFINITY` (couvre les 38 descripteurs
+    réels de la base construite au moment de l'écriture, mais un futur crawl
+    peut en révéler un nouveau) — signalés explicitement plutôt que de
+    disparaître en silence dans une cible d'affinité vide, pour ne pas laisser
+    croire à tort qu'aucun houblon ne contraste avec un descripteur donné.
     """
     hops, comp, hop_desc, _ = load(con)
     if descriptors:
@@ -240,6 +247,7 @@ def contrast(con, note: str | None = None, descriptors: list[str] | None = None,
                          "peuplé), soit `descriptors` (sélection manuelle).")
     # descripteurs qui contrastent bien avec ceux de la note
     target = set()
+    unmapped = sorted(d for d in ndesc if d not in reference.CONTRAST_AFFINITY)
     for d in ndesc:
         target.update(reference.CONTRAST_AFFINITY.get(d, []))
     ranked = []
@@ -251,7 +259,8 @@ def contrast(con, note: str | None = None, descriptors: list[str] | None = None,
                            "score": round(100 * len(hit) / max(len(target), 1), 1),
                            "contrast_via": sorted(hit), "sources": hops[h]["sources"]})
     ranked.sort(key=lambda r: -r["score"])
-    return {"mode": "contrast", "note": label, "affinity_target": sorted(target), "ranked": ranked[:top]}
+    return {"mode": "contrast", "note": label, "affinity_target": sorted(target),
+           "unmapped": unmapped, "ranked": ranked[:top]}
 
 
 def contrast_blend(con, note: str | None = None, descriptors: list[str] | None = None,
@@ -278,7 +287,8 @@ def contrast_blend(con, note: str | None = None, descriptors: list[str] | None =
         remaining -= gain
         candidates.remove(best)
     return {"mode": "contrast_blend", "note": r["note"], "affinity_target": r["affinity_target"],
-           "blend": blend, "covered": sorted(target - remaining), "residual": sorted(remaining)}
+           "unmapped": r["unmapped"], "blend": blend,
+           "covered": sorted(target - remaining), "residual": sorted(remaining)}
 
 
 # --------------------------------------------------------------------------- #

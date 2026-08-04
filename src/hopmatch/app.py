@@ -86,6 +86,9 @@ def _contrast(con):
     r = matching.contrast(con, descriptors=selected)
 
     st.caption("Cible d'affinité : " + ", ".join(r["affinity_target"]))
+    if r["unmapped"]:
+        st.caption(":material/info: Pas de carte d'affinité pour : "
+                  + ", ".join(r["unmapped"]) + " (ignorés, sans effet sur la cible).")
     if not r["ranked"]:
         st.write("Aucun houblon ne recoupe cette cible.")
         return
@@ -93,7 +96,7 @@ def _contrast(con):
         [{"Houblon": h["name"], "Score": h["score"],
           "Contraste via": ", ".join(h["contrast_via"]), "Sources": h["sources"]}
          for h in r["ranked"]],
-        use_container_width=True, hide_index=True)
+        width="stretch", hide_index=True)
 
     st.subheader("Proposer un blend")
     max_hops = st.slider("Nombre de houblons max", 1, 6, 3)
@@ -104,7 +107,7 @@ def _contrast(con):
     st.dataframe(
         [{"Houblon": h["name"], "Couvre": ", ".join(h["covers"]), "Sources": h["sources"]}
          for h in blend["blend"]],
-        use_container_width=True, hide_index=True)
+        width="stretch", hide_index=True)
     if blend["residual"]:
         st.warning("Non couvert par le blend : " + ", ".join(blend["residual"]))
 
