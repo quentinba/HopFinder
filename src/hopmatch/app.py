@@ -1,8 +1,10 @@
 """
-GUI Streamlit : les mêmes modes que le CLI (amplify/contrast/combine/by-descriptor),
-en lecture seule contre une base déjà construite. Ne touche pas à l'ingestion
-(crawl/build/ingest-*) : ça reste le rôle du CLI (`hopmatch build`, `hopmatch
-crawl-barthhaas`...). N'importe que `matching`/`schema`, jamais `ingest`.
+GUI Streamlit : les modes du CLI (amplify/contrast/combine/by-descriptor) +
+un mode "browse" propre à la GUI pour parcourir la base brute (houblon par
+houblon), en lecture seule contre une base déjà construite. Ne touche pas à
+l'ingestion (crawl/build/ingest-*) : ça reste le rôle du CLI (`hopmatch
+build`, `hopmatch crawl-barthhaas`...). N'importe que `matching`/`schema`,
+jamais `ingest`.
 
 Lancer : streamlit run src/hopmatch/app.py [-- --db chemin/vers/aromahops.db]
 """
@@ -178,6 +180,44 @@ def _combine(con, note):
         width="stretch", hide_index=True)
 
 
+_NON_AROMA_DISPLAY = {"total_oil", "alpha_acid", "beta_acid"}
+
+
+def _browse(con):
+    """Mode propre à la GUI (pas d'équivalent CLI) : consulter un houblon
+    directement — composition + descripteurs + sources — sans passer par
+    amplify/combine/by-descriptor (T5 backlog)."""
+    hops, comp, hop_desc, _ = matching.load(con)
+    query = st.text_input("Rechercher (nom ou variété)")
+    varieties = sorted(hops, key=lambda v: hops[v]["name"].lower())
+    if query:
+        q = query.strip().lower()
+        varieties = [v for v in varieties if q in hops[v]["name"].lower() or q in v]
+    st.caption(f"{len(varieties)} houblon(s)")
+    if not varieties:
+        st.write("Aucun houblon ne correspond à cette recherche.")
+        return
+
+    selected = st.selectbox("Houblon", varieties, format_func=lambda v: hops[v]["name"])
+    h = hops[selected]
+    st.subheader(h["name"])
+    st.caption(f"Région : {h['region'] or 'inconnue'} · Sources : {h['sources']}")
+
+    descs = sorted(hop_desc.get(selected, set()))
+    st.write("**Descripteurs :** " + (", ".join(descs) if descs else "aucun enregistré"))
+
+    hcomp = comp.get(selected, {})
+    rows = sorted(
+        ({"Composé": c, "Valeur": round(v["mid"], 3), "Unité": v["unit"],
+          "Sources": ", ".join(v["sources"])}
+         for c, v in hcomp.items() if c not in _NON_AROMA_DISPLAY and v["mid"] is not None),
+        key=lambda r: -r["Valeur"])
+    if rows:
+        st.dataframe(rows, width="stretch", hide_index=True)
+    else:
+        st.write("Aucune composition enregistrée.")
+
+
 def _by_descriptor(con):
     descriptors = _descriptors(con)
     selected = st.multiselect("Descripteurs", descriptors)
@@ -223,7 +263,8 @@ def main():
         f"**{db_path}** — {stats['hops']} houblons, {stats['notes']} notes, "
         f"{stats['descriptors']} descripteurs · modifiée {modified}")
 
-    mode = st.sidebar.radio("Mode", ["amplify", "contrast", "combine", "by-descriptor"])
+    mode = st.sidebar.radio(
+        "Mode", ["amplify", "contrast", "combine", "by-descriptor", "browse"])
 
     if mode == "by-descriptor":
         st.header("Découverte par descripteurs")
@@ -233,6 +274,11 @@ def main():
     if mode == "contrast":
         st.header("contrast")
         _contrast(con)
+        return
+
+    if mode == "browse":
+        st.header("Parcourir les houblons")
+        _browse(con)
         return
 
     notes = _notes(con)

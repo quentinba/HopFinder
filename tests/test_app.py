@@ -141,3 +141,29 @@ def test_by_descriptor_mode_lists_matching_hop(toy_cwd):
     # hopa a "citrus", hopb non -> hopa doit apparaître dans un expander
     assert any("Hopa" in e.label for e in at.expander)
     assert not any("Hopb" in e.label for e in at.expander)
+
+def test_browse_mode_shows_hop_composition_and_descriptors(toy_cwd):
+    # T5 backlog : consulter un houblon (composition + descripteurs) sans
+    # passer par amplify/combine/by-descriptor.
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("browse").run()
+    assert not at.exception
+    at.selectbox[0].set_value("hopa").run()
+    assert not at.exception
+    assert any("Hopa" in s.value for s in at.subheader)
+    assert any("citrus" in m.value and "woody" in m.value for m in at.markdown)
+    assert len(at.dataframe) >= 1
+
+def test_browse_mode_search_filters_hop_list(toy_cwd):
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("browse").run()
+    assert not at.exception
+    at.text_input[0].set_value("hopb").run()
+    assert not at.exception
+    caption = next(c.value for c in at.caption if "houblon(s)" in c.value)
+    assert "1 houblon(s)" in caption
+    # .options renvoie le libellé affiché (format_func), pas le code brut.
+    options = at.selectbox[0].options
+    assert options == ["Hopb"]

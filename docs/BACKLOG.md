@@ -39,7 +39,7 @@ l'implémentation ([ ] à faire, [x] fait — voir le commit associé).
   pour `by-descriptor`/`amplify`. (Skills requis avant d'y toucher :
   `developing-with-streamlit`, `dataviz`.)
 
-- [ ] **T5 — Pas de mode "parcourir la base"**
+- [x] **T5 — Pas de mode "parcourir la base"**
   Impossible d'explorer un houblon (composition + descripteurs + sources)
   sans passer par amplify/combine/by-descriptor. Ajouter un mode de
   recherche/consultation direct.

@@ -4,7 +4,7 @@
 questions concrètes : *quel houblon accorder à un ajout* (yuzu, basilic…), et *un goût
 est-il reproductible avec du houblon seul* ?
 
-> État : `pytest` vert (79 tests). Toutes les sources tournent contre les sites externes :
+> État : `pytest` vert (82 tests). Toutes les sources tournent contre les sites externes :
 > `crawl_barthhaas`, `crawl_yakima`, `ingest_flavornet`, `ingest_foodb`, `ingest_flavordb2`,
 > `resolve_pubchem_cids`, `by-descriptor`, `--biotransform` (portée volontairement étroite,
 > deux voies sourcées) — voir [Feuille de route](#feuille-de-route).
@@ -601,7 +601,7 @@ hopmatch combine <note> --biotransform    # géraniol->citronellol compte pour l
 hopmatch descriptors              # vocabulaire de descripteurs disponible
 hopmatch by-descriptor citrus,tropical   # découverte, sans note requise
 
-pytest -q                         # 79 tests (nécessite l'extra [dev])
+pytest -q                         # 82 tests (nécessite l'extra [dev])
 ```
 
 ### GUI navigateur
@@ -613,15 +613,19 @@ ci-dessus) :
 streamlit run src/hopmatch/app.py
 ```
 
-Les quatre modes (amplify/contrast/combine/by-descriptor) et les options
-(`--oav`, `--biotransform`, `max_hops`) sont dans la barre latérale ; `app.py`
-importe directement `matching`/`schema`, pas de couche API intermédiaire. Le mode
-`contrast` remplace le sélecteur de note habituel par une sélection de descripteurs
-(vocabulaire réel `hop_descriptors`), avec un blend proposé en dessous. Le mode
-`amplify` garde le sélecteur de note, avec en plus une sélection de descripteurs
-optionnelle (même vocabulaire) pour activer la couche descripteurs — sinon `note`
-seule donne un score 100% moléculaire. Pour pointer vers une autre base :
-`streamlit run src/hopmatch/app.py -- --db chemin.db`.
+Les cinq modes (amplify/contrast/combine/by-descriptor/browse) et les options
+(`--oav`, `--biotransform`, `max_hops`, nombre de résultats) sont dans la barre
+latérale ; `app.py` importe directement `matching`/`schema`, pas de couche API
+intermédiaire. Le mode `contrast` remplace le sélecteur de note habituel par une
+sélection de descripteurs (vocabulaire réel `hop_descriptors`), avec un blend
+proposé en dessous. Le mode `amplify` garde le sélecteur de note, avec en plus
+une sélection de descripteurs optionnelle (même vocabulaire) pour activer la
+couche descripteurs — sinon `note` seule donne un score 100% moléculaire. Le
+mode `browse` (sans équivalent CLI) permet de consulter un houblon directement —
+composition + descripteurs + sources, avec recherche par nom — sans passer par
+les autres modes. La barre latérale affiche aussi le nombre de houblons/notes/
+descripteurs chargés et la date de dernière modification de la base. Pour
+pointer vers une autre base : `streamlit run src/hopmatch/app.py -- --db chemin.db`.
 
 ---
 
