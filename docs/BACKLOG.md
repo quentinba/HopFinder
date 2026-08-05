@@ -44,16 +44,16 @@ l'implémentation ([ ] à faire, [x] fait — voir le commit associé).
   sans passer par amplify/combine/by-descriptor. Ajouter un mode de
   recherche/consultation direct.
 
-- [ ] **T6 — Pas de stats base en barre latérale**
+- [x] **T6 — Pas de stats base en barre latérale**
   Aucune indication du nombre de houblons/notes/descripteurs chargés, ni de
   fraîcheur de la base — utile puisque la construction se fait uniquement
   en CLI, hors de la vue de l'utilisateur GUI.
 
-- [ ] **T7 — `_notes`/`_descriptors` sans cache**
+- [x] **T7 — `_notes`/`_descriptors` sans cache**
   Requêtées à chaque rerender Streamlit (500+ notes). `st.cache_data` réduirait
   la latence perçue sur une interaction typique.
 
-- [ ] **T8 — top-N non ajustable sur amplify/contrast**
+- [x] **T8 — top-N non ajustable sur amplify/contrast**
   `by-descriptor` a un slider "nombre de résultats" ; `amplify`/`contrast`
   sont figés à 8. Incohérent, à harmoniser.
 

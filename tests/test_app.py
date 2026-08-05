@@ -76,6 +76,18 @@ def test_app_loads_with_no_exception_default_amplify_mode(toy_cwd):
     # "amplify" est le mode par défaut (premier de la liste du radio)
     assert "mynote" in [o for o in at.sidebar.selectbox[0].options]
 
+def test_sidebar_shows_db_stats(toy_cwd):
+    # T6 backlog : contexte base (nombre de houblons/notes/descripteurs)
+    # visible en barre latérale, avec les vrais chiffres de la base jouet
+    # (2 houblons, 1 note, 2 descripteurs distincts : citrus/woody/floral -> 3).
+    at = _app()
+    at.run()
+    assert not at.exception
+    stats_caption = next(c.value for c in at.sidebar.caption if "houblons" in c.value)
+    assert "2 houblons" in stats_caption
+    assert "1 notes" in stats_caption
+    assert "3 descripteurs" in stats_caption
+
 def test_amplify_mode_renders_ranked_table(toy_cwd):
     at = _app()
     at.run()

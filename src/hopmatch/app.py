@@ -9,6 +9,7 @@ Lancer : streamlit run src/hopmatch/app.py [-- --db chemin/vers/aromahops.db]
 from __future__ import annotations
 import os
 import sys
+from datetime import datetime
 
 import streamlit as st
 
@@ -32,12 +33,50 @@ def _connection(db_path: str):
     return connect(db_path)
 
 
+def _db_version(db_path: str) -> float:
+    """mtime du fichier — clé de cache pour `_notes`/`_descriptors`/`_stats` :
+    invalide le cache exactement quand la base a été reconstruite (CLI, dans
+    un autre terminal pendant que la GUI tourne), ni plus tôt (pas de TTL
+    arbitraire qui resservirait des données périmées) ni plus tard."""
+    return os.path.getmtime(db_path)
+
+
+@st.cache_data
+def _cached_notes(_con, db_path: str, _version: float) -> list[str]:
+    # `_con`/underscore : Streamlit ne hache pas les paramètres préfixés `_`
+    # (une connexion sqlite3 n'est de toute façon pas hachable) ; `db_path`
+    # + `_version` (mtime, voir _db_version) sont les vraies clés de cache.
+    return sorted(r[0] for r in _con.execute("SELECT DISTINCT note FROM aroma_notes"))
+
+
+@st.cache_data
+def _cached_descriptors(_con, db_path: str, _version: float) -> list[str]:
+    return sorted(r[0] for r in _con.execute("SELECT DISTINCT descriptor FROM hop_descriptors"))
+
+
+@st.cache_data
+def _cached_stats(_con, db_path: str, _version: float) -> dict:
+    return {
+        "hops": _con.execute("SELECT COUNT(*) FROM hops").fetchone()[0],
+        "notes": _con.execute("SELECT COUNT(DISTINCT note) FROM aroma_notes").fetchone()[0],
+        "descriptors": _con.execute(
+            "SELECT COUNT(DISTINCT descriptor) FROM hop_descriptors").fetchone()[0],
+    }
+
+
 def _notes(con) -> list[str]:
-    return sorted(r[0] for r in con.execute("SELECT DISTINCT note FROM aroma_notes"))
+    db_path = _db_path()
+    return _cached_notes(con, db_path, _db_version(db_path))
 
 
 def _descriptors(con) -> list[str]:
-    return sorted(r[0] for r in con.execute("SELECT DISTINCT descriptor FROM hop_descriptors"))
+    db_path = _db_path()
+    return _cached_descriptors(con, db_path, _db_version(db_path))
+
+
+def _stats(con) -> dict:
+    db_path = _db_path()
+    return _cached_stats(con, db_path, _db_version(db_path))
 
 
 def _amplify(con, note):
@@ -45,6 +84,7 @@ def _amplify(con, note):
     use_oav = st.sidebar.checkbox("--oav (prior de seuil, approx.)", value=False)
     biotransform = st.sidebar.checkbox(
         "--biotransform (fermentation levure standard)", value=False)
+    top = st.sidebar.slider("Nombre de résultats", 1, 30, 8)
     # note_descriptors est vide par défaut pour toute note (pas d'amorce
     # littérature, cf. reference.py) : sans sélection manuelle ici, la couche
     # descripteurs ne peut jamais contribuer au score.
@@ -52,7 +92,7 @@ def _amplify(con, note):
         "Descripteurs de la note (optionnel — active la couche descripteurs)",
         _descriptors(con))
     r = matching.amplify(con, note, use_oav=use_oav, biotransform=biotransform,
-                         descriptors=selected_desc or None)
+                         descriptors=selected_desc or None, top=top)
 
     st.metric("Couverture moléculaire", f"{r['coverage']*100:.0f}%")
     if r["biotransform"]:
@@ -81,9 +121,10 @@ def _contrast(con):
     # la roue d'arôme (même source que by-descriptor), ce qui fonctionne pour
     # n'importe quelle note sans rien inventer.
     selected = st.multiselect("Descripteurs de la note à contraster", _descriptors(con))
+    top = st.sidebar.slider("Nombre de résultats", 1, 30, 8)
     if not selected:
         st.write("Choisis au moins un descripteur."); return
-    r = matching.contrast(con, descriptors=selected)
+    r = matching.contrast(con, descriptors=selected, top=top)
 
     st.caption("Cible d'affinité : " + ", ".join(r["affinity_target"]))
     if r["unmapped"]:
@@ -172,6 +213,15 @@ def main():
                  f"(`hopmatch build`, ou `crawl-barthhaas`/`crawl-yakima`/`ingest-*`).")
         st.stop()
     con = _connection(db_path)
+
+    # Contexte base (T6 backlog) : la construction se fait entièrement en CLI,
+    # hors de la vue GUI — sans ça, rien n'indique si la base ouverte est la
+    # démo (`hopmatch build`, 4 houblons) ou une base réelle, ni sa fraîcheur.
+    stats = _stats(con)
+    modified = datetime.fromtimestamp(_db_version(db_path)).strftime("%Y-%m-%d %H:%M")
+    st.sidebar.caption(
+        f"**{db_path}** — {stats['hops']} houblons, {stats['notes']} notes, "
+        f"{stats['descriptors']} descripteurs · modifiée {modified}")
 
     mode = st.sidebar.radio("Mode", ["amplify", "contrast", "combine", "by-descriptor"])
 
