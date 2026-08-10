@@ -33,11 +33,24 @@ l'implémentation ([ ] à faire, [x] fait — voir le commit associé).
 
 ## GUI
 
-- [ ] **T4 — Aucune visualisation graphique**
-  L'app est 100% tableaux. Ajouter un graphique radar (roue d'arôme) pour
-  comparer visuellement les descripteurs de 1-3 houblons — candidat naturel
-  pour `by-descriptor`/`amplify`. (Skills requis avant d'y toucher :
-  `developing-with-streamlit`, `dataviz`.)
+- [x] **T4 — Aucune visualisation graphique**
+  L'app est 100% tableaux. Ajouté dans `by-descriptor` : une heatmap
+  houblon x descripteur (présence/absence) comparant les candidats retournés
+  (jusqu'à 12, triés par pertinence). **Radar écarté volontairement** au
+  profit d'une heatmap, sur la base du skill `dataviz` : les descripteurs
+  d'un houblon sont un ensemble binaire (pas une quantité), un radar
+  déformerait par l'aire pour un gain de lisibilité nul, alors que la table
+  du skill recommande explicitement « grille -> heatmap, une teinte » pour
+  ce type de données — c'est exactement la forme des données ici. Une teinte
+  (bleu = présent, gris clair = absent), légende toujours affichée, tooltip
+  par cellule (houblon/descripteur/présence). Bug réel trouvé et corrigé en
+  testant en direct dans le navigateur (pas juste `pytest`) : largeur de
+  graphique par défaut trop étroite -> Vega-Lite masquait un libellé de
+  houblon sur deux (10 houblons, seuls 5 nom affichés) ; corrigé avec une
+  largeur au pas (`alt.Step`, comme la hauteur déjà utilisée pour les
+  lignes) + `labelOverlap=False` + `labelLimit=200` (les plus longs noms,
+  ex. "Nectaron® Brand - NZ Hops", étaient tronqués avec l'ellipse par
+  défaut).
 
 - [x] **T5 — Pas de mode "parcourir la base"**
   Impossible d'explorer un houblon (composition + descripteurs + sources)

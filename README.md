@@ -4,7 +4,7 @@
 questions concrètes : *quel houblon accorder à un ajout* (yuzu, basilic…), et *un goût
 est-il reproductible avec du houblon seul* ?
 
-> État : `pytest` vert (82 tests). Toutes les sources tournent contre les sites externes :
+> État : `pytest` vert (84 tests). Toutes les sources tournent contre les sites externes :
 > `crawl_barthhaas`, `crawl_yakima`, `ingest_flavornet`, `ingest_foodb`, `ingest_flavordb2`,
 > `resolve_pubchem_cids`, `by-descriptor`, `--biotransform` (portée volontairement étroite,
 > deux voies sourcées) — voir [Feuille de route](#feuille-de-route).
@@ -477,6 +477,12 @@ dans le parseur brut.
 `hopmatch by-descriptor citrus,tropical` → Simcoe, Citra, Mosaic (Saazer, sans aucun des deux,
 n'apparaît pas).
 
+**GUI uniquement** : dès que ≥2 houblons recoupent la sélection, une heatmap
+houblon x descripteur (présence/absence, jusqu'à 12 candidats triés par pertinence) compare
+visuellement leurs profils complets — pas seulement les descripteurs recherchés. Radar écarté
+volontairement (voir `docs/BACKLOG.md#T4`) : les descripteurs d'un houblon forment un ensemble
+binaire, pas une quantité — un radar déformerait par l'aire sans gain de lisibilité.
+
 ---
 
 ## Architecture technique
@@ -601,7 +607,7 @@ hopmatch combine <note> --biotransform    # géraniol->citronellol compte pour l
 hopmatch descriptors              # vocabulaire de descripteurs disponible
 hopmatch by-descriptor citrus,tropical   # découverte, sans note requise
 
-pytest -q                         # 82 tests (nécessite l'extra [dev])
+pytest -q                         # 84 tests (nécessite l'extra [dev])
 ```
 
 ### GUI navigateur

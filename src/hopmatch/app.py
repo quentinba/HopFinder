@@ -13,6 +13,7 @@ import os
 import sys
 from datetime import datetime
 
+import altair as alt
 import streamlit as st
 
 from hopmatch import matching
@@ -218,6 +219,53 @@ def _browse(con):
         st.write("Aucune composition enregistrée.")
 
 
+_MAX_HEATMAP_HOPS = 12
+
+
+def _descriptor_heatmap(ranked):
+    """Grille houblon x descripteur (présence), pour comparer visuellement
+    plusieurs candidats d'un coup (T4 backlog). Une teinte, présence/absence —
+    pas un radar : les descripteurs sont un ensemble binaire par houblon (pas
+    une quantité), un radar déformerait par l'aire pour un gain de lisibilité
+    nul ; une grille compare exactement les mêmes données sans cette
+    distorsion (voir la table forme/usage du skill dataviz : « grille ->
+    heatmap, une teinte »)."""
+    if len(ranked) < 2:
+        return None
+    shown = ranked[:_MAX_HEATMAP_HOPS]
+    hop_order = [h["name"] for h in shown]
+    freq = {}
+    for h in shown:
+        for d in h["all_descriptors"]:
+            freq[d] = freq.get(d, 0) + 1
+    descriptor_order = sorted(freq, key=lambda d: (-freq[d], d))
+    rows = [
+        {"Houblon": h["name"], "Descripteur": d,
+         "Présent": "oui" if d in h["all_descriptors"] else "non"}
+        for h in shown for d in descriptor_order
+    ]
+    chart = (
+        alt.Chart(alt.Data(values=rows))
+        .mark_rect(stroke="white", strokeWidth=2)
+        .encode(
+            x=alt.X("Houblon:N", sort=hop_order, title=None,
+                    axis=alt.Axis(labelAngle=-45, labelOverlap=False, labelLimit=200)),
+            y=alt.Y("Descripteur:N", sort=descriptor_order, title=None),
+            color=alt.Color(
+                "Présent:N",
+                scale=alt.Scale(domain=["oui", "non"], range=["#2a78d6", "#f2f1ee"]),
+                legend=alt.Legend(title="Descripteur présent")),
+            tooltip=["Houblon:N", "Descripteur:N", "Présent:N"],
+        )
+        # largeur/hauteur au pas (pas "container") : le nombre de lignes/colonnes
+        # varie avec la sélection, une largeur fixe tronque les libellés en
+        # silence (labelOverlap les faisait disparaître un sur deux, vérifié
+        # en direct avec 10 houblons).
+        .properties(width=alt.Step(45), height=alt.Step(18))
+    )
+    return chart, len(ranked) - len(shown)
+
+
 def _by_descriptor(con):
     descriptors = _descriptors(con)
     selected = st.multiselect("Descripteurs", descriptors)
@@ -229,6 +277,14 @@ def _by_descriptor(con):
     if not ranked:
         st.write("Aucun houblon ne recoupe ces descripteurs.")
         return
+
+    heatmap = _descriptor_heatmap(ranked)
+    if heatmap is not None:
+        chart, hidden = heatmap
+        st.caption("Comparaison des profils de descripteurs" +
+                   (f" (12 premiers sur {len(ranked)})" if hidden else ""))
+        st.altair_chart(chart, width="stretch")
+
     for h in ranked:
         with st.expander(
                 f"{h['name']} — recoupe {', '.join(h['matched_descriptors'])} "

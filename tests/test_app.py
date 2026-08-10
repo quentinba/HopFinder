@@ -142,6 +142,34 @@ def test_by_descriptor_mode_lists_matching_hop(toy_cwd):
     assert any("Hopa" in e.label for e in at.expander)
     assert not any("Hopb" in e.label for e in at.expander)
 
+def test_by_descriptor_mode_shows_comparison_heatmap_for_multiple_hops(toy_cwd):
+    # T4 backlog : grille de comparaison (houblon x descripteur) dès que
+    # >=2 houblons recoupent la sélection ; "citrus"+"floral" recoupe hopa
+    # ET hopb dans la base jouet (by_descriptor matche l'union, pas
+    # l'intersection). AppTest ne structure pas les graphiques Vega-Lite
+    # (st.altair_chart) : on vérifie leur présence via UnknownElement, faute
+    # d'accesseur dédié.
+    from streamlit.testing.v1.element_tree import UnknownElement
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("by-descriptor").run()
+    at.multiselect[0].select("citrus").select("floral").run()
+    assert not at.exception
+    assert any("Comparaison des profils" in c.value for c in at.caption)
+    assert any(isinstance(n, UnknownElement) for n in at.main)
+
+def test_by_descriptor_mode_hides_heatmap_for_single_hop(toy_cwd):
+    # Un seul houblon recoupé -> rien à comparer, pas de grille (juste
+    # l'expander habituel).
+    from streamlit.testing.v1.element_tree import UnknownElement
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("by-descriptor").run()
+    at.multiselect[0].select("citrus").run()
+    assert not at.exception
+    assert not any("Comparaison des profils" in c.value for c in at.caption)
+    assert not any(isinstance(n, UnknownElement) for n in at.main)
+
 def test_browse_mode_shows_hop_composition_and_descriptors(toy_cwd):
     # T5 backlog : consulter un houblon (composition + descripteurs) sans
     # passer par amplify/combine/by-descriptor.
