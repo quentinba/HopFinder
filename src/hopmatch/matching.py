@@ -364,10 +364,46 @@ def combine(con, note: str, max_hops: int = 3, biotransform: bool = False):
     t = np.array([profile[m] for m in mols], dtype=float)
     t = t / (t.max() or 1.0)
 
+    # Sous-ensemble à <= max_hops houblons : deux heuristiques (aucune n'est
+    # une recherche exhaustive du meilleur sous-ensemble, hors de portée dès
+    # une centaine de houblons), on garde celle qui minimise le résidu réel :
+    # (1) NNLS complet, garder les max_hops poids les plus forts, re-résoudre
+    #     dessus — rapide (une seule résolution pleine échelle) mais peut
+    #     laisser de côté un houblon individuellement discret dont l'ajout
+    #     réduirait pourtant le résidu ;
+    # (2) sélection gloutonne avant (type matching pursuit) : ajoute à chaque
+    #     étape le houblon qui réduit le plus le résidu sur le sous-ensemble
+    #     déjà choisi. Mesuré sur la base réelle (échantillon de 80 notes,
+    #     `docs/BACKLOG.md#T10`) : la seule gloutonne fait MIEUX que (1) dans
+    #     ~20 % des cas mais MOINS BIEN dans quelques cas (deux heuristiques
+    #     différentes, ni l'une ni l'autre optimale) — d'où le "meilleur des
+    #     deux" plutôt qu'un remplacement pur et simple, qui ne peut jamais
+    #     dégrader (1) et l'améliore quand (2) trouve mieux.
     w, _ = nnls(A, t)
-    # parcimonie : garder les max_hops meilleurs, re-résoudre sur ce sous-ensemble
-    idx = list(np.argsort(-w)[:max_hops])
-    idx = [j for j in idx if w[j] > 1e-9]
+    idx_topk = [j for j in np.argsort(-w)[:max_hops] if w[j] > 1e-9]
+
+    idx_greedy: list[int] = []
+    remaining = set(range(len(varieties)))
+    best_res = float(np.linalg.norm(t))
+    for _ in range(max_hops):
+        candidate, candidate_res = None, best_res
+        for j in remaining:
+            _, r = nnls(A[:, idx_greedy + [j]], t)
+            if r < candidate_res - 1e-9:
+                candidate, candidate_res = j, r
+        if candidate is None:
+            break
+        idx_greedy.append(candidate)
+        remaining.discard(candidate)
+        best_res = candidate_res
+
+    def _residual(idx):
+        if not idx:
+            return float(np.linalg.norm(t))
+        _, r = nnls(A[:, idx], t)
+        return float(r)
+
+    idx = min((idx_topk, idx_greedy), key=_residual) if idx_topk or idx_greedy else []
     if idx:
         w2, res = nnls(A[:, idx], t)
         blend_w = {varieties[idx[k]]: float(w2[k]) for k in range(len(idx)) if w2[k] > 1e-6}

@@ -4,7 +4,7 @@
 questions concrètes : *quel houblon accorder à un ajout* (yuzu, basilic…), et *un goût
 est-il reproductible avec du houblon seul* ?
 
-> État : `pytest` vert (84 tests). Toutes les sources tournent contre les sites externes :
+> État : `pytest` vert (85 tests). Toutes les sources tournent contre les sites externes :
 > `crawl_barthhaas`, `crawl_yakima`, `ingest_flavornet`, `ingest_foodb`, `ingest_flavordb2`,
 > `resolve_pubchem_cids`, `by-descriptor`, `--biotransform` (portée volontairement étroite,
 > deux voies sourcées) — voir [Feuille de route](#feuille-de-route).
@@ -404,8 +404,14 @@ quoi qu'il arrive »**.
    (mêmes unités comparables entre lignes).
 3. **Cible t** = poids de la note pour ces molécules (normalisés).
 4. **Résoudre** `A · w ≈ t` avec `w ≥ 0` (NNLS) → poids non négatifs par houblon.
-5. **Parcimonie** : garder les `max_hops` meilleurs (un brasseur ne blende pas 8 variétés) et
-   re-résoudre sur ce sous-ensemble.
+5. **Parcimonie** (un brasseur ne blende pas 8 variétés) : chercher un sous-ensemble à
+   `max_hops` houblons via deux heuristiques — ni l'une ni l'autre exhaustive, une recherche
+   du meilleur sous-ensemble étant hors de portée dès une centaine de houblons — et garder
+   celle qui minimise le résidu réel, jamais un remplacement pur et simple : (a) garder les
+   `max_hops` plus gros poids du NNLS complet, re-résoudre dessus ; (b) sélection gloutonne
+   avant (matching pursuit), qui ajoute à chaque étape le houblon réduisant le plus le résidu.
+   Mesuré sur la base réelle : (b) seule fait mieux que (a) dans ~20 % des notes mais moins
+   bien dans quelques cas — d'où le « meilleur des deux » (voir `docs/BACKLOG.md#T10`).
 6. **Sortie** : proportions du blend (normalisées à 100 %), **résidu** (distance à la cible),
    et **molécules irréductibles** = orphelines qu'aucune combinaison ne peut fournir (limonène,
    terpinolène…) — la quantification honnête du plafond de couverture.
@@ -607,7 +613,7 @@ hopmatch combine <note> --biotransform    # géraniol->citronellol compte pour l
 hopmatch descriptors              # vocabulaire de descripteurs disponible
 hopmatch by-descriptor citrus,tropical   # découverte, sans note requise
 
-pytest -q                         # 84 tests (nécessite l'extra [dev])
+pytest -q                         # 85 tests (nécessite l'extra [dev])
 ```
 
 ### GUI navigateur

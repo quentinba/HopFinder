@@ -69,3 +69,56 @@ def test_orphan_no_blend(con):
     assert r["blend"] == []
     assert "molz" in r["orphan"]
     assert r["coverage"] == 0
+
+
+def _adversarial_topk_db():
+    """
+    Base jouet où le sous-ensemble des `max_hops` plus gros poids du NNLS
+    complet (l'ancienne heuristique, T10 du backlog) est strictement moins bon
+    qu'une sélection gloutonne avant (matching pursuit) — trouvée par
+    recherche aléatoire sur la vraie base (`docs/BACKLOG.md#T10`), rejouée ici
+    en dur avec des pourcentages ronds. NNLS complet donne un poids fort à h4
+    et h1 (résidu ~0.71) alors que h0+h3 fait ~0.51 : sans le "meilleur des
+    deux", combine() choisirait le pire sous-ensemble.
+    """
+    path = os.path.join(tempfile.mkdtemp(), "toy_adversarial.db")
+    con = connect(path)
+    init_db(con)
+    con.executemany("INSERT INTO molecules VALUES (?,?,?,?)",
+                    [(f"m{i}", f"m{i}", None, None) for i in range(5)])
+    hops = ["h0", "h1", "h2", "h3", "h4", "h5"]
+    for h in hops:
+        con.execute("INSERT INTO hops VALUES (?,?,?,?)", (h, h, "test", "toy"))
+        con.execute("INSERT INTO hop_composition VALUES (?,?,?,?,?,?,?,?)",
+                     (h, "total_oil", 1.0, 1.0, "ml_100g", "toy", "ok", ""))
+    # lignes = m0..m4, colonnes = h0..h5 (% huile)
+    pct = [
+        [59, 55, 69,  0,  0,  0],
+        [ 0,  0, 90, 89,  0, 69],
+        [ 0,  0,  0, 96,  0, 58],
+        [95,  0, 81,  0, 73, 81],
+        [84, 97, 71, 98,  0,  0],
+    ]
+    rows = [(hops[j], f"m{i}", pct[i][j], pct[i][j], "pct_oil", "toy", "ok", "")
+            for i in range(5) for j in range(6) if pct[i][j] > 0]
+    con.executemany("INSERT INTO hop_composition VALUES (?,?,?,?,?,?,?,?)", rows)
+    con.executemany("INSERT INTO aroma_notes VALUES (?,?,?,?)", [
+        ("tadversarial", f"m{i}", w, "toy")
+        for i, w in enumerate([0.21, 0.08, 0.44, 0.72, 0.78])
+    ])
+    con.commit()
+    return con
+
+
+def test_forward_selection_beats_topk_truncation():
+    con = _adversarial_topk_db()
+    try:
+        r = matching.combine(con, "tadversarial", max_hops=2)
+    finally:
+        con.close()
+    picked = {b["variety"] for b in r["blend"]}
+    # la troncature "top-K du NNLS complet" choisirait h4+h1 (résidu ~0.71) ;
+    # la sélection gloutonne avant trouve h0+h3 (résidu ~0.51) — combine()
+    # doit garder le meilleur des deux, jamais le pire.
+    assert picked == {"h0", "h3"}
+    assert r["residual"] < 0.6

@@ -106,8 +106,19 @@ l'implémentation ([ ] à faire, [x] fait — voir le commit associé).
 
 ## Méthodologie (optionnel, si temps disponible)
 
-- [ ] **T10 — `combine()` : parcimonie gloutonne sous-optimale**
-  Résout le NNLS complet puis garde les `max_hops` meilleurs poids — pas une
-  vraie recherche du meilleur sous-ensemble. Avec le gain de perf de T1, un
-  essai sur quelques sous-ensembles candidats (au lieu d'un seul) devient
-  abordable. Valeur moyenne, à ne considérer qu'en fin de backlog.
+- [x] **T10 — `combine()` : parcimonie gloutonne sous-optimale**
+  L'ancienne méthode (NNLS complet, garder les `max_hops` plus gros poids,
+  re-résoudre dessus) n'est pas une recherche du meilleur sous-ensemble — juste
+  une heuristique. Ajout d'une seconde heuristique, une **sélection gloutonne
+  avant** (matching pursuit : à chaque étape, ajouter le houblon qui réduit le
+  plus le résidu sur le sous-ensemble déjà choisi, jusqu'à `max_hops`), et
+  `combine()` garde désormais celle des deux qui minimise le résidu réel —
+  jamais un remplacement pur et simple (aucune des deux heuristiques n'est
+  optimale ni dominante ; mesuré sur un échantillon de 80 notes réelles :
+  la seule gloutonne fait mieux dans ~20 % des cas mais MOINS bien dans
+  quelques cas). Coût mesuré sur la base réelle (203 houblons) : jusqu'à
+  ~280ms pour `max_hops=6` sur la note la plus défavorable — acceptable pour
+  un usage interactif CLI/GUI. Non-régression : `tests/test_combine.py`
+  contient un cas adversarial construit par recherche aléatoire où l'ancienne
+  heuristique seule choisirait un sous-ensemble strictement pire (résidu 0.71
+  vs 0.51) que la nouvelle décision "meilleur des deux".
