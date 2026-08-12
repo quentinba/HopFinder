@@ -72,16 +72,29 @@ l'implémentation ([ ] à faire, [x] fait — voir le commit associé).
 
 ## Sources de données additionnelles (recherche)
 
-- [ ] **T9 — Hopsteiner (shop.hopsteiner.com), à évaluer plus avant**
-  Vérifié en direct : HTML servi côté serveur (Magento), ~98 variétés en
-  pellets, alpha/beta/co-humulone/huile totale + une liste courte de
-  descripteurs (pas une prose comme BarthHaas actuellement). PAS de détail
-  myrcène/humulène/caryophyllène par variété sur la page produit vérifiée
-  (Cascade) — n'alimenterait donc PAS `hop_composition` au-delà de
-  alpha/beta/total_oil (déjà couverts par 2 sources), seulement une 3e
-  source de `hop_descriptors`. Valeur modeste vs effort d'intégration
-  (nouveau slug-matching, tests, vérif anti-corruption comme Admiral/Yakima) :
-  à faire seulement si le temps le permet après le reste du backlog.
+- **Investigué à nouveau, PAS retenu — Hopsteiner (shop.hopsteiner.com)**.
+  Re-vérifié en direct : le site a changé depuis la première investigation
+  (audit du 2026-08-03, qui décrivait un Magento à slugs lisibles) — ce n'est
+  plus le cas aujourd'hui (`/hop-varieties/cascade/` → 404). Nouvelle
+  plateforme e-commerce à ID produit opaques (`/all-products/shop/hop-pellets/
+  12475204.html`). Le contenu utile est toujours là sur une fiche produit —
+  alpha/beta/co-humulone/huile totale, ET une vraie liste courte de
+  descripteurs par tags (`aroma/citrus`, `aroma/floral`... pas une prose) —
+  mais **la page catégorie ne liste que 18 produits en HTML statique** (pas
+  de sitemap.xml, pas de pagination visible, aucune trace d'API de recherche
+  publique type Algolia/Klevu/Searchspring dans le HTML) contre les ~98
+  variétés attendues : la majorité du catalogue est très probablement
+  chargée en JS après coup (pagination/scroll infini côté client), ce qui
+  demanderait un navigateur headless plutôt qu'un simple crawl HTTP — un
+  cran de fragilité au-dessus de BarthHaas (HTML statique) et même de Yakima
+  (API JSON publique). Toujours AUCUN détail myrcène/humulène/caryophyllène
+  par variété (vérifié sur la fiche produit récupérée), donc toujours
+  seulement une 3e source de `hop_descriptors`, jamais de `hop_composition`
+  au-delà de ce que 2 sources couvrent déjà. Effort en hausse, valeur
+  inchangée (modeste) : décision inchangée, mais pour une raison plus forte
+  qu'avant — ne pas reconsidérer sans un changement structurel du site
+  (sitemap, API publique retrouvée) ou un besoin réel de 3e corroboration
+  des descripteurs.
 
 - **Investigué, PAS retenu — BeerMaverick** (beermaverick.com). Endpoint JS
   interne trouvé (`/api/js/?hop=<id>`) mais explicitement documenté par eux
