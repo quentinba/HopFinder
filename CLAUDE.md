@@ -4,13 +4,25 @@ Ce fichier donne à Claude Code le contexte et les décisions issues de la conce
 de hopmatch. Lis-le avant d'agir. (Détails : `docs/ARCHITECTURE.md`, `docs/DATA_SOURCES.md`.)
 
 ## But
-Outil brasseur : **note olfactive → molécules → houblons**. Deux cas d'usage aux
-scorings DIFFÉRENTS :
-- **Cas A** — accorder un houblon à un ajout (yuzu, basilic…). Modes `amplify`
-  (prolonger) et `contrast` (contraster). L'ajout est dans la bière, donc le houblon
-  n'a pas à le reproduire : le « plafond de couverture » ne pénalise pas.
-- **Cas B** — reproduire un goût sans ajout, via une **combinaison** de houblons
-  (`combine`, NNLS). Ici la valeur est de dire ce qui est **irréductible**.
+Outil brasseur : **note olfactive → molécules → houblons**. Accorder un houblon à un
+ajout (yuzu, basilic…). Modes `amplify` (prolonger) et `contrast` (contraster).
+L'ajout est dans la bière, donc le houblon n'a pas à le reproduire : le « plafond de
+couverture » ne pénalise pas.
+
+**`combine()` (NNLS, reproduire un goût sans ajout par combinaison de houblons)
+implémenté puis RETIRÉ (décision utilisateur, 2026-08-12).** Mesuré sur les 506 notes
+réelles de la base : 0 % ne dépassaient 20 % de couverture (max observé 12 %, médiane
+1,3 %) — la chimie de l'huile de houblon ne recoupe simplement pas la plupart des
+arômes alimentaires. Pire : sur les notes à un seul composé « producible » (la
+majorité), NNLS dégénère en un système à une seule équation où n'importe quel houblon
+porteur atteint un résidu artificiel de 0 — une fausse confiance sans rapport avec la
+couverture réelle (ex. observé en direct : "strawberry" et "passion fruit" retournaient
+tous deux "100% Talus, résidu 0.0", simplement parce que le géraniol était le SEUL
+composé commun aux deux notes sur toute la base). Pas un bug de méthode (l'amélioration
+T10 du backlog — garder le meilleur de deux heuristiques de sous-ensemble — restait
+correcte) : un problème de fond, aucun algorithme ne change le recoupement chimique
+réel. Ne pas réintroduire sans un changement de fond côté données (une source qui
+couvre bien plus de composés aromatiques par aliment).
 
 ## Décisions de conception (ne pas revenir dessus sans raison)
 - **Descripteurs = couche primaire** (roues d'arôme BarthHaas/Yakima). Robuste, sans
@@ -131,8 +143,8 @@ scorings DIFFÉRENTS :
   la rareté du signal mais l'ubiquité chimique réelle de certains composés triviaux qui
   noient la signature propre à l'aliment. Définitivement PAS viable, ne pas retenter sans
   changer de vocabulaire source (pas Flavornet) ; voir `matching.contrast`.
-  `note_descriptors` est donc VIDE par défaut pour toute note — `amplify`/`combine`
-  fonctionnent en molécules-seules pour toutes les notes désormais (plus de traitement
+  `note_descriptors` est donc VIDE par défaut pour toute note — `amplify`
+  fonctionne en molécules-seules pour toutes les notes désormais (plus de traitement
   spécial pour un sous-ensemble curé). **`contrast` généralisé par sélection manuelle** :
   `matching.contrast(con, descriptors=[...])` laisse l'utilisateur décrire sa note à la
   main (vocabulaire réel `hop_descriptors`, comme `by_descriptor`) au lieu d'exiger
@@ -186,9 +198,12 @@ Fait : `ingest.ingest_flavornet`, `ingest.ingest_foodb` (généralisé à `all_f
 pipeline, amorce littérature retirée), `by-descriptor`, `ingest.crawl_yakima`,
 `ingest.ingest_flavordb2`, `ingest.resolve_pubchem_cids` (jointure structurale CAS->CID + repli
 sur le nom, voir `docs/FEATURE_NOTES.md` pour le détail de spec de by-descriptor), option
-`--biotransform` (`amplify`/`combine`, portée étroite — voir décision ci-dessus), GUI Streamlit
+`--biotransform` (`amplify`, portée étroite — voir décision ci-dessus), GUI Streamlit
 (`src/hopmatch/app.py`), `contrast`/`contrast_blend` généralisés par sélection manuelle de
-descripteurs (`matching.contrast(descriptors=[...])`, sans dépendre de `note_descriptors`).
+descripteurs (`matching.contrast(descriptors=[...])`, sans dépendre de `note_descriptors`),
+GUI : mode `browse` (T5), heatmap de comparaison des descripteurs en `by-descriptor` (T4).
+`combine()` (NNLS) implémenté, amélioré (T10), puis RETIRÉ (2026-08-12) — voir la section
+« But » en haut de ce fichier pour le détail de la décision.
 Reste :
 1. Jointure FooDB/hop_composition au-delà des ~734 composés Flavornet si le vocabulaire
    s'élargit beaucoup (crawl Yakima déjà réel, plus d'aliments FooDB).
@@ -212,5 +227,5 @@ Reste :
 - Commandes : `pip install -e ".[dev]"` ; `pytest -q` ; `hopmatch build` (démo, 4 houblons,
   0 note — `build` ne seed plus de note, seul `ingest-foodb` en crée) puis `hopmatch
   ingest-flavornet` puis `hopmatch ingest-foodb` (télécharge le dump si besoin) avant de
-  pouvoir utiliser `hopmatch amplify|contrast|combine <note>` ; `hopmatch by-descriptor
+  pouvoir utiliser `hopmatch amplify|contrast <note>` ; `hopmatch by-descriptor
   <descripteurs>` ne dépend d'aucune note et fonctionne dès `build`.

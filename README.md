@@ -1,10 +1,10 @@
 # hopmatch
 
-**Note olfactive → molécules → houblons.** Un outil pour brasseur qui répond à deux
-questions concrètes : *quel houblon accorder à un ajout* (yuzu, basilic…), et *un goût
-est-il reproductible avec du houblon seul* ?
+**Note olfactive → molécules → houblons.** Un outil pour brasseur qui répond à une
+question concrète : *quel houblon accorder à un ajout* (yuzu, basilic…) — en le
+prolongeant (`amplify`) ou en le contrastant (`contrast`) ?
 
-> État : `pytest` vert (85 tests). Toutes les sources tournent contre les sites externes :
+> État : `pytest` vert (77 tests). Toutes les sources tournent contre les sites externes :
 > `crawl_barthhaas`, `crawl_yakima`, `ingest_flavornet`, `ingest_foodb`, `ingest_flavordb2`,
 > `resolve_pubchem_cids`, `by-descriptor`, `--biotransform` (portée volontairement étroite,
 > deux voies sourcées) — voir [Feuille de route](#feuille-de-route).
@@ -15,7 +15,7 @@ est-il reproductible avec du houblon seul* ?
 1. [L'idée en une page](#lidée-en-une-page)
 2. [Le principe de conception : les données sont le goulot](#le-principe-de-conception--les-données-sont-le-goulot)
 3. [Les bases de données : pourquoi et comment chacune](#les-bases-de-données--pourquoi-et-comment-chacune)
-4. [Les deux cas d'usage, en détail](#les-deux-cas-dusage-en-détail)
+4. [Les modes, en détail](#les-modes-en-détail)
 5. [Architecture technique](#architecture-technique)
 6. [Ce qui est un prior, pas une donnée](#ce-qui-est-un-prior-pas-une-donnée)
 7. [Installation & usage](#installation--usage)
@@ -30,14 +30,17 @@ est-il reproductible avec du houblon seul* ?
 Un arôme (yuzu, basilic, mangue) est un ensemble de **molécules volatiles**. Un houblon,
 lui, a un **profil d'huile essentielle** (myrcène, linalol, géraniol, thiols…) et une
 **roue d'arôme** (descripteurs : agrume, tropical, résineux…). hopmatch relie les deux :
+tu mets un ajout dans ta bière et tu cherches le houblon qui va bien avec — soit en
+**amplifiant** (prolonger le caractère de l'ajout), soit en **contrastant**.
 
-- **Cas A — accorder.** Tu mets un ajout dans ta bière et tu cherches le houblon qui va
-  bien avec. Deux modes : *amplifier* (prolonger le caractère de l'ajout) ou *contraster*.
-- **Cas B — reproduire.** Tu veux le goût sans l'ajout : hopmatch cherche une **combinaison**
-  de houblons qui recompose le profil, et indique **ce qui restera hors de portée**.
-
-Ces deux cas n'ont **pas le même scoring**, et c'est le point de conception central
-(détaillé plus bas).
+> Une troisième approche — reproduire un goût *sans* ajout, en recomposant le profil par
+> combinaison de houblons (NNLS) — a été tentée puis retirée : mesurée sur les 506 notes
+> réelles de la base, aucune ne dépassait 20 % de couverture (max observé 12 %, médiane
+> 1,3 %). La chimie de l'huile de houblon ne recoupe simplement pas la plupart des arômes
+> alimentaires, et sur les notes à un seul composé « producible » (la majorité), le calcul
+> dégénère en un système à une seule équation où n'importe quel houblon porteur atteint un
+> résidu artificiel de 0 — une fausse confiance sans rapport avec la couverture réelle.
+> Décision utilisateur du 2026-08-12, voir l'historique git pour le détail.
 
 ---
 
@@ -199,7 +202,7 @@ et *ce qu'elle vaut*.
   composés distinctifs) reproduit systématiquement la même dégénérescence : soit les notes
   convergent vers les mêmes mots génériques, soit le profil devient vide dès qu'on se limite
   aux composés vraiment food-specific. `note_descriptors` reste donc VIDE par défaut pour
-  toute note — `amplify`/`combine` fonctionnent en scoring molécules-seules pour toutes les
+  toute note — `amplify` fonctionne en scoring molécules-seules pour toutes les
   notes désormais ; `contrast` (voir plus bas) est généralisé autrement, par sélection
   manuelle de descripteurs plutôt que par auto-dérivation.
   (Outils : `tools/audit_foodb.py`, `tools/foodb_impact_check.py`.)
@@ -298,7 +301,7 @@ résultat, si un poids vient d'une vraie source ou d'une estimation maison.
 
 ---
 
-## Les deux cas d'usage, en détail
+## Les modes, en détail
 
 ### Méthode de score moléculaire (TF-IDF)
 
@@ -318,7 +321,7 @@ et ne fait remonter que « les houblons les plus huileux ». La solution (analog
 
 Score moléculaire = somme de ces contributions, normalisée 0-100.
 
-### Cas A — `amplify` : prolonger un ajout
+### `amplify` : prolonger un ajout
 
 **Contexte.** L'ajout (le yuzu) est *physiquement dans la bière* — c'est lui qui apporte le
 limonène et le citral. Le houblon n'a donc pas à les fabriquer : le « plafond de couverture »
@@ -348,7 +351,7 @@ fournit ça automatiquement (voir « pourquoi la sélection manuelle » sous `co
 `hopmatch amplify mango` → houblons classés par recoupement molécules/descripteurs avec le
 profil FooDB de "mango" (myrcène, terpinolène...).
 
-### Cas A — `contrast` : accorder par contraste
+### `contrast` : accorder par contraste
 
 **Contexte.** Le contraste **ne se dérive pas d'une similarité moléculaire** — chercher des
 molécules partagées, c'est l'amplification. Le contraste, ce sont des profils *différents mais
@@ -384,40 +387,12 @@ note requise du tout.
 plusieurs houblons pour couvrir la cible de contraste, par couverture ensembliste **gloutonne**
 sur `hop_descriptors` (pas de NNLS ici — le contraste reste non-moléculaire par design) :
 à chaque étape, le houblon qui couvre le plus de descripteurs-cible encore non couverts, jusqu'à
-`--max-hops` ou couverture complète. Rapporte explicitement ce qui n'est pas couvert (même
-principe honnête que le résidu de `combine`), plutôt qu'une liste tronquée silencieuse.
+`--max-hops` ou couverture complète. Rapporte explicitement ce qui n'est pas couvert, plutôt
+qu'une liste tronquée silencieuse.
 
 > ⚠️ La carte d'affinités est un **prior heuristique**, pas une donnée sourcée (voir
 > [section dédiée](#ce-qui-est-un-prior-pas-une-donnée)). À ancrer sur un corpus de recettes
 > ou une référence d'accords (*The Flavor Bible*).
-
-### Cas B — `combine` : reproduire avec une combinaison de houblons
-
-**Contexte.** Ici le houblon doit tout fournir seul : le plafond de couverture **mord
-pleinement**. Un seul houblon suffit rarement, mais un **blend** peut s'approcher. La valeur
-n'est pas juste « voici le blend » — c'est **« voici le plus proche ET voici ce qui manquera
-quoi qu'il arrive »**.
-
-**Méthode (moindres carrés non négatifs, NNLS).**
-1. **Molécules couvrables** = molécules de la note qu'au moins un houblon porte.
-2. **Matrice A** (molécules couvrables × houblons), chaque case = quantité normalisée par molécule
-   (mêmes unités comparables entre lignes).
-3. **Cible t** = poids de la note pour ces molécules (normalisés).
-4. **Résoudre** `A · w ≈ t` avec `w ≥ 0` (NNLS) → poids non négatifs par houblon.
-5. **Parcimonie** (un brasseur ne blende pas 8 variétés) : chercher un sous-ensemble à
-   `max_hops` houblons via deux heuristiques — ni l'une ni l'autre exhaustive, une recherche
-   du meilleur sous-ensemble étant hors de portée dès une centaine de houblons — et garder
-   celle qui minimise le résidu réel, jamais un remplacement pur et simple : (a) garder les
-   `max_hops` plus gros poids du NNLS complet, re-résoudre dessus ; (b) sélection gloutonne
-   avant (matching pursuit), qui ajoute à chaque étape le houblon réduisant le plus le résidu.
-   Mesuré sur la base réelle : (b) seule fait mieux que (a) dans ~20 % des notes mais moins
-   bien dans quelques cas — d'où le « meilleur des deux » (voir `docs/BACKLOG.md#T10`).
-6. **Sortie** : proportions du blend (normalisées à 100 %), **résidu** (distance à la cible),
-   et **molécules irréductibles** = orphelines qu'aucune combinaison ne peut fournir (limonène,
-   terpinolène…) — la quantification honnête du plafond de couverture.
-
-`hopmatch combine mango` → blend + composés irréductibles (aucun houblon disponible ne les
-fournit).
 
 ### Option `--biotransform`
 
@@ -425,11 +400,11 @@ Certains composés qu'une note demande ne sont jamais mesurés dans une fiche ho
 (BarthHaas/Yakima ne rapportent pas le citronellol) mais peuvent apparaître dans la bière
 finie : la fermentation transforme une partie de certains composés du houblon en d'autres,
 via les enzymes de la levure. Sans en tenir compte, ces composés tombent systématiquement en
-orphelins/irréductibles — ce qui pèse surtout sur `combine`, dont la promesse centrale est de
-dire honnêtement ce qui est hors de portée.
+orphelins — ce qui pèse sur `amplify`, dont une partie de la promesse est de dire honnêtement
+ce qui est hors de portée.
 
 `--biotransform` redirige une molécule demandée par la note vers le composé précurseur que le
-houblon mesure réellement (`reference.BIOTRANSFORMATIONS`), dans `amplify` et `combine`. Portée
+houblon mesure réellement (`reference.BIOTRANSFORMATIONS`), dans `amplify`. Portée
 volontairement étroite à deux voies :
 
 - **géraniol → citronellol**
@@ -465,7 +440,7 @@ permettent pas de différencier entre souches individuelles, seulement entre « 
 
 ### Découverte — `by-descriptor` : explorer par vocabulaire
 
-Un troisième mode, orthogonal aux cas A/B : pas de note requise. L'utilisateur choisit un ou
+Un mode à part, orthogonal à `amplify`/`contrast` : pas de note requise. L'utilisateur choisit un ou
 plusieurs descripteurs dans le vocabulaire réel de la base (`hopmatch descriptors`) → l'app
 liste les houblons qui les portent, avec leurs descripteurs **et** leurs molécules.
 
@@ -564,7 +539,7 @@ activé, préfixer les commandes par `.venv/bin/` (`.venv/bin/hopmatch`,
 `hopmatch build` construit **seulement la démo** — 3 fiches BarthHaas + 3 fiches
 Yakima figées dans `data/fixtures/`, avec citra/mosaic communs aux deux sources :
 **4 houblons, 0 note**. `build` ne peuple plus aucune note (il n'y a pas d'amorce
-littérature dans ce projet) : `amplify`/`contrast`/`combine` ont besoin d'`ingest-foodb`
+littérature dans ce projet) : `amplify`/`contrast` ont besoin d'`ingest-foodb`
 en plus pour avoir des notes à interroger — `by-descriptor` fonctionne dès `build`.
 
 ```bash
@@ -601,19 +576,17 @@ distinctivité — voir la section FooDB plus haut).
 ```bash
 hopmatch list                     # notes et houblons disponibles
 
-hopmatch amplify mango                    # cas A — prolonger
+hopmatch amplify mango                    # prolonger
 hopmatch amplify "sweet basil" --oav      # + prior de seuil
 hopmatch amplify mango --descriptors citrus,tropical  # + couche descripteurs (sélection manuelle)
-hopmatch contrast --descriptors citrus,herbal        # cas A — contraster (sélection manuelle)
+hopmatch amplify mango --biotransform     # géraniol->citronellol compte comme couvert
+hopmatch contrast --descriptors citrus,herbal        # contraster (sélection manuelle)
 hopmatch contrast-blend --descriptors citrus,herbal --max-hops 3   # + blend parcimonieux
-hopmatch combine mango                    # cas B — recomposer
-hopmatch combine "passion fruit" --max-hops 2
-hopmatch combine <note> --biotransform    # géraniol->citronellol compte pour le résidu
 
 hopmatch descriptors              # vocabulaire de descripteurs disponible
 hopmatch by-descriptor citrus,tropical   # découverte, sans note requise
 
-pytest -q                         # 85 tests (nécessite l'extra [dev])
+pytest -q                         # 77 tests (nécessite l'extra [dev])
 ```
 
 ### GUI navigateur
@@ -625,7 +598,7 @@ ci-dessus) :
 streamlit run src/hopmatch/app.py
 ```
 
-Les cinq modes (amplify/contrast/combine/by-descriptor/browse) et les options
+Les quatre modes (amplify/contrast/by-descriptor/browse) et les options
 (`--oav`, `--biotransform`, `max_hops`, nombre de résultats) sont dans la barre
 latérale ; `app.py` importe directement `matching`/`schema`, pas de couche API
 intermédiaire. Le mode `contrast` remplace le sélecteur de note habituel par une
@@ -653,12 +626,12 @@ src/hopmatch/
                  validation/réparation
   ingest.py      build fixtures / crawl BarthHaas / crawl Yakima (Algolia) / ingest_flavornet /
                  resolve_pubchem_cids / ingest_flavordb2 / ingest_foodb
-  matching.py    load+réconciliation ; amplify / contrast / combine(NNLS) / by_descriptor
+  matching.py    load+réconciliation ; amplify / contrast / by_descriptor
   cli.py         CLI
   app.py         GUI Streamlit (lecture seule, importe matching/schema directement)
 data/fixtures/   pages réelles (démo) : barthhaas/{citra,mosaic,saazer}, yakima/{citra,mosaic,simcoe}
 tools/           audit_foodb.py, foodb_impact_check.py
-tests/           parsers, ingest, validation, réconciliation, modes, non-régression NNLS
+tests/           parsers, ingest, validation, réconciliation, modes
 docs/            ARCHITECTURE.md, DATA_SOURCES.md, FEATURE_NOTES.md
 CLAUDE.md        contexte projet pour Claude Code
 ```
@@ -674,7 +647,7 @@ pipeline suffisant), `by-descriptor`, `ingest.crawl_yakima` (via Algolia), `inge
 `ingest.resolve_pubchem_cids` (jointure structurale CAS→CID, avec repli sur le nom du composé —
 cf. `parsers.pubchem_name_fallbacks` — quand le CAS seul ne résout rien ; remplace la table
 d'alias manuelle pour les synonymes purs et la recherche par nom exact de `ingest_flavordb2`),
-option `--biotransform` sur `amplify`/`combine` (portée étroite, deux voies sourcées — détail
+option `--biotransform` sur `amplify` (portée étroite, deux voies sourcées — détail
 dans la [section dédiée](#option---biotransform)), GUI Streamlit (`src/hopmatch/app.py`,
 lecture seule), `contrast`/`contrast_blend` généralisés par sélection manuelle de descripteurs.
 
@@ -688,6 +661,14 @@ aucune des variantes de nom essayées — probablement absent de PubChem, pas ju
 Coder un CID à la main pour ces cas ne serait pas une donnée vérifiée comme les autres entrées
 manuelles du projet (`reference.ALIASES`, `reference.BIOTRANSFORMATIONS`) : ce serait une
 supposition sans confirmation possible. Laissé non résolu.
+
+**`combine()` (mode `combine`, NNLS) implémenté puis retiré.** Livré, testé, amélioré
+(`docs/BACKLOG.md#T10`), puis retiré le 2026-08-12 après mesure sur les 506 notes réelles :
+0 % ne dépassaient 20 % de couverture, et sur les notes à un seul composé « producible »
+(la majorité) le calcul dégénérait en un résidu artificiel de 0 — confiance affichée sans
+rapport avec la couverture réelle. Décision utilisateur, pas un bug de méthode : la chimie de
+l'huile de houblon ne recoupe simplement pas la plupart des arômes alimentaires. Voir
+l'historique git pour le détail (`matching.py`, `cli.py`, `app.py`, tests).
 
 Reste :
 

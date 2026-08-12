@@ -48,7 +48,7 @@ ALIASES: dict[str, str] = {
     "3-mercaptohexanol": "thiols", "4mmp": "thiols",
 }
 
-# Biotransformation levure (option --biotransform, cas A `amplify`/cas B `combine`) :
+# Biotransformation levure (option --biotransform, `amplify`) :
 # molécule demandée par la note -> composé précurseur mesuré côté houblon, que la
 # fermentation peut convertir. Actif seulement si l'utilisateur l'active — ça
 # affirme une fermentation standard, ce que hopmatch ne peut pas vérifier.

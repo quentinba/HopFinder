@@ -1,4 +1,4 @@
-"""CLI hopmatch : construire la base et interroger les trois modes."""
+"""CLI hopmatch : construire la base et interroger les modes (amplify/contrast/by-descriptor)."""
 from __future__ import annotations
 import argparse
 import os
@@ -51,19 +51,6 @@ def _print_contrast_blend(r):
         print("  non couvert :", ", ".join(r["residual"]))
 
 
-def _print_combine(r):
-    print(f"\n[COMBINE] {r['note']}  — couverture {r['coverage']*100:.0f}% "
-          f"| résidu {r['residual']}")
-    if r.get("biotransform"):
-        print("  (hypothèse : fermentation levure standard, géraniol->citronellol)")
-    if not r["blend"]:
-        print("  aucune combinaison trouvée.");
-    for h in r["blend"]:
-        print(f"  {h['proportion']*100:5.1f}%  {h['name']}")
-    if r["orphan"]:
-        print("  irréductible (aucun houblon ne fournit) :", ", ".join(r["orphan"]))
-
-
 def _print_by_descriptor(ranked, selected):
     print(f"\n[BY-DESCRIPTOR] {', '.join(selected)}")
     if not ranked:
@@ -110,22 +97,18 @@ def main(argv=None):
     f2.add_argument("--db", default=DEFAULT_DB)
     f2.add_argument("--sleep", type=float, default=0.3)
 
-    for name in ("amplify", "combine"):
-        s = sub.add_parser(name, help=f"cas d'usage : {name}")
-        s.add_argument("note")
-        s.add_argument("--db", default=DEFAULT_DB)
-        if name == "amplify":
-            s.add_argument("--oav", action="store_true", help="prior de seuil (approx.)")
-            s.add_argument("--descriptors",
-                           help="active la couche descripteurs pour cette note (vide par "
-                                "défaut, pas d'amorce littérature) : sélection manuelle sur "
-                                "le vocabulaire réel — voir `hopmatch descriptors` — séparés "
-                                "par virgule, ex: herbal,woody")
-        if name == "combine":
-            s.add_argument("--max-hops", type=int, default=3)
-        s.add_argument("--biotransform", action="store_true",
-                       help="suppose une fermentation levure standard "
-                            "(géraniol->citronellol, portée limitée)")
+    am = sub.add_parser("amplify", help="cas d'usage : amplify")
+    am.add_argument("note")
+    am.add_argument("--db", default=DEFAULT_DB)
+    am.add_argument("--oav", action="store_true", help="prior de seuil (approx.)")
+    am.add_argument("--descriptors",
+                    help="active la couche descripteurs pour cette note (vide par "
+                         "défaut, pas d'amorce littérature) : sélection manuelle sur "
+                         "le vocabulaire réel — voir `hopmatch descriptors` — séparés "
+                         "par virgule, ex: herbal,woody")
+    am.add_argument("--biotransform", action="store_true",
+                    help="suppose une fermentation levure standard "
+                         "(géraniol->citronellol, portée limitée)")
 
     for name in ("contrast", "contrast-blend"):
         s = sub.add_parser(name, help="cas d'usage : contraster"
@@ -187,9 +170,6 @@ def main(argv=None):
             else:
                 _print_contrast_blend(matching.contrast_blend(
                     con, note, descriptors, max_hops=a.max_hops))
-        elif a.cmd == "combine":
-            _print_combine(matching.combine(con, a.note.lower(), max_hops=a.max_hops,
-                                            biotransform=a.biotransform))
         elif a.cmd == "descriptors":
             ds = [r[0] for r in con.execute("SELECT DISTINCT descriptor FROM hop_descriptors")]
             print("Descripteurs :", ", ".join(sorted(ds)))

@@ -1,21 +1,30 @@
 """
-Moteur de matching. Trois entrées, deux cas d'usage :
+Moteur de matching :
 
-  amplify(note)   — cas A : houblons qui PROLONGENT un ajout (molécules + descripteurs)
-  contrast(note)  — cas A : houblons qui CONTRASTENT bien (affinités descripteurs)
-  combine(note)   — cas B : COMBINAISON de houblons recomposant un profil (NNLS)
+  amplify(note)   — houblons qui PROLONGENT un ajout (molécules + descripteurs)
+  contrast(note)  — houblons qui CONTRASTENT bien (affinités descripteurs)
+  by_descriptor() — découverte par vocabulaire, sans note requise
 
 Choix de conception (cf. discussion) : pas d'OAV quantitatif (pas de concentration
 fiable). Le seuil sert de prior de puissance, la couche descripteurs est primaire,
 et la couche moléculaire tourne en similarité normalisée-par-composé (TF-IDF), pas
-en cosinus pseudo-OAV. Le cas B rapporte le RÉSIDU irréductible (molécules qu'aucune
-combinaison ne peut fournir) — la quantification honnête du « à quel point on approche ».
+en cosinus pseudo-OAV.
 
-Option `biotransform` (amplify et combine) : redirige une molécule non mesurée côté
-houblon vers son précurseur mesuré, via `reference.BIOTRANSFORMATIONS` (portée
-étroite : géraniol->citronellol et linalol->alpha-terpinéol, les deux voies avec
-preuve indépendante convergente ale/lager). Affirme une fermentation levure
-standard — voir le commentaire sur cette table.
+`combine()` (cas B — recomposer un profil par combinaison NNLS de houblons) a été
+retiré : mesuré sur les 506 notes réelles de la base, aucune ne dépassait 20% de
+couverture (max observé 12%, médiane 1.3%) — la chimie de l'huile de houblon ne
+recoupe tout simplement pas la plupart des arômes alimentaires. Pire, sur les notes
+à un seul composé « producible » (la majorité), NNLS retombe sur un système à une
+seule équation : n'importe quel houblon portant ce composé atteint un résidu
+artificiel de 0.0, ce qui affichait une fausse confiance (« 100% Talus, résidu
+0.0 ») sans rapport avec la couverture réelle (~1.7%). Décision utilisateur du
+2026-08-12 après vérification en direct sur plusieurs notes.
+
+Option `biotransform` (amplify) : redirige une molécule non mesurée côté houblon
+vers son précurseur mesuré, via `reference.BIOTRANSFORMATIONS` (portée étroite :
+géraniol->citronellol et linalol->alpha-terpinéol, les deux voies avec preuve
+indépendante convergente ale/lager). Affirme une fermentation levure standard —
+voir le commentaire sur cette table.
 """
 from __future__ import annotations
 import math
@@ -240,7 +249,7 @@ def contrast(con, note: str | None = None, descriptors: list[str] | None = None,
                 f"note_descriptors pour cette note (table vide par défaut, aucune "
                 f"amorce littérature dans ce projet). Passer `descriptors=` pour "
                 f"décrire la note à la main (voir `hopmatch descriptors`), ou "
-                f"essayer amplify/combine.")
+                f"essayer amplify.")
         label = note
     else:
         raise ValueError("contrast nécessite soit `note` (avec note_descriptors "
@@ -269,9 +278,9 @@ def contrast_blend(con, note: str | None = None, descriptors: list[str] | None =
     Combinaison PARCIMONIEUSE de houblons couvrant la cible de contraste — pas de
     NNLS ici (contrast reste non-moléculaire par design, cf. ARCHITECTURE.md) :
     couverture ensembliste gloutonne sur `hop_descriptors` (à chaque étape, le
-    houblon qui couvre le PLUS de descripteurs-cible encore non couverts), même
-    esprit honnête que `combine` — parcimonie (`max_hops`) + résidu irréductible
-    rapportés explicitement plutôt qu'une liste tronquée silencieuse.
+    houblon qui couvre le PLUS de descripteurs-cible encore non couverts).
+    Parcimonie (`max_hops`) + résidu irréductible rapportés explicitement
+    plutôt qu'une liste tronquée silencieuse.
     """
     r = contrast(con, note=note, descriptors=descriptors, top=top_candidates)
     target = set(r["affinity_target"])
@@ -327,93 +336,3 @@ def by_descriptor(con, selected: list[str], top: int = 10):
     for r in ranked:
         del r["_rank"]
     return ranked[:top]
-
-
-# --------------------------------------------------------------------------- #
-# CAS B — combine (NNLS + parcimonie + résidu irréductible)
-# --------------------------------------------------------------------------- #
-def combine(con, note: str, max_hops: int = 3, biotransform: bool = False):
-    """
-    `biotransform=True` : le résidu irréductible reflète une fermentation levure
-    standard (S. cerevisiae/S. pastorianus, voir reference.BIOTRANSFORMATIONS).
-    Une molécule comme le citronellol, jamais mesurée côté houblon, devient
-    couvrable via le géraniol du houblon — c'est ici que ça compte le plus :
-    la promesse de `combine` est de dire honnêtement ce qui est irréductible,
-    et ignorer une biotransformation bien documentée le surestimerait.
-    """
-    import numpy as np
-    from scipy.optimize import nnls
-
-    hops, comp, _, _ = load(con)
-    profile = get_note(con, note)
-    producible, orphan, cov = coverage(profile, comp, biotransform)
-    mols = sorted(producible)
-    varieties = list(comp.keys())
-    if not mols or not varieties:
-        return {"mode": "combine", "note": note, "coverage": cov, "orphan": orphan,
-                "biotransform": biotransform, "blend": [], "residual": None}
-
-    # matrice A (molécules × houblons), normalisée par molécule ; cible t = poids note
-    A = np.zeros((len(mols), len(varieties)))
-    for j, h in enumerate(varieties):
-        for i, m in enumerate(mols):
-            A[i, j] = amount(h, m, comp, biotransform)
-    row_max = A.max(axis=1, keepdims=True)
-    row_max[row_max == 0] = 1.0
-    A = A / row_max
-    t = np.array([profile[m] for m in mols], dtype=float)
-    t = t / (t.max() or 1.0)
-
-    # Sous-ensemble à <= max_hops houblons : deux heuristiques (aucune n'est
-    # une recherche exhaustive du meilleur sous-ensemble, hors de portée dès
-    # une centaine de houblons), on garde celle qui minimise le résidu réel :
-    # (1) NNLS complet, garder les max_hops poids les plus forts, re-résoudre
-    #     dessus — rapide (une seule résolution pleine échelle) mais peut
-    #     laisser de côté un houblon individuellement discret dont l'ajout
-    #     réduirait pourtant le résidu ;
-    # (2) sélection gloutonne avant (type matching pursuit) : ajoute à chaque
-    #     étape le houblon qui réduit le plus le résidu sur le sous-ensemble
-    #     déjà choisi. Mesuré sur la base réelle (échantillon de 80 notes,
-    #     `docs/BACKLOG.md#T10`) : la seule gloutonne fait MIEUX que (1) dans
-    #     ~20 % des cas mais MOINS BIEN dans quelques cas (deux heuristiques
-    #     différentes, ni l'une ni l'autre optimale) — d'où le "meilleur des
-    #     deux" plutôt qu'un remplacement pur et simple, qui ne peut jamais
-    #     dégrader (1) et l'améliore quand (2) trouve mieux.
-    w, _ = nnls(A, t)
-    idx_topk = [j for j in np.argsort(-w)[:max_hops] if w[j] > 1e-9]
-
-    idx_greedy: list[int] = []
-    remaining = set(range(len(varieties)))
-    best_res = float(np.linalg.norm(t))
-    for _ in range(max_hops):
-        candidate, candidate_res = None, best_res
-        for j in remaining:
-            _, r = nnls(A[:, idx_greedy + [j]], t)
-            if r < candidate_res - 1e-9:
-                candidate, candidate_res = j, r
-        if candidate is None:
-            break
-        idx_greedy.append(candidate)
-        remaining.discard(candidate)
-        best_res = candidate_res
-
-    def _residual(idx):
-        if not idx:
-            return float(np.linalg.norm(t))
-        _, r = nnls(A[:, idx], t)
-        return float(r)
-
-    idx = min((idx_topk, idx_greedy), key=_residual) if idx_topk or idx_greedy else []
-    if idx:
-        w2, res = nnls(A[:, idx], t)
-        blend_w = {varieties[idx[k]]: float(w2[k]) for k in range(len(idx)) if w2[k] > 1e-6}
-    else:
-        blend_w, res = {}, float(np.linalg.norm(t))
-
-    total = sum(blend_w.values()) or 1.0
-    blend = sorted(({"variety": v, "name": hops[v]["name"],
-                     "proportion": round(w / total, 3)} for v, w in blend_w.items()),
-                   key=lambda r: -r["proportion"])
-    return {"mode": "combine", "note": note, "coverage": cov, "orphan": orphan,
-            "biotransform": biotransform, "blend": blend, "residual": round(float(res), 3),
-            "n_molecules": len(mols)}

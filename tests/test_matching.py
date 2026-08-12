@@ -47,11 +47,6 @@ def test_amplify_ranks(db):
     assert r["ranked"], "au moins un houblon"
     assert 0 <= r["coverage"] <= 1
 
-def test_combine_returns_blend_and_residual(db):
-    r = matching.combine(db, "_passion", max_hops=2)
-    assert "residual" in r
-    assert isinstance(r["blend"], list)
-
 def test_orphans_flagged(db):
     r = matching.amplify(db, "_citrus")
     # limonène n'existe pas dans le houblon -> orphelin
@@ -104,14 +99,6 @@ def test_coverage_biotransform_unlocks_citronellol(db):
     producible_on, orphan_on, _ = matching.coverage(profile, comp, biotransform=True)
     assert "citronellol" in producible_on
     assert "citronellol" not in orphan_on
-
-def test_combine_biotransform_removes_citronellol_from_residual(db):
-    r_off = matching.combine(db, "_rose", max_hops=2)
-    r_on = matching.combine(db, "_rose", max_hops=2, biotransform=True)
-    assert "citronellol" in r_off["orphan"]
-    assert "citronellol" not in r_on["orphan"]
-    assert r_off["biotransform"] is False
-    assert r_on["biotransform"] is True
 
 def test_amplify_biotransform_flag_echoed(db):
     r = matching.amplify(db, "_rose", biotransform=True)

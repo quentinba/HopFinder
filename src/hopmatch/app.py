@@ -1,5 +1,5 @@
 """
-GUI Streamlit : les modes du CLI (amplify/contrast/combine/by-descriptor) +
+GUI Streamlit : les modes du CLI (amplify/contrast/by-descriptor) +
 un mode "browse" propre à la GUI pour parcourir la base brute (houblon par
 houblon), en lecture seule contre une base déjà construite. Ne touche pas à
 l'ingestion (crawl/build/ingest-*) : ça reste le rôle du CLI (`hopmatch
@@ -156,38 +156,13 @@ def _contrast(con):
         st.warning("Non couvert par le blend : " + ", ".join(blend["residual"]))
 
 
-def _combine(con, note):
-    st.sidebar.subheader("Options")
-    max_hops = st.sidebar.slider("max_hops (taille du blend)", 1, 6, 3)
-    biotransform = st.sidebar.checkbox(
-        "--biotransform (fermentation levure standard)", value=False)
-    r = matching.combine(con, note, max_hops=max_hops, biotransform=biotransform)
-
-    col1, col2 = st.columns(2)
-    col1.metric("Couverture", f"{r['coverage']*100:.0f}%")
-    col2.metric("Résidu (distance à la cible)", r["residual"])
-    if r["biotransform"]:
-        st.info("Hypothèse active : fermentation levure standard "
-                "(géraniol→citronellol, linalol→alpha-terpinéol).")
-    if r["orphan"]:
-        st.warning("Irréductible (aucun houblon ne peut fournir) : "
-                   + ", ".join(r["orphan"]))
-    if not r["blend"]:
-        st.write("Aucune combinaison trouvée.")
-        return
-    st.dataframe(
-        [{"Houblon": h["name"], "Proportion": f"{h['proportion']*100:.1f}%"}
-         for h in r["blend"]],
-        width="stretch", hide_index=True)
-
-
 _NON_AROMA_DISPLAY = {"total_oil", "alpha_acid", "beta_acid"}
 
 
 def _browse(con):
     """Mode propre à la GUI (pas d'équivalent CLI) : consulter un houblon
     directement — composition + descripteurs + sources — sans passer par
-    amplify/combine/by-descriptor (T5 backlog)."""
+    amplify/contrast/by-descriptor (T5 backlog)."""
     hops, comp, hop_desc, _ = matching.load(con)
     query = st.text_input("Rechercher (nom ou variété)")
     varieties = sorted(hops, key=lambda v: hops[v]["name"].lower())
@@ -250,7 +225,8 @@ def _descriptor_heatmap(ranked):
         .encode(
             x=alt.X("Houblon:N", sort=hop_order, title=None,
                     axis=alt.Axis(labelAngle=-45, labelOverlap=False, labelLimit=200)),
-            y=alt.Y("Descripteur:N", sort=descriptor_order, title=None),
+            y=alt.Y("Descripteur:N", sort=descriptor_order, title=None,
+                    axis=alt.Axis(labelOverlap=False)),
             color=alt.Color(
                 "Présent:N",
                 scale=alt.Scale(domain=["oui", "non"], range=["#2a78d6", "#f2f1ee"]),
@@ -320,7 +296,7 @@ def main():
         f"{stats['descriptors']} descripteurs · modifiée {modified}")
 
     mode = st.sidebar.radio(
-        "Mode", ["amplify", "contrast", "combine", "by-descriptor", "browse"])
+        "Mode", ["amplify", "contrast", "by-descriptor", "browse"])
 
     if mode == "by-descriptor":
         st.header("Découverte par descripteurs")
@@ -343,10 +319,7 @@ def main():
     note = st.sidebar.selectbox("Note", notes)
 
     st.header(f"{mode} — {note}")
-    if mode == "amplify":
-        _amplify(con, note)
-    elif mode == "combine":
-        _combine(con, note)
+    _amplify(con, note)
 
 
 if __name__ == "__main__":

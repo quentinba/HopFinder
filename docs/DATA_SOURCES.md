@@ -115,7 +115,7 @@
   le problème n'est plus la rareté du signal (filtré par le point 1) mais l'ubiquité
   chimique réelle de composés triviaux qui noient la signature propre à l'aliment. Aucun
   filtre de richesse ne peut compenser ça. `note_descriptors` reste donc VIDE par défaut
-  pour toute note — `amplify`/`combine` fonctionnent en molécules-seules pour toutes les notes
+  pour toute note — `amplify` fonctionne en molécules-seules pour toutes les notes
   désormais. `contrast` est généralisé différemment : `matching.contrast(descriptors=)` laisse
   l'utilisateur décrire sa note à la main (vocabulaire réel `hop_descriptors`, comme
   `by_descriptor`) au lieu de dépendre de `note_descriptors` — couvre n'importe quelle note sans

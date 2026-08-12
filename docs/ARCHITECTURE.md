@@ -62,9 +62,9 @@ vocabulaire houblon.
 dans les scrapes tiers), les négatifs, les sommes incohérentes. Inoffensif sur
 BarthHaas/Yakima (propres) ; utile si tu ingères un dataset brut.
 
-## Les trois modes
-- `amplify` = w_mol·(molécules) + w_desc·(descripteurs). Cas A, prolonger.
-- `contrast` = affinités descripteurs (carte curée). Cas A, contraster. **Non
+## Les modes
+- `amplify` = w_mol·(molécules) + w_desc·(descripteurs). Prolonger l'ajout.
+- `contrast` = affinités descripteurs (carte curée). Contraster. **Non
   moléculaire** : le contraste ne se dérive pas des composés partagés. Par
   `note`, exige `note_descriptors` peuplé pour cette note — vide par défaut
   pour toutes les notes (pas d'amorce littérature dans ce projet, retirée à la
@@ -76,25 +76,35 @@ BarthHaas/Yakima (propres) ; utile si tu ingères un dataset brut.
   fonctionne pour n'importe quelle note sans curation. `contrast_blend` propose
   une combinaison parcimonieuse (couverture ensembliste gloutonne, pas de NNLS)
   avec résidu non couvert rapporté.
-- `combine` = NNLS `A·w ≈ t` (A = composés×houblons normalisés, t = poids note),
-  parcimonie (≤ max_hops), + **résidu irréductible** = orphelines. Cas B.
 - `by_descriptor` = recoupement `hop_descriptors ∩ sélection`, sans note requise.
-  Orthogonal aux cas A/B : grounded sur les roues d'arôme réelles (pas
+  Orthogonal à `amplify`/`contrast` : grounded sur les roues d'arôme réelles (pas
   `CONTRAST_AFFINITY`), ne dépend ni de FooDB ni de `crawl_yakima`. Tri par nb de
   descripteurs recoupés puis `total_oil` réconcilié (proxy d'intensité) puis variety.
   Descripteurs normalisés à l'ingestion via `reference.DESCRIPTOR_ALIASES`.
 
-`--biotransform` (`amplify`/`combine`) : `matching.hop_compound(m, biotransform=True)`
+`--biotransform` (`amplify`) : `matching.hop_compound(m, biotransform=True)`
 redirige une molécule vers son précurseur mesuré côté houblon via
 `reference.BIOTRANSFORMATIONS` — géraniol→citronellol et linalol→alpha-terpinéol
 uniquement (deux voies avec preuve indépendante convergente ale/lager, King &
 Dickinson 2003 ; corroboré par Michel et al. 2019 sur l'absence d'effet souche). Un
 seul point d'implémentation (`hop_compound`) traverse `amount`, `specificity`,
-`coverage`, donc `molecular_scores`/`amplify` ET la matrice NNLS/`combine` — c'est
-`combine` qui en tire le plus, puisque le résidu irréductible surestimerait sinon ce
-qui est vraiment hors de portée. Pas de sélection de souche : aucune source ne
-compare des souches commerciales entre elles, seulement des codes de collection
-académique — voir README.md#option---biotransform pour le détail du raisonnement.
+`coverage`, donc `molecular_scores`/`amplify`. Pas de sélection de souche : aucune
+source ne compare des souches commerciales entre elles, seulement des codes de
+collection académique — voir README.md#option---biotransform pour le détail du
+raisonnement.
+
+## `combine()` (NNLS) — implémenté puis retiré
+Un mode `combine` a existé : `A·w ≈ t` (A = composés×houblons normalisés, t = poids
+note) résolu par NNLS, parcimonie (≤ max_hops) via deux heuristiques combinées
+(garder le meilleur des deux résidus), **résidu irréductible** = orphelines. Retiré
+le 2026-08-12 (décision utilisateur) après mesure sur les 506 notes réelles : 0 %
+ne dépassaient 20 % de couverture (max observé 12 %, médiane 1,3 %). Sur les notes à
+un seul composé « producible » (la majorité), NNLS dégénère en un système à une
+seule équation : n'importe quel houblon porteur du composé atteint un résidu
+artificiel de 0, une fausse confiance sans rapport avec la couverture réelle — pas
+un bug d'implémentation, la chimie de l'huile de houblon ne recoupe simplement pas
+la plupart des arômes alimentaires. Voir CLAUDE.md pour le détail complet et
+l'historique git pour le code retiré.
 
 ## Ce qui est volontairement absent
 Pas d'OAV quantitatif (pas de concentration fiable), pas de cosinus pseudo-OAV,

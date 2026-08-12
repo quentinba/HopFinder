@@ -5,12 +5,12 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "hopmatch"
 version = "0.1.0"
-description = "Note olfactive → molécules → houblons : accorder ou recomposer des profils avec du houblon."
+description = "Note olfactive → molécules → houblons : accorder un houblon à un ajout."
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [{name = "Quentin"}]
-dependencies = ["numpy>=1.24", "scipy>=1.10"]
+dependencies = []
 
 [project.optional-dependencies]
 crawl = ["requests>=2.31", "beautifulsoup4>=4.12"]

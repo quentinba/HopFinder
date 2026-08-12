@@ -654,7 +654,7 @@ def ingest_foodb(out_db: str, foodb_csv_dir: str | None = None,
     écartés par ce filtre (992 aliments au total, 141 sans aucun composé
     whitelisté — voir `no_hit` ci-dessous, ~510 notes distinctes conservées).
     Limite honnête : aucune note (curée ou non) n'a de `note_descriptors` par
-    défaut désormais — `amplify`/`combine` fonctionnent en scoring
+    défaut désormais — `amplify` fonctionne en scoring
     molécules-seules pour toutes, `contrast` par `note` lève une ValueError
     explicite (matching.contrast) plutôt qu'un résultat vide silencieux ;
     `contrast` reste utilisable via une sélection manuelle de descripteurs

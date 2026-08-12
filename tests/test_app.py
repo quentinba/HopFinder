@@ -121,16 +121,6 @@ def test_contrast_mode_with_manual_descriptors(toy_cwd):
     assert any("cible d'affinité" in c.value.lower() for c in at.caption)
     assert len(at.dataframe) >= 1
 
-def test_combine_mode_renders_metrics(toy_cwd):
-    at = _app()
-    at.run()
-    at.sidebar.radio[0].set_value("combine").run()
-    assert not at.exception
-    note_select = at.sidebar.selectbox[0]
-    note_select.set_value("mynote").run()
-    assert not at.exception
-    assert len(at.metric) >= 2  # couverture + résidu
-
 def test_by_descriptor_mode_lists_matching_hop(toy_cwd):
     at = _app()
     at.run()
@@ -172,7 +162,7 @@ def test_by_descriptor_mode_hides_heatmap_for_single_hop(toy_cwd):
 
 def test_browse_mode_shows_hop_composition_and_descriptors(toy_cwd):
     # T5 backlog : consulter un houblon (composition + descripteurs) sans
-    # passer par amplify/combine/by-descriptor.
+    # passer par amplify/contrast/by-descriptor.
     at = _app()
     at.run()
     at.sidebar.radio[0].set_value("browse").run()

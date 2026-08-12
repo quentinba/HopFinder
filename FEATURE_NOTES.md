@@ -28,7 +28,7 @@ est implémentable dès maintenant sur la base existante.
   et `hopmatch descriptors` pour lister le vocabulaire disponible.
 - Fonction : `matching.by_descriptor(con, selected: list[str], top=10)` renvoyant
   `[{variety, name, matched_descriptors, all_descriptors, compounds, sources}]`.
-- Nouveau mode, plus SIMPLE que amplify/contrast/combine (pas de note requise).
+- Nouveau mode, plus SIMPLE que amplify/contrast (pas de note requise).
 
 **Notes.**
 - Idéal pour une future UI (cases à cocher sur le vocabulaire).

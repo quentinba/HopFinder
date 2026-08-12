@@ -135,3 +135,15 @@ l'implémentation ([ ] à faire, [x] fait — voir le commit associé).
   contient un cas adversarial construit par recherche aléatoire où l'ancienne
   heuristique seule choisirait un sous-ensemble strictement pire (résidu 0.71
   vs 0.51) que la nouvelle décision "meilleur des deux".
+
+  **Addendum 2026-08-12 — `combine()` retiré entièrement (décision utilisateur).**
+  Cette amélioration restait correcte, mais mesurée sur les 506 notes réelles :
+  0 % ne dépassaient 20 % de couverture (max 12 %, médiane 1,3 %) — la chimie de
+  l'huile de houblon ne recoupe simplement pas la plupart des arômes alimentaires.
+  Pire, sur les notes à un seul composé « producible » (la majorité), NNLS dégénère
+  en système à une seule équation : n'importe quel houblon porteur atteint un
+  résidu artificiel de 0, une fausse confiance sans rapport avec la couverture
+  réelle (observé en direct : "strawberry" et "passion fruit" retournaient tous
+  deux "100% Talus, résidu 0.0", géraniol étant le seul composé commun aux deux
+  notes sur toute la base). `tests/test_combine.py` supprimé avec la fonction —
+  voir CLAUDE.md et l'historique git pour le détail complet.

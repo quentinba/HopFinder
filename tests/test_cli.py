@@ -74,11 +74,6 @@ def test_amplify_with_manual_descriptors(db_path, capsys):
     assert "[AMPLIFY] mynote" in out
     assert "pas de descripteurs pour cette note" not in out
 
-def test_combine_dispatches(db_path, capsys):
-    assert main(["combine", "mynote", "--db", db_path, "--max-hops", "2"]) == 0
-    out = capsys.readouterr().out
-    assert "[COMBINE] mynote" in out
-
 def test_by_descriptor_dispatches(db_path, capsys):
     assert main(["by-descriptor", "citrus", "--db", db_path]) == 0
     out = capsys.readouterr().out

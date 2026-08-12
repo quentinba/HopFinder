@@ -38,7 +38,7 @@ est implémentable dès maintenant sur la base existante.
   `[{variety, name, matched_descriptors, all_descriptors, compounds, sources}]` où
   `compounds = [{compound, mid, unit, sources}]` (même forme que `matching.load()`,
   pas de nouvelle convention de sortie).
-- Nouveau mode, plus SIMPLE que amplify/contrast/combine (pas de note requise).
+- Nouveau mode, plus SIMPLE que amplify/contrast (pas de note requise).
 
 **Normalisation des descripteurs (prérequis, pas juste une note d'intention).**
 Vérifié sur les fixtures actuelles : `parse_descriptors` minuscule déjà tout, aucune
