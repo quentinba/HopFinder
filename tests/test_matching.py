@@ -23,10 +23,6 @@ def db():
         # mirrors l'ancienne note "fruit-passion" : thiols (barthhaas only).
         ("_passion", "thiols", 1.0, "test"),
         ("_passion", "myrcene", 0.3, "test"),
-        # mirrors l'ancienne note "rose" : citronellol jamais mesuré côté
-        # houblon (nécessite --biotransform pour être couvert via géraniol).
-        ("_rose", "geraniol", 1.0, "test"),
-        ("_rose", "citronellol", 0.9, "test"),
     ])
     con.executemany("INSERT INTO note_descriptors VALUES (?,?)", [
         ("_citrus", "citrus"), ("_citrus", "floral"),
@@ -52,6 +48,24 @@ def test_orphans_flagged(db):
     # limonène n'existe pas dans le houblon -> orphelin
     assert "limonene" in r["orphan"]
 
+def test_amplify_use_oav_flag_echoed(db):
+    r = matching.amplify(db, "_citrus", use_oav=True)
+    assert r["use_oav"] is True
+    assert matching.amplify(db, "_citrus")["use_oav"] is False
+
+def test_biotransform_removed_no_double_counting_path(db):
+    # Non-régression : --biotransform a été retiré (2026-08-12) car il faisait
+    # compter deux fois la même mesure de géraniol (une fois comme "geraniol",
+    # une fois redirigée comme "citronellol") sur toute note demandant les
+    # deux — vérifie qu'il n'existe plus aucun paramètre biotransform sur les
+    # fonctions concernées, pour empêcher une réintroduction accidentelle du
+    # même bug plutôt qu'une correction à la racine.
+    import inspect
+    for fn in (matching.hop_compound, matching.amount, matching.specificity,
+              matching.coverage, matching.molecular_scores, matching.amplify):
+        assert "biotransform" not in inspect.signature(fn).parameters
+    assert not hasattr(reference, "BIOTRANSFORMATIONS")
+
 def test_by_descriptor_matches_and_ranks(db):
     r = matching.by_descriptor(db, ["citrus", "tropical"])
     varieties = [h["variety"] for h in r]
@@ -71,38 +85,6 @@ def test_by_descriptor_normalizes_aliases(db):
 
 def test_by_descriptor_no_match(db):
     assert matching.by_descriptor(db, ["nonexistent-descriptor"]) == []
-
-def test_hop_compound_biotransform():
-    assert matching.hop_compound("citronellol") == "citronellol"  # sans le flag, pas de redirection
-    assert matching.hop_compound("citronellol", biotransform=True) == "geraniol"
-    assert matching.hop_compound("alpha-terpineol", biotransform=True) == "linalool"
-    assert matching.hop_compound("myrcene", biotransform=True) == "myrcene"  # hors portée, inchangé
-
-def test_coverage_biotransform_unlocks_alpha_terpineol(db):
-    # aucune note de démo ne demande alpha-terpineol : profil ad hoc pour vérifier
-    # la voie linalol->alpha-terpinéol indépendamment de géraniol->citronellol
-    _, comp, _, _ = matching.load(db)
-    profile = {"alpha-terpineol": 1.0}
-    _, orphan_off, _ = matching.coverage(profile, comp)
-    assert "alpha-terpineol" in orphan_off
-
-    producible_on, orphan_on, _ = matching.coverage(profile, comp, biotransform=True)
-    assert "alpha-terpineol" in producible_on
-    assert "alpha-terpineol" not in orphan_on
-
-def test_coverage_biotransform_unlocks_citronellol(db):
-    _, comp, _, _ = matching.load(db)
-    profile = matching.get_note(db, "_rose")
-    _, orphan_off, _ = matching.coverage(profile, comp)
-    assert "citronellol" in orphan_off  # aucun houblon ne mesure le citronellol
-
-    producible_on, orphan_on, _ = matching.coverage(profile, comp, biotransform=True)
-    assert "citronellol" in producible_on
-    assert "citronellol" not in orphan_on
-
-def test_amplify_biotransform_flag_echoed(db):
-    r = matching.amplify(db, "_rose", biotransform=True)
-    assert r["biotransform"] is True
 
 def test_contrast_requires_note_or_descriptors(db):
     with pytest.raises(ValueError):

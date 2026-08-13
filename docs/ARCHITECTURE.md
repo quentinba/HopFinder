@@ -14,8 +14,7 @@ déchet. hopmatch privilégie donc des couches robustes et honnêtes.
    pour que les molécules-signature pilotent, pas le myrcène ubiquitaire. Le seuil
    olfactif est un **prior de puissance** (option `--oav`), pas un OAV réel.
 3. **Honnêteté.** Couverture (fraction du caractère réellement portable par le
-   houblon) + molécules **orphelines** + biotransformation levure optionnelle
-   (`--biotransform`, portée étroite — voir plus bas).
+   houblon) + molécules **orphelines**.
 
 ## Base : EAV multi-sources
 `hop_composition(variety, compound, vmin, vmax, unit, source, confidence, notes)`
@@ -82,16 +81,16 @@ BarthHaas/Yakima (propres) ; utile si tu ingères un dataset brut.
   descripteurs recoupés puis `total_oil` réconcilié (proxy d'intensité) puis variety.
   Descripteurs normalisés à l'ingestion via `reference.DESCRIPTOR_ALIASES`.
 
-`--biotransform` (`amplify`) : `matching.hop_compound(m, biotransform=True)`
-redirige une molécule vers son précurseur mesuré côté houblon via
-`reference.BIOTRANSFORMATIONS` — géraniol→citronellol et linalol→alpha-terpinéol
-uniquement (deux voies avec preuve indépendante convergente ale/lager, King &
-Dickinson 2003 ; corroboré par Michel et al. 2019 sur l'absence d'effet souche). Un
-seul point d'implémentation (`hop_compound`) traverse `amount`, `specificity`,
-`coverage`, donc `molecular_scores`/`amplify`. Pas de sélection de souche : aucune
-source ne compare des souches commerciales entre elles, seulement des codes de
-collection académique — voir README.md#option---biotransform pour le détail du
-raisonnement.
+## `--biotransform` — implémenté puis retiré
+L'option redirigeait une molécule vers son précurseur mesuré côté houblon
+(géraniol→citronellol, linalol→alpha-terpinéol) via `hop_compound(m,
+biotransform=True)`, un seul point d'implémentation traversant `amount`,
+`specificity`, `coverage`. Science sourcée solide (King & Dickinson 2003 ;
+corroboré par Michel et al. 2019), mais bug de double comptage confirmé sur
+les données réelles : les 29 notes demandant du citronellol demandent TOUTES
+aussi du géraniol, donc la même mesure de géraniol comptait deux fois dans le
+score. Retiré le 2026-08-12 (décision utilisateur) — voir README.md et
+CLAUDE.md pour le détail complet.
 
 ## `combine()` (NNLS) — implémenté puis retiré
 Un mode `combine` a existé : `A·w ≈ t` (A = composés×houblons normalisés, t = poids

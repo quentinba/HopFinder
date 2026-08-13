@@ -18,8 +18,9 @@ def _split_descriptors(raw: str | None) -> list[str] | None:
 
 def _print_amplify(r):
     print(f"\n[AMPLIFY] {r['note']}  — couverture moléculaire {r['coverage']*100:.0f}%")
-    if r.get("biotransform"):
-        print("  (hypothèse : fermentation levure standard, géraniol->citronellol)")
+    if r.get("use_oav"):
+        print("  (--oav actif : molécules à seuil olfactif bas pondérées plus fort, "
+              "prior de puissance approximatif — pas une mesure de concentration réelle)")
     if not r.get("has_descriptors", True):
         print("  (pas de descripteurs pour cette note : score 100% moléculaire)")
     if r["orphan"]:
@@ -100,15 +101,20 @@ def main(argv=None):
     am = sub.add_parser("amplify", help="cas d'usage : amplify")
     am.add_argument("note")
     am.add_argument("--db", default=DEFAULT_DB)
-    am.add_argument("--oav", action="store_true", help="prior de seuil (approx.)")
+    am.add_argument("--oav", action="store_true",
+                    help="pondère chaque molécule par un prior de puissance olfactive "
+                         "(1/seuil connu, ~14 molécules d'huile de houblon courantes — "
+                         "myrcène, géraniol, thiols... ; les autres molécules ne sont pas "
+                         "affectées). Approximatif : pas une mesure de concentration "
+                         "réelle (aucune donnée de concentration fiable ne l'alimente), "
+                         "juste une correction pour qu'une molécule très odorante à faible "
+                         "seuil ne soit pas éclipsée par une molécule ubiquitaire mais peu "
+                         "odorante. Change le classement sur ~1 note sur 6 (mesuré).")
     am.add_argument("--descriptors",
                     help="active la couche descripteurs pour cette note (vide par "
                          "défaut, pas d'amorce littérature) : sélection manuelle sur "
                          "le vocabulaire réel — voir `hopmatch descriptors` — séparés "
                          "par virgule, ex: herbal,woody")
-    am.add_argument("--biotransform", action="store_true",
-                    help="suppose une fermentation levure standard "
-                         "(géraniol->citronellol, portée limitée)")
 
     for name in ("contrast", "contrast-blend"):
         s = sub.add_parser(name, help="cas d'usage : contraster"
@@ -161,7 +167,7 @@ def main(argv=None):
         elif a.cmd == "amplify":
             descriptors = _split_descriptors(a.descriptors)
             _print_amplify(matching.amplify(con, a.note.lower(), use_oav=a.oav,
-                                            biotransform=a.biotransform, descriptors=descriptors))
+                                            descriptors=descriptors))
         elif a.cmd in ("contrast", "contrast-blend"):
             descriptors = _split_descriptors(a.descriptors)
             note = a.note.lower() if a.note else None

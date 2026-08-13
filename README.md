@@ -4,10 +4,10 @@
 question concrète : *quel houblon accorder à un ajout* (yuzu, basilic…) — en le
 prolongeant (`amplify`) ou en le contrastant (`contrast`) ?
 
-> État : `pytest` vert (77 tests). Toutes les sources tournent contre les sites externes :
+> État : `pytest` vert (75 tests). Toutes les sources tournent contre les sites externes :
 > `crawl_barthhaas`, `crawl_yakima`, `ingest_flavornet`, `ingest_foodb`, `ingest_flavordb2`,
-> `resolve_pubchem_cids`, `by-descriptor`, `--biotransform` (portée volontairement étroite,
-> deux voies sourcées) — voir [Feuille de route](#feuille-de-route).
+> `resolve_pubchem_cids`, `by-descriptor`, `--oav` (prior de puissance olfactive, approximatif)
+> — voir [Feuille de route](#feuille-de-route).
 
 ---
 
@@ -394,49 +394,25 @@ qu'une liste tronquée silencieuse.
 > [section dédiée](#ce-qui-est-un-prior-pas-une-donnée)). À ancrer sur un corpus de recettes
 > ou une référence d'accords (*The Flavor Bible*).
 
-### Option `--biotransform`
+### Option `--biotransform` — implémentée puis retirée
 
-Certains composés qu'une note demande ne sont jamais mesurés dans une fiche houblon
-(BarthHaas/Yakima ne rapportent pas le citronellol) mais peuvent apparaître dans la bière
-finie : la fermentation transforme une partie de certains composés du houblon en d'autres,
-via les enzymes de la levure. Sans en tenir compte, ces composés tombent systématiquement en
-orphelins — ce qui pèse sur `amplify`, dont une partie de la promesse est de dire honnêtement
-ce qui est hors de portée.
-
-`--biotransform` redirige une molécule demandée par la note vers le composé précurseur que le
-houblon mesure réellement (`reference.BIOTRANSFORMATIONS`), dans `amplify`. Portée
-volontairement étroite à deux voies :
-
-- **géraniol → citronellol**
-- **linalol → alpha-terpinéol**
-
-Ce sont les deux seules voies avec une preuve indépendante convergente entre souche ale et
-souche lager — deux espèces différentes, résultats concordants : King & Dickinson (2003,
-*Biotransformation of hop aroma terpenoids by ale and lager yeasts*, FEMS Yeast Research)
-mesurent des courbes de concentration réelles sur *Saccharomyces cerevisiae* NCYC 1681 (ale) et
-*Saccharomyces bayanus* NCYC 1324 (lager), avec des niveaux de conversion proches pour les deux
-souches sur ces deux voies. Michel et al. (2019, *Screening of brewing yeast β-lyase activity
-and release of hop volatile thiols from precursors during fermentation*, BrewingScience)
-corrobore l'absence d'effet souche détectable, sur près de 100 souches de brasserie (*S.
-cerevisiae*/*S. pastorianus*), pour un thiol proche mécaniquement.
-
-**Délibérément hors périmètre :**
-- Les esters (acétate de géranyle, acétate de citronellyle) : King & Dickinson montrent qu'ils
-  ne sont produits que par la souche lager, pas l'ale — preuve divergente entre souches, donc
-  hors de la généralisation que fait cette option.
-- Les thiols et leurs précurseurs : jamais mesurés côté houblon, rien à rediriger vers.
-- Les terpènes majoritaires du houblon (myrcène, humulène, caryophyllène, pinènes) : montrés
-  explicitement NON biotransformés dans la même étude — juste perdus par
-  évaporation/adsorption, aucun produit détecté.
-
-**Ce que `--biotransform` affirme, et ce qu'il n'affirme pas.** L'option suppose une
-fermentation à la levure *S. cerevisiae*/*S. pastorianus* standard. Aucune étude trouvée ne
-teste les souches Kveik, *Brettanomyces* ou une fermentation mixte pour ces voies précises :
-l'option ne fait aucune affirmation dans ces cas (ni « pareil », ni « différent ») — elle
-suppose simplement une fermentation standard, à l'utilisateur de juger si c'est pertinent pour
-sa recette. C'est pour cette raison qu'il n'y a pas de sélection de souche : les données ne
-permettent pas de différencier entre souches individuelles, seulement entre « standard » et
-« non testé ».
+L'option existait pour rediriger une molécule demandée par la note vers son composé
+précurseur mesuré côté houblon (géraniol → citronellol, linalol → alpha-terpinéol),
+sur l'hypothèse d'une fermentation levure standard. La science sourcée derrière
+restait solide (King & Dickinson 2003, corroborée par Michel et al. 2019), mais
+**l'intégration avait un vrai bug de double comptage**, retiré le 2026-08-12
+(décision utilisateur, vérifié en direct) : `hop_compound(m, biotransform=True)`
+redirigeait la molécule demandée vers son précurseur sans vérifier si ce précurseur
+était déjà, séparément, une entrée du même profil de note. Sur les **29 notes
+réelles** qui demandent du citronellol, **les 29** demandent aussi du géraniol
+(chevauchement total, vérifié) — la même mesure de géraniol d'un houblon comptait
+donc deux fois dans le score (une fois comme « géraniol », une fois redirigée comme
+« citronellol »), gonflant le classement sans réelle justification (vérifié : change
+le houblon n°1 sur plusieurs notes réelles, ex. "coriander"). Corriger le double
+comptage à la racine aurait ajouté de la complexité à une hypothèse déjà étroite
+(une seule souche « standard », non vérifiable par hopmatch) pour un bénéfice
+marginal — voir `reference.py` pour le détail complet et le raisonnement pour ne
+pas la réintroduire sans corriger le double comptage.
 
 ### Découverte — `by-descriptor` : explorer par vocabulaire
 
@@ -577,16 +553,15 @@ distinctivité — voir la section FooDB plus haut).
 hopmatch list                     # notes et houblons disponibles
 
 hopmatch amplify mango                    # prolonger
-hopmatch amplify "sweet basil" --oav      # + prior de seuil
+hopmatch amplify "sweet basil" --oav      # + prior de puissance olfactive
 hopmatch amplify mango --descriptors citrus,tropical  # + couche descripteurs (sélection manuelle)
-hopmatch amplify mango --biotransform     # géraniol->citronellol compte comme couvert
 hopmatch contrast --descriptors citrus,herbal        # contraster (sélection manuelle)
 hopmatch contrast-blend --descriptors citrus,herbal --max-hops 3   # + blend parcimonieux
 
 hopmatch descriptors              # vocabulaire de descripteurs disponible
 hopmatch by-descriptor citrus,tropical   # découverte, sans note requise
 
-pytest -q                         # 77 tests (nécessite l'extra [dev])
+pytest -q                         # 75 tests (nécessite l'extra [dev])
 ```
 
 ### GUI navigateur
@@ -599,7 +574,7 @@ streamlit run src/hopmatch/app.py
 ```
 
 Les quatre modes (amplify/contrast/by-descriptor/browse) et les options
-(`--oav`, `--biotransform`, `max_hops`, nombre de résultats) sont dans la barre
+(`--oav`, `max_hops`, nombre de résultats) sont dans la barre
 latérale ; `app.py` importe directement `matching`/`schema`, pas de couche API
 intermédiaire. Le mode `contrast` remplace le sélecteur de note habituel par une
 sélection de descripteurs (vocabulaire réel `hop_descriptors`), avec un blend
@@ -647,9 +622,8 @@ pipeline suffisant), `by-descriptor`, `ingest.crawl_yakima` (via Algolia), `inge
 `ingest.resolve_pubchem_cids` (jointure structurale CAS→CID, avec repli sur le nom du composé —
 cf. `parsers.pubchem_name_fallbacks` — quand le CAS seul ne résout rien ; remplace la table
 d'alias manuelle pour les synonymes purs et la recherche par nom exact de `ingest_flavordb2`),
-option `--biotransform` sur `amplify` (portée étroite, deux voies sourcées — détail
-dans la [section dédiée](#option---biotransform)), GUI Streamlit (`src/hopmatch/app.py`,
-lecture seule), `contrast`/`contrast_blend` généralisés par sélection manuelle de descripteurs.
+GUI Streamlit (`src/hopmatch/app.py`, lecture seule), `contrast`/`contrast_blend`
+généralisés par sélection manuelle de descripteurs.
 
 **Résidu PubChem accepté, pas une piste ouverte.** 6/734 CAS restent sans CID (0,8%) après CAS
 + repli par nom : recherché aussi par CAS comme identifiant d'enregistrement PubChem (endpoint
@@ -659,8 +633,8 @@ pour deux cas : `methylethylpyrazine` désigne plusieurs isomères réels distin
 (synonyme `p-menthatrien-2-ol` confirmé par des fournisseurs chimiques externes) ne répond sur
 aucune des variantes de nom essayées — probablement absent de PubChem, pas juste mal nommé.
 Coder un CID à la main pour ces cas ne serait pas une donnée vérifiée comme les autres entrées
-manuelles du projet (`reference.ALIASES`, `reference.BIOTRANSFORMATIONS`) : ce serait une
-supposition sans confirmation possible. Laissé non résolu.
+manuelles du projet (`reference.ALIASES`) : ce serait une supposition sans confirmation
+possible. Laissé non résolu.
 
 **`combine()` (mode `combine`, NNLS) implémenté puis retiré.** Livré, testé, amélioré
 (`docs/BACKLOG.md#T10`), puis retiré le 2026-08-12 après mesure sur les 506 notes réelles :
@@ -670,13 +644,15 @@ rapport avec la couverture réelle. Décision utilisateur, pas un bug de méthod
 l'huile de houblon ne recoupe simplement pas la plupart des arômes alimentaires. Voir
 l'historique git pour le détail (`matching.py`, `cli.py`, `app.py`, tests).
 
+**`--biotransform` implémenté puis retiré.** Livré, puis retiré le 2026-08-12 (même jour que
+`combine()`, décision utilisateur) : bug de double comptage confirmé sur les 29 notes réelles
+demandant du citronellol (les 29 demandent aussi du géraniol, donc la même mesure comptait
+deux fois) — voir la [section dédiée](#option---biotransform--implémentée-puis-retirée) pour
+le détail complet.
+
 Reste :
 
-1. Extension éventuelle de `reference.BIOTRANSFORMATIONS` si une étude comparant explicitement
-   des souches commerciales (pas des codes de collection académique) sur ces mêmes composés
-   devient disponible — pas de drapeau par souche individuelle en attendant (voir
-   [section dédiée](#option---biotransform) pour le raisonnement).
-2. Jointure au-delà des ~734 composés Flavornet si le vocabulaire s'élargit beaucoup (crawl
+1. Jointure au-delà des ~734 composés Flavornet si le vocabulaire s'élargit beaucoup (crawl
    Yakima déjà réel, plus d'aliments FooDB).
 
 ---

@@ -10,8 +10,8 @@ FooDB, yuzu/rose/pin-resine, disparaissent avec : aucune ne reviendra tant
 qu'aucune source réelle ne les couvre).
 
 Reste : `MOLECULES` (propriétés par molécule, indépendantes de toute note),
-`ALIASES`/`BIOTRANSFORMATIONS` (résolution de composés, indépendantes des
-notes), `DESCRIPTOR_ALIASES`/`CONTRAST_AFFINITY` (vocabulaire descripteur,
+`ALIASES` (résolution de composés, indépendante des notes),
+`DESCRIPTOR_ALIASES`/`CONTRAST_AFFINITY` (vocabulaire descripteur,
 indépendant des notes — `CONTRAST_AFFINITY` est déjà keyed par descripteur,
 pas par note, donc `contrast` reste utilisable pour N'IMPORTE QUELLE note via
 une sélection manuelle de descripteurs, `matching.contrast(descriptors=[...])`
@@ -48,38 +48,27 @@ ALIASES: dict[str, str] = {
     "3-mercaptohexanol": "thiols", "4mmp": "thiols",
 }
 
-# Biotransformation levure (option --biotransform, `amplify`) :
-# molécule demandée par la note -> composé précurseur mesuré côté houblon, que la
-# fermentation peut convertir. Actif seulement si l'utilisateur l'active — ça
-# affirme une fermentation standard, ce que hopmatch ne peut pas vérifier.
-#
-# Portée volontairement étroite aux deux voies avec preuve indépendante
-# convergente sur souche ale ET lager (King & Dickinson 2003, FEMS Yeast
-# Research — courbes cinétiques réelles sur S. cerevisiae NCYC 1681 et
-# S. bayanus NCYC 1324, deux espèces différentes, résultats concordants) :
-#   - géraniol -> citronellol : produit principal, quantifié dans les deux
-#     souches (~1,4-1,5 µg/mL de pic depuis 10 µg/mL de géraniol ajouté).
-#     Corroboré par Michel et al. 2019 (BrewingScience) : aucun effet souche
-#     détecté sur un thiol proche mécaniquement, sur ~98 souches de brasserie.
-#   - linalol -> alpha-terpinéol : produit principal du linalol, également
-#     quantifié dans les deux souches (~0,4-0,45 µg/mL après 15 jours).
-#
-# Délibérément PAS étendu : (1) aux esters (acétate de géranyle/citronellyle) —
-# King & Dickinson montrent que SEULE la souche lager les produit, pas l'ale :
-# preuve divergente entre souches, donc hors de la portée "généralisable" de
-# cette option ; (2) aux thiols (précurseurs non mesurés côté houblon, rien à
-# rediriger) ; (3) aux terpènes majoritaires du houblon — myrcène, humulène,
-# caryophyllène, les pinènes sont explicitement montrés NON biotransformés
-# (aucun produit détecté, juste perdus par évaporation/adsorption) ; (4) au
-# nérol comme cible ou source — jamais mesuré côté houblon (aucune fiche
-# BarthHaas/Yakima ne le rapporte), une redirection vers lui serait inerte.
-# Non validé pour Kveik/Brettanomyces/fermentation mixte : aucune étude
-# trouvée ne teste ces cas, donc aucune affirmation n'est faite (ni "pareil",
-# ni "différent") — l'option suppose une souche standard.
-BIOTRANSFORMATIONS: dict[str, str] = {
-    "citronellol": "geraniol",
-    "alpha-terpineol": "linalool",
-}
+# Option --biotransform (redirection géraniol->citronellol / linalol->
+# alpha-terpinéol via une table BIOTRANSFORMATIONS) IMPLÉMENTÉE PUIS RETIRÉE
+# le 2026-08-12 (décision utilisateur). La science derrière restait solide
+# (King & Dickinson 2003, FEMS Yeast Research, deux souches convergentes ;
+# corroboré par Michel et al. 2019) — le problème était l'INTÉGRATION, pas la
+# source : `hop_compound(m, biotransform=True)` redirige la molécule demandée
+# vers son précurseur SANS vérifier si ce précurseur est déjà, séparément,
+# une entrée du même profil de note. Sur les 29 notes réelles qui demandent
+# du citronellol, LES 29 demandent aussi du géraniol (chevauchement total,
+# vérifié) : la même mesure de géraniol d'un houblon comptait donc deux fois
+# dans le score (une fois comme "géraniol", une fois redirigée comme
+# "citronellol"), gonflant le classement de façon non réfléchie plutôt que
+# reflétant une vraie contribution supplémentaire. Vérifié en direct : change
+# le rang #1 sur plusieurs notes réelles (ex. "coriander" : Sabro/Ekuanot
+# s'inversent). Corriger le double comptage aurait ajouté de la complexité
+# à une hypothèse déjà étroite (une seule souche « standard », non vérifiable
+# par hopmatch) pour un bénéfice marginal — cohérent avec le retrait de
+# `combine()` le même jour pour des raisons similaires (voir matching.py).
+# Ne pas réintroduire sans corriger le double comptage à la racine (ex.
+# exclure de la redirection toute molécule dont le précurseur est déjà,
+# indépendamment, demandé par la même note).
 
 # Normalisation des variantes de descripteurs entre sources (pluriel, formulation).
 # Amorce curée ; appliquée à l'ingestion (ingest._ingest_variety), pas dans

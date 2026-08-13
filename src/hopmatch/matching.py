@@ -20,11 +20,14 @@ artificiel de 0.0, ce qui affichait une fausse confiance (« 100% Talus, résidu
 0.0 ») sans rapport avec la couverture réelle (~1.7%). Décision utilisateur du
 2026-08-12 après vérification en direct sur plusieurs notes.
 
-Option `biotransform` (amplify) : redirige une molécule non mesurée côté houblon
-vers son précurseur mesuré, via `reference.BIOTRANSFORMATIONS` (portée étroite :
-géraniol->citronellol et linalol->alpha-terpinéol, les deux voies avec preuve
-indépendante convergente ale/lager). Affirme une fermentation levure standard —
-voir le commentaire sur cette table.
+Option `biotransform` implémentée puis retirée (2026-08-12, décision utilisateur) :
+redirigeait une molécule demandée par la note vers son précurseur mesuré côté
+houblon (géraniol->citronellol, linalol->alpha-terpinéol). Retirée pour un vrai
+bug, pas juste une hypothèse fragile : les 29 notes réelles demandant du
+citronellol demandent TOUTES aussi du géraniol, donc la même mesure de géraniol
+comptait deux fois dans le score (double comptage, pas une seconde source
+d'évidence) — vérifié en direct, ça changeait le rang #1 sur plusieurs notes.
+Voir `reference.py` pour le détail complet.
 """
 from __future__ import annotations
 import math
@@ -66,20 +69,14 @@ def load(con: sqlite3.Connection):
     return hops, comp, hop_desc, mols
 
 
-def hop_compound(m: str, biotransform: bool = False) -> str:
-    """
-    Résout un nom de molécule côté note vers le composé à chercher côté houblon.
-    `biotransform=True` ajoute la redirection precurseur->produit de
-    `reference.BIOTRANSFORMATIONS` (ex. citronellol -> geraniol) : affirme une
-    fermentation levure standard, voir le commentaire sur cette table.
-    """
-    if biotransform and m in reference.BIOTRANSFORMATIONS:
-        return reference.BIOTRANSFORMATIONS[m]
+def hop_compound(m: str) -> str:
+    """Résout un nom de molécule côté note vers le composé à chercher côté houblon
+    (`reference.ALIASES`, ex. agrégations mesurées ensemble comme "thiols")."""
     return reference.ALIASES.get(m, m)
 
 
-def amount(variety: str, molecule: str, comp, biotransform: bool = False) -> float:
-    rec = comp.get(variety, {}).get(hop_compound(molecule, biotransform))
+def amount(variety: str, molecule: str, comp) -> float:
+    rec = comp.get(variety, {}).get(hop_compound(molecule))
     if not rec or rec["mid"] is None:
         return 0.0
     if rec["unit"] == "pct_oil":
@@ -88,8 +85,8 @@ def amount(variety: str, molecule: str, comp, biotransform: bool = False) -> flo
     return rec["mid"]
 
 
-def specificity(molecule: str, comp, biotransform: bool = False) -> float:
-    c = hop_compound(molecule, biotransform)
+def specificity(molecule: str, comp) -> float:
+    c = hop_compound(molecule)
     n = len(comp)
     n_with = sum(1 for h in comp if comp[h].get(c) and comp[h][c]["mid"])
     return math.log(n / (1 + n_with)) + 1.0
@@ -119,29 +116,40 @@ def _normalize_descriptors(descriptors: list[str]) -> set[str]:
 # --------------------------------------------------------------------------- #
 # Couches de score
 # --------------------------------------------------------------------------- #
-def molecular_scores(note_profile, comp, use_oav=False, mols=None, biotransform=False):
-    """Similarité moléculaire normalisée-par-composé (TF-IDF). -> {variety: (score, contribs)}."""
-    max_amt = {m: max((amount(h, m, comp, biotransform) for h in comp), default=0.0)
+def molecular_scores(note_profile, comp, use_oav=False, mols=None):
+    """Similarité moléculaire normalisée-par-composé (TF-IDF). -> {variety: (score, contribs)}.
+
+    `use_oav` : multiplie la contribution d'une molécule par un PRIOR DE PUISSANCE
+    (REFERENCE_THRESHOLD_PPB / seuil olfactif) quand son seuil est connu — seulement
+    pour les ~14 molécules curées dans `reference.MOLECULES` (myrcène, humulène,
+    caryophyllène, géraniol, linalol, thiols...), les composés d'huile de houblon
+    les plus courants. Ce n'est PAS un OAV réel (aucune concentration mesurée) :
+    juste une réponse à « molécule X et Y ont la même quantité normalisée, mais X a
+    un seuil olfactif 10x plus bas — laquelle pèse le plus dans l'odeur perçue ? ».
+    Vérifié sur la base réelle : change le classement complet sur ~18% des notes et
+    le houblon #1 sur ~15% (échantillon de 40 notes) — un effet réel, pas un bruit.
+    """
+    max_amt = {m: max((amount(h, m, comp) for h in comp), default=0.0)
               for m in note_profile}
-    # specificity(m, comp, biotransform) ne dépend PAS du houblon `h` — seulement
-    # de la molécule et de `comp` dans son ensemble. Précalculée une fois par
-    # molécule ici (même principe que max_amt juste au-dessus) plutôt que
-    # recalculée à chaque paire (houblon, molécule) : passait par une boucle
-    # interne O(n_houblons) à CHAQUE itération de la boucle externe `for h in
-    # comp`, donc O(n_houblons²) au total. Mesuré sur la base réelle (203
-    # houblons) : amplify() ~1s avant, ~30-50ms après, résultat identique
-    # (spécificité est une fonction pure de la molécule, pas du houblon scoré).
-    spec = {m: specificity(m, comp, biotransform) for m in note_profile}
+    # specificity(m, comp) ne dépend PAS du houblon `h` — seulement de la molécule
+    # et de `comp` dans son ensemble. Précalculée une fois par molécule ici (même
+    # principe que max_amt juste au-dessus) plutôt que recalculée à chaque paire
+    # (houblon, molécule) : passait par une boucle interne O(n_houblons) à CHAQUE
+    # itération de la boucle externe `for h in comp`, donc O(n_houblons²) au total.
+    # Mesuré sur la base réelle (203 houblons) : amplify() ~1s avant, ~30-50ms
+    # après, résultat identique (spécificité est une fonction pure de la molécule,
+    # pas du houblon scoré).
+    spec = {m: specificity(m, comp) for m in note_profile}
     out = {}
     for h in comp:
         contribs = {}
         for m, w in note_profile.items():
-            a = amount(h, m, comp, biotransform)
+            a = amount(h, m, comp)
             if a <= 0 or not max_amt[m]:
                 continue
             s = w * (a / max_amt[m]) * spec[m]
             if use_oav and mols:
-                thr = mols.get(hop_compound(m, biotransform), {}).get("threshold_ppb")
+                thr = mols.get(hop_compound(m), {}).get("threshold_ppb")
                 s *= (REFERENCE_THRESHOLD_PPB / thr) if thr else 1.0
             contribs[m] = s
         if contribs:
@@ -154,10 +162,10 @@ def descriptor_overlap(note_desc: set[str], hop_desc: set[str]) -> float:
     return len(note_desc & hop_desc) / len(note_desc) if note_desc else 0.0
 
 
-def coverage(note_profile, comp, biotransform: bool = False):
+def coverage(note_profile, comp):
     """Molécules de la note couvrables par ≥1 houblon, et orphelines."""
     producible = {m for m in note_profile
-                  if any(comp[h].get(hop_compound(m, biotransform)) for h in comp)}
+                  if any(comp[h].get(hop_compound(m)) for h in comp)}
     orphan = [m for m in note_profile if m not in producible]
     tot = sum(note_profile.values()) or 1
     cov = sum(w for m, w in note_profile.items() if m in producible) / tot
@@ -168,7 +176,7 @@ def coverage(note_profile, comp, biotransform: bool = False):
 # CAS A — amplify
 # --------------------------------------------------------------------------- #
 def amplify(con, note: str, w_mol: float = 0.5, w_desc: float = 0.5, use_oav=False, top=8,
-           biotransform=False, descriptors: list[str] | None = None):
+           descriptors: list[str] | None = None):
     """
     `descriptors` : sélection manuelle par l'utilisateur des descripteurs de la
     note, sur le vocabulaire réel `hop_descriptors` (comme `contrast`/
@@ -192,7 +200,7 @@ def amplify(con, note: str, w_mol: float = 0.5, w_desc: float = 0.5, use_oav=Fal
     if not has_descriptors:
         w_mol, w_desc = 1.0, 0.0
 
-    mol = molecular_scores(profile, comp, use_oav=use_oav, mols=mols, biotransform=biotransform)
+    mol = molecular_scores(profile, comp, use_oav=use_oav, mols=mols)
     mmax = max((s for s, _ in mol.values()), default=1.0) or 1.0
 
     ranked = []
@@ -205,9 +213,9 @@ def amplify(con, note: str, w_mol: float = 0.5, w_desc: float = 0.5, use_oav=Fal
                            "mol": round(ms, 2), "desc": round(ds, 2),
                            "why": mol.get(h, (0, []))[1][:4], "sources": hops[h]["sources"]})
     ranked.sort(key=lambda r: -r["score"])
-    _, orphan, cov = coverage(profile, comp, biotransform)
+    _, orphan, cov = coverage(profile, comp)
     return {"mode": "amplify", "note": note, "coverage": cov, "orphan": orphan,
-           "biotransform": biotransform, "has_descriptors": has_descriptors,
+           "use_oav": use_oav, "has_descriptors": has_descriptors,
            "ranked": ranked[:top]}
 
 

@@ -37,13 +37,17 @@ couvre bien plus de composés aromatiques par aliment).
 - **Honnêteté d'abord** : toujours rapporter la couverture et les molécules orphelines.
 - **Base EAV multi-sources** : `hop_composition` clé (variety, compound, source) ;
   réconciliation à la LECTURE (moyenne des milieux, provenance tracée), pas à l'écriture.
-- **Option `--biotransform` : portée étroite et sourcée, généralisée par espèce de levure
-  (pas par souche commerciale individuelle).** `reference.BIOTRANSFORMATIONS`
-  ne contient que géraniol→citronellol et linalol→alpha-terpinéol — les deux seules voies
-  avec preuve indépendante convergente entre souche ale ET lager (King & Dickinson 2003 ;
-  corroboré par Michel et al. 2019 pour l'absence d'effet souche sur un thiol proche).
-  Jamais de drapeau par souche commerciale individuelle : aucune source ne compare des
-  souches commerciales entre elles, seulement des codes de collection académique.
+- **Option `--biotransform` implémentée puis RETIRÉE (2026-08-12, décision
+  utilisateur).** La science sourcée restait solide (géraniol→citronellol,
+  linalol→alpha-terpinéol, preuve indépendante convergente ale/lager — King &
+  Dickinson 2003, corroboré par Michel et al. 2019) mais l'intégration avait un
+  vrai bug : `hop_compound(m, biotransform=True)` redirigeait la molécule
+  demandée vers son précurseur SANS vérifier si ce précurseur était déjà,
+  séparément, une entrée du même profil de note. Sur les 29 notes réelles
+  demandant du citronellol, LES 29 demandent aussi du géraniol : la même mesure
+  de géraniol comptait donc deux fois dans le score. Voir `reference.py` pour
+  le détail complet. Ne pas réintroduire sans corriger le double comptage à la
+  racine.
 
 ## Réalité des données (vérifiée)
 - **BarthHaas** : source houblon primaire. HTML servi, parsable, inclut les THIOLS.
@@ -183,7 +187,7 @@ couvre bien plus de composés aromatiques par aliment).
   isomères réels distincts (aucun moyen de savoir lequel), `dehydrocarveol` (synonyme
   `p-menthatrien-2-ol` confirmé ailleurs) ne répond sur aucune variante essayée — probablement
   absent de PubChem. Coder un CID à la main ici serait une supposition non vérifiable, pas une
-  donnée comme `reference.ALIASES`/`BIOTRANSFORMATIONS`. Ne pas retenter sans nouvelle piste.
+  donnée comme `reference.ALIASES`. Ne pas retenter sans nouvelle piste.
 - **Licence** : le CODE est MIT ; FooDB et FlavorDB2 sont NON COMMERCIALES. Un usage
   commercial imposerait de retirer/renégocier ces sources.
 
@@ -197,21 +201,18 @@ Fait : `ingest.ingest_flavornet`, `ingest.ingest_foodb` (généralisé à `all_f
 + filtre de distinctivité + `download_foodb_dump` automatique — seule source de notes du
 pipeline, amorce littérature retirée), `by-descriptor`, `ingest.crawl_yakima`,
 `ingest.ingest_flavordb2`, `ingest.resolve_pubchem_cids` (jointure structurale CAS->CID + repli
-sur le nom, voir `docs/FEATURE_NOTES.md` pour le détail de spec de by-descriptor), option
-`--biotransform` (`amplify`, portée étroite — voir décision ci-dessus), GUI Streamlit
+sur le nom, voir `docs/FEATURE_NOTES.md` pour le détail de spec de by-descriptor), GUI Streamlit
 (`src/hopmatch/app.py`), `contrast`/`contrast_blend` généralisés par sélection manuelle de
 descripteurs (`matching.contrast(descriptors=[...])`, sans dépendre de `note_descriptors`),
 GUI : mode `browse` (T5), heatmap de comparaison des descripteurs en `by-descriptor` (T4).
 `combine()` (NNLS) implémenté, amélioré (T10), puis RETIRÉ (2026-08-12) — voir la section
-« But » en haut de ce fichier pour le détail de la décision.
+« But » en haut de ce fichier pour le détail de la décision. Option `--biotransform`
+implémentée puis RETIRÉE le même jour (bug de double comptage, voir la section
+« Décisions de conception » ci-dessus).
 Reste :
 1. Jointure FooDB/hop_composition au-delà des ~734 composés Flavornet si le vocabulaire
    s'élargit beaucoup (crawl Yakima déjà réel, plus d'aliments FooDB).
-2. Extension de `reference.BIOTRANSFORMATIONS` SI une étude comparant des souches
-   commerciales entre elles (pas des codes de collection académique TUM/CBS/NCYC) sur
-   ces mêmes composés devient disponible. Pas de drapeau par souche individuelle en
-   attendant — voir le raisonnement dans README.md#option---biotransform.
-3. `parsers.parse_descriptors` (BarthHaas) renvoie désormais `[]` pour la plupart des variétés :
+2. `parsers.parse_descriptors` (BarthHaas) renvoie désormais `[]` pour la plupart des variétés :
    le site réel a remplacé sa liste courte de descripteurs par un paragraphe descriptif (vérifié
    en direct sur plusieurs variétés, ex. 'admiral', 'tango' — voir le commentaire de la fonction).
    Piste non explorée : les pages exposent une roue d'arôme en `<canvas>` avec des valeurs

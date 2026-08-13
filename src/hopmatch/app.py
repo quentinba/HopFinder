@@ -84,9 +84,16 @@ def _stats(con) -> dict:
 
 def _amplify(con, note):
     st.sidebar.subheader("Options")
-    use_oav = st.sidebar.checkbox("--oav (prior de seuil, approx.)", value=False)
-    biotransform = st.sidebar.checkbox(
-        "--biotransform (fermentation levure standard)", value=False)
+    use_oav = st.sidebar.checkbox(
+        "--oav (prior de puissance olfactive)", value=False,
+        help="Pondère chaque molécule par 1/seuil olfactif quand ce seuil est "
+             "connu (~14 molécules d'huile de houblon courantes : myrcène, "
+             "géraniol, thiols... — les autres molécules ne sont pas affectées). "
+             "Approximatif : pas une mesure de concentration réelle, juste une "
+             "correction pour qu'une molécule très odorante à faible seuil ne "
+             "soit pas éclipsée par une molécule ubiquitaire mais peu odorante. "
+             "Change le classement sur environ 1 note sur 6 (mesuré sur la base "
+             "réelle).")
     top = st.sidebar.slider("Nombre de résultats", 1, 30, 8)
     # note_descriptors est vide par défaut pour toute note (pas d'amorce
     # littérature, cf. reference.py) : sans sélection manuelle ici, la couche
@@ -94,13 +101,10 @@ def _amplify(con, note):
     selected_desc = st.multiselect(
         "Descripteurs de la note (optionnel — active la couche descripteurs)",
         _descriptors(con))
-    r = matching.amplify(con, note, use_oav=use_oav, biotransform=biotransform,
+    r = matching.amplify(con, note, use_oav=use_oav,
                          descriptors=selected_desc or None, top=top)
 
     st.metric("Couverture moléculaire", f"{r['coverage']*100:.0f}%")
-    if r["biotransform"]:
-        st.info("Hypothèse active : fermentation levure standard "
-                "(géraniol→citronellol, linalol→alpha-terpinéol).")
     if not r.get("has_descriptors", True):
         st.caption("Pas de descripteurs pour cette note : score 100% moléculaire "
                   "(pas de w_desc appliqué).")
