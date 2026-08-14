@@ -21,6 +21,16 @@ from hopmatch.schema import connect
 
 DEFAULT_DB = "aromahops.db"
 
+# Libellés GUI affichés à l'utilisateur, distincts des clés internes ("mode")
+# qui pilotent le dispatch et restent stables (CLI/tests/URLs internes non
+# concernés — habillage d'affichage uniquement, demandé par l'utilisateur).
+MODE_LABELS = {
+    "amplify": "HopFinder - Amplify",
+    "contrast": "HopFinder - Contrast",
+    "by-descriptor": "Hopfinder from Descriptors",
+    "browse": "Browse hop composition",
+}
+
 
 def _db_path() -> str:
     if "--db" in sys.argv:
@@ -300,20 +310,21 @@ def main():
         f"{stats['descriptors']} descripteurs · modifiée {modified}")
 
     mode = st.sidebar.radio(
-        "Mode", ["amplify", "contrast", "by-descriptor", "browse"])
+        "Mode", ["amplify", "contrast", "by-descriptor", "browse"],
+        format_func=lambda m: MODE_LABELS[m])
 
     if mode == "by-descriptor":
-        st.header("Découverte par descripteurs")
+        st.header(MODE_LABELS[mode])
         _by_descriptor(con)
         return
 
     if mode == "contrast":
-        st.header("contrast")
+        st.header(MODE_LABELS[mode])
         _contrast(con)
         return
 
     if mode == "browse":
-        st.header("Parcourir les houblons")
+        st.header(MODE_LABELS[mode])
         _browse(con)
         return
 
@@ -322,7 +333,7 @@ def main():
         st.error("Aucune note en base."); st.stop()
     note = st.sidebar.selectbox("Note", notes)
 
-    st.header(f"{mode} — {note}")
+    st.header(f"{MODE_LABELS[mode]} — {note}")
     _amplify(con, note)
 
 
