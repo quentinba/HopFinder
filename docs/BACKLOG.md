@@ -70,6 +70,29 @@ l'implémentation ([ ] à faire, [x] fait — voir le commit associé).
   `by-descriptor` a un slider "nombre de résultats" ; `amplify`/`contrast`
   sont figés à 8. Incohérent, à harmoniser.
 
+- [x] **T24 — Libellés de mode peu conviviaux**
+  `amplify`/`contrast`/`by-descriptor`/`browse` affichés tels quels dans la
+  barre latérale. Renommés en `HopFinder - Amplify`/`HopFinder - Contrast`/
+  `Hopfinder from Descriptors`/`Browse hop composition` (`app.MODE_LABELS`,
+  `format_func` sur le radio) — purement cosmétique, les clés internes/CLI ne
+  changent pas.
+
+- [x] **T26 — Roue d'arôme graphique par houblon en `browse`**
+  Demandée « comme BeerMaverick/Yakima ». Première version en `hop_descriptors`
+  (présence/absence, camembert à rayon fixe) jugée à raison non informative en
+  retour utilisateur — **contrairement à T4** (radar écarté pour la
+  COMPARAISON multi-houblon, où il déformerait par l'aire), ici il n'y a
+  qu'UN polygone à la fois, l'objection T4 ne s'applique pas. En creusant le
+  retour, découverte d'une vraie donnée quantitative jamais exploitée côté
+  Yakima (`imported_fields.aroma_values`/`sensory_values`, intensité 0-100 —
+  voir la section Yakima Chief de CLAUDE.md et `docs/DATA_SOURCES.md`) :
+  nouvelle table `hop_aroma_intensity`, nouveau champ retourné par
+  `parse_yakima_hit`, rendu en radar/spider chart (polygone sur 15 axes fixes,
+  coordonnées calculées en Python — un premier essai en `mark_arc` Vega-Lite
+  theta+radius ne balayait qu'un demi-cercle par défaut, bug non résolu,
+  abandonné). 94/151 variétés Yakima couvertes ; BarthHaas n'a pas cette
+  donnée, rien affiché pour les variétés non couvertes.
+
 ## Sources de données additionnelles (recherche)
 
 - **Investigué à nouveau, PAS retenu — Hopsteiner (shop.hopsteiner.com)**.

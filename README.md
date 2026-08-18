@@ -4,7 +4,7 @@
 question concrète : *quel houblon accorder à un ajout* (yuzu, basilic…) — en le
 prolongeant (`amplify`) ou en le contrastant (`contrast`) ?
 
-> État : `pytest` vert (75 tests). Toutes les sources tournent contre les sites externes :
+> État : `pytest` vert (79 tests). Toutes les sources tournent contre les sites externes :
 > `crawl_barthhaas`, `crawl_yakima`, `ingest_flavornet`, `ingest_foodb`, `ingest_flavordb2`,
 > `resolve_pubchem_cids`, `by-descriptor`, `--oav` (prior de puissance olfactive, approximatif)
 > — voir [Feuille de route](#feuille-de-route).
@@ -561,7 +561,7 @@ hopmatch contrast-blend --descriptors citrus,herbal --max-hops 3   # + blend par
 hopmatch descriptors              # vocabulaire de descripteurs disponible
 hopmatch by-descriptor citrus,tropical   # découverte, sans note requise
 
-pytest -q                         # 75 tests (nécessite l'extra [dev])
+pytest -q                         # 79 tests (nécessite l'extra [dev])
 ```
 
 ### GUI navigateur
@@ -583,9 +583,17 @@ une sélection de descripteurs optionnelle (même vocabulaire) pour activer la
 couche descripteurs — sinon `note` seule donne un score 100% moléculaire. Le
 mode `browse` (sans équivalent CLI) permet de consulter un houblon directement —
 composition + descripteurs + sources, avec recherche par nom — sans passer par
-les autres modes. La barre latérale affiche aussi le nombre de houblons/notes/
-descripteurs chargés et la date de dernière modification de la base. Pour
-pointer vers une autre base : `streamlit run src/hopmatch/app.py -- --db chemin.db`.
+les autres modes. Pour les variétés Yakima couvertes (94/151, voir
+`docs/DATA_SOURCES.md`), `browse` affiche aussi une roue d'arôme QUANTITATIVE
+(rendue en radar/spider chart, un polygone sur 15 axes fixes — pas un
+camembert à rayon variable, voir le commentaire de `app._aroma_wheel`) —
+intensité 0-100 réelle (`hop_aroma_intensity`, table dédiée alimentée par
+`crawl_yakima` depuis `imported_fields.sensory_values`/`aroma_values`), pas
+une simple présence/absence. BarthHaas n'a pas cette donnée : rien n'est
+affiché pour les variétés non couvertes (pas de valeur inventée). La barre
+latérale affiche aussi le nombre de houblons/notes/descripteurs chargés et la
+date de dernière modification de la base. Pour pointer vers une autre base :
+`streamlit run src/hopmatch/app.py -- --db chemin.db`.
 
 ---
 

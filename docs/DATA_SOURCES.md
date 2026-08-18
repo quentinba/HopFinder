@@ -28,6 +28,25 @@
   structurée en JSON (`imported_fields.brewing_values`, low/ave/high) et roue d'arôme
   (`imported_fields.aromas`) — pas de parsing HTML/texte requis, contrairement à BarthHaas.
 - Qualité : labo qualité YCH, conforme méthodes ASBC. Ajoute **β-pinène, sélinène**.
+- **Roue d'arôme QUANTITATIVE trouvée dans la même réponse Algolia (T26 backlog, découverte
+  en creusant un retour utilisateur sur une première version binaire jugée peu informative)** :
+  `imported_fields.aroma_values` (niveau variété) et `imported_fields.sensory_values` (par
+  forme produit, mêmes codes que `brewing_values` — CON04/PEL02/PEL06 vus en pratique, un
+  sous-ensemble des 10 codes de composition) donnent chacun une liste `{aroma, aroma_intensity}`,
+  intensité 0-100 — une donnée RÉELLE, jamais parsée jusqu'ici (`aromas`, la liste plate déjà
+  utilisée pour `hop_descriptors`, ne garde qu'un sous-ensemble des arômes les plus forts, sans
+  valeur : vérifié sur Mosaic, `aromas` liste 4 termes quand `aroma_values` en couvre 15).
+  `parsers.parse_yakima_hit` choisit l'entrée `sensory_values` dont le `code` correspond à LA
+  MÊME forme produit que la composition retenue (cohérence composition/arôme), repli sur
+  `aroma_values` (niveau variété) si aucune entrée `sensory_values` ne correspond. Écrit dans
+  `hop_aroma_intensity` (table dédiée, jamais dans `hop_descriptors` qui reste binaire). Run réel
+  (152 variétés) : vocabulaire fixe à 15 catégories (berry, citrus, dried fruit, earthy, floral,
+  grassy, herbal, melon, pomme, spicy, stone fruit, sweet aromatic, tropical, vegetal, woody),
+  94/151 variétés Yakima couvertes, 12-15/15 catégories par houblon couvert (quasi-complet).
+  **Un cas dégénéré rencontré et géré** : `admiral` a une entrée `sensory_values` présente mais
+  ENTIÈREMENT à zéro côté YCH lui-même — cohérent avec la corruption déjà documentée de cette
+  variété précise (voir plus bas, `_is_plausible_brewing_entry`) ; `app._browse` vérifie
+  `any(v > 0 ...)`, pas juste la présence du dict, avant d'afficher la roue.
 - **Piège de nommage** : les variétés déposées ont un slug `-brand` (`citra-brand`) qui ne
   fusionnerait jamais avec le slug BarthHaas (`citra`). Mais le catalogue a aussi de vrais
   doublons de SKU sans rapport (`perle` ET `perle-per03` coexistent) — `crawl_yakima` ne

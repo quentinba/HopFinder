@@ -77,6 +77,24 @@ couvre bien plus de composés aromatiques par aliment).
   jusqu'à 99%+) sauf si c'est vraiment tout ce qui existe pour une variété. Réingestion
   réelle : 18/152 variétés changent de valeurs (CON02→PEL02 différaient réellement, pas
   juste une histoire de source `admiral`).
+  **Roue d'arôme QUANTITATIVE (T26 backlog)** : la même réponse Algolia contient aussi
+  `imported_fields.aroma_values` (niveau variété) et `imported_fields.sensory_values` (par
+  forme produit, mêmes codes que `brewing_values`), chacun `{aroma, aroma_intensity}` —
+  intensité RÉELLE 0-100, jamais parsée jusqu'ici (découvert en creusant un retour
+  utilisateur : une première roue basée sur `hop_descriptors`/`aromas`, binaire
+  présence/absence, jugée à raison non informative — `aromas` ne garde qu'un
+  sous-ensemble des arômes les plus forts sans valeur, ex. Mosaic : 4 termes dans
+  `aromas` contre 15 dans `aroma_values`). `parse_yakima_hit` choisit l'entrée
+  `sensory_values` de LA MÊME forme produit que la composition retenue, repli sur
+  `aroma_values` (variété) sinon. Écrit dans `hop_aroma_intensity` (table dédiée, jamais
+  dans `hop_descriptors`). 94/151 variétés Yakima couvertes, vocabulaire fixe à 15
+  catégories, 12-15/15 par houblon couvert. Cas dégénéré géré : `admiral` a une entrée
+  présente mais entièrement à 0 (cohérent avec sa corruption déjà documentée plus haut) —
+  `app._browse` vérifie `any(valeur > 0)`, pas juste la présence du dict. GUI `browse` :
+  rendu en radar/spider chart (polygone sur 15 axes fixes, coordonnées calculées en
+  Python), PAS un camembert à rayon variable — une première version en `mark_arc`
+  (theta+radius Vega-Lite) ne balayait qu'un demi-cercle par défaut, bug non résolu,
+  abandonné pour l'approche polygone. Voir `docs/DATA_SOURCES.md` pour le détail complet.
   `ingest.crawl_yakima` IMPLÉMENTÉ. Fragile (clé/index Algolia non documentés).
 - **FooDB** : source note→molécule. Dump bulk, figé 2020-04-07, licence NON COMMERCIALE.
   `ingest.download_foodb_dump` télécharge+extrait automatiquement le tar.gz
@@ -204,11 +222,16 @@ pipeline, amorce littérature retirée), `by-descriptor`, `ingest.crawl_yakima`,
 sur le nom, voir `docs/FEATURE_NOTES.md` pour le détail de spec de by-descriptor), GUI Streamlit
 (`src/hopmatch/app.py`), `contrast`/`contrast_blend` généralisés par sélection manuelle de
 descripteurs (`matching.contrast(descriptors=[...])`, sans dépendre de `note_descriptors`),
-GUI : mode `browse` (T5), heatmap de comparaison des descripteurs en `by-descriptor` (T4).
+GUI : mode `browse` (T5), heatmap de comparaison des descripteurs en `by-descriptor` (T4),
+roue d'arôme quantitative par houblon en `browse` (T26, radar/spider chart — voir la
+section Yakima Chief ci-dessus), libellés de mode conviviaux (T24, `app.MODE_LABELS`,
+purement cosmétique côté GUI, les clés internes/CLI ne changent pas).
 `combine()` (NNLS) implémenté, amélioré (T10), puis RETIRÉ (2026-08-12) — voir la section
 « But » en haut de ce fichier pour le détail de la décision. Option `--biotransform`
 implémentée puis RETIRÉE le même jour (bug de double comptage, voir la section
-« Décisions de conception » ci-dessus).
+« Décisions de conception » ci-dessus). `--oav` réexaminé (T23) : conservé, effet réel
+mesuré (~1 note sur 6 change de classement), documentation CLI/GUI enrichie plutôt que
+retiré.
 Reste :
 1. Jointure FooDB/hop_composition au-delà des ~734 composés Flavornet si le vocabulaire
    s'élargit beaucoup (crawl Yakima déjà réel, plus d'aliments FooDB).

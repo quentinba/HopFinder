@@ -297,15 +297,44 @@ def _select_brewing_entry(brewing: list[dict]) -> dict:
     return next((b for b in brewing if _is_plausible_brewing_entry(b)), brewing[0])
 
 
-def parse_yakima_hit(hit: dict) -> tuple[str, str, str, dict, list[str]]:
+def _select_sensory_items(imp: dict, bv_code: str | None) -> list[dict]:
+    """Choisit la liste d'items `{aroma, aroma_intensity}` correspondant à LA
+    MÊME forme produit que la composition retenue (`bv_code`, ex. "PEL02") —
+    cohérence entre composition et intensité d'arôme, même logique que
+    `_select_brewing_entry`. `imported_fields.sensory_values` est une liste de
+    {code, sensory_value_items}, un sous-ensemble des codes `brewing_values`
+    (vérifié en direct sur Mosaic : CON04/PEL02/PEL06 seulement, sur les 10
+    formes de brewing_values). Repli sur `imported_fields.aroma_values`
+    (niveau variété, sans code produit associé — vérifié identique à l'entrée
+    PEL02 de sensory_values sur les échantillons observés, mais pas garanti
+    partout) si aucune entrée sensory_values ne correspond au code choisi."""
+    for entry in imp.get("sensory_values") or []:
+        if entry.get("code") == bv_code:
+            return entry.get("sensory_value_items") or []
+    return imp.get("aroma_values") or []
+
+
+def parse_yakima_hit(hit: dict) -> tuple[str, str, str, dict, list[str], dict[str, float]]:
     """
-    Extrait (variety, name, region, comp, descriptors) d'un hit Algolia YCH
-    (index contentstack--name-asc, _content_type='variety'). Renvoie comp au
-    même format que parse_composition ({compound: (vmin, vmax, unit)}).
+    Extrait (variety, name, region, comp, descriptors, aroma_intensity) d'un
+    hit Algolia YCH (index contentstack--name-asc, _content_type='variety').
+    Renvoie comp au même format que parse_composition ({compound: (vmin, vmax,
+    unit)}).
 
     La composition vient de imported_fields.brewing_values, forme produit
     choisie par `_select_brewing_entry` (Type 90 Pellets en priorité — voir
     `_BREWING_VALUE_PRIORITY` — pas un produit dérivé type Cryo/CO2/extrait).
+
+    aroma_intensity (T26 backlog, roue d'arôme quantitative) vient de
+    imported_fields.sensory_values/aroma_values — {aroma: intensité 0-100},
+    une donnée RÉELLE distincte de `descriptors` (qui ne garde qu'un sous-
+    ensemble des arômes les plus forts, sans valeur : vérifié sur Mosaic,
+    `aromas` liste 4 termes quand `aroma_values` en couvre 15). Simplement non
+    exploitée jusqu'ici (contrairement à BarthHaas, dont la roue d'arôme EST
+    verrouillée dans un `<canvas>` sans libellé d'axe récupérable côté HTML
+    statique — voir docs/DATA_SOURCES.md — Yakima n'a jamais eu ce problème,
+    la donnée était juste là dans la même réponse Algolia déjà utilisée pour
+    la composition, pas besoin de parsing canvas).
     """
     imp = hit.get("imported_fields") or {}
     variety = (hit.get("url") or "").rsplit("/", 1)[-1]
@@ -321,7 +350,13 @@ def parse_yakima_hit(hit: dict) -> tuple[str, str, str, dict, list[str]]:
         lo, hi = rng.get("low"), rng.get("high")
         if lo is not None and hi is not None:
             comp[compound] = (float(lo), float(hi), unit)
-    return variety, name, region, comp, descriptors
+
+    aroma_intensity = {
+        item["aroma"].strip().lower(): float(item["aroma_intensity"])
+        for item in _select_sensory_items(imp, bv.get("code"))
+        if item.get("aroma") and item.get("aroma_intensity") is not None
+    }
+    return variety, name, region, comp, descriptors, aroma_intensity
 
 
 _GREEK_TO_LATIN = {"α": "alpha", "β": "beta", "γ": "gamma", "δ": "delta"}

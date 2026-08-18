@@ -48,6 +48,20 @@ def test_orphans_flagged(db):
     # limonène n'existe pas dans le houblon -> orphelin
     assert "limonene" in r["orphan"]
 
+def test_hop_aroma_intensity_empty_without_yakima_sensory_data(db):
+    # fixtures (texte BarthHaas/Yakima) n'alimentent pas hop_aroma_intensity
+    # (donnée Algolia YCH uniquement, voir ingest.crawl_yakima) -> vide, pas
+    # de valeur inventée.
+    assert matching.hop_aroma_intensity(db, "citra") == {}
+
+def test_hop_aroma_intensity_reads_inserted_rows(db):
+    db.execute("INSERT INTO hop_aroma_intensity VALUES (?,?,?,?)",
+              ("citra", "citrus", 90.0, "yakima"))
+    db.commit()
+    assert matching.hop_aroma_intensity(db, "citra") == {"citrus": 90.0}
+    db.execute("DELETE FROM hop_aroma_intensity WHERE variety='citra'")
+    db.commit()
+
 def test_amplify_use_oav_flag_echoed(db):
     r = matching.amplify(db, "_citrus", use_oav=True)
     assert r["use_oav"] is True

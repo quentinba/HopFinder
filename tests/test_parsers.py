@@ -142,7 +142,7 @@ def test_parse_yakima_hit():
             ],
         },
     }
-    variety, name, region, comp, descriptors = parsers.parse_yakima_hit(hit)
+    variety, name, region, comp, descriptors, _ = parsers.parse_yakima_hit(hit)
     assert variety == "admiral"
     assert name == "Admiral"
     assert region == "United Kingdom"
@@ -178,7 +178,7 @@ def test_parse_yakima_hit_prefers_pel02_over_everything():
             ],
         },
     }
-    _, _, _, comp, _ = parsers.parse_yakima_hit(hit)
+    _, _, _, comp, _, _ = parsers.parse_yakima_hit(hit)
     assert comp["total_oil"] == (1.2, 2.1, "ml_100g")  # PEL02, pas ARO01
 
 def test_parse_yakima_hit_falls_back_to_con02_without_pel02():
@@ -189,7 +189,7 @@ def test_parse_yakima_hit_falls_back_to_con02_without_pel02():
             "brewing_values": [{"code": "CON02", "myrcene": {"low": 10, "ave": 12, "high": 14}}],
         },
     }
-    _, _, _, comp, _ = parsers.parse_yakima_hit(hit)
+    _, _, _, comp, _, _ = parsers.parse_yakima_hit(hit)
     assert comp["myrcene"] == (10.0, 14.0, "pct_oil")
 
 def test_parse_yakima_hit_avoids_derivative_products_like_cryo_or_co2_extract():
@@ -211,7 +211,7 @@ def test_parse_yakima_hit_avoids_derivative_products_like_cryo_or_co2_extract():
             ],
         },
     }
-    _, _, _, comp, _ = parsers.parse_yakima_hit(hit)
+    _, _, _, comp, _, _ = parsers.parse_yakima_hit(hit)
     assert comp["total_oil"] == (1.0, 3.0, "ml_100g")  # PEL02, pas EXT01/PEL06
 
 def test_parse_yakima_hit_rejects_implausible_aro01_in_favor_of_other_plausible_entry():
@@ -232,7 +232,7 @@ def test_parse_yakima_hit_rejects_implausible_aro01_in_favor_of_other_plausible_
             ],
         },
     }
-    _, _, _, comp, _ = parsers.parse_yakima_hit(hit)
+    _, _, _, comp, _, _ = parsers.parse_yakima_hit(hit)
     assert comp["total_oil"] == (2.0, 6.0, "ml_100g")  # PEL06, pas ARO01
 
 def test_parse_yakima_hit_uses_sole_implausible_entry_as_last_resort():
@@ -250,7 +250,7 @@ def test_parse_yakima_hit_uses_sole_implausible_entry_as_last_resort():
             ],
         },
     }
-    _, _, _, comp, _ = parsers.parse_yakima_hit(hit)
+    _, _, _, comp, _, _ = parsers.parse_yakima_hit(hit)
     assert comp["total_oil"] == (5.0, 9.0, "ml_100g")
 
 def test_parse_yakima_hit_pel02_implausible_falls_back_to_con02():
@@ -267,8 +267,54 @@ def test_parse_yakima_hit_pel02_implausible_falls_back_to_con02():
             ],
         },
     }
-    _, _, _, comp, _ = parsers.parse_yakima_hit(hit)
+    _, _, _, comp, _, _ = parsers.parse_yakima_hit(hit)
     assert comp["total_oil"] == (1.0, 1.7, "ml_100g")
+
+def test_parse_yakima_hit_aroma_intensity_matches_selected_product_form():
+    # gabarit trimmé d'un vrai hit Algolia YCH (variété Mosaic, vérifié en
+    # direct) : sensory_values couvre un sous-ensemble des codes brewing_values
+    # (ici CON04 et PEL02 seulement), avec un vocabulaire plus large que
+    # `aromas` (ex. "Vegetal"/"Pomme" absents de la liste courte). L'entrée
+    # PEL02 doit être choisie car c'est la forme retenue pour la composition.
+    hit = {
+        "url": "/variety/mosaic",
+        "imported_fields": {
+            "display_name": "Mosaic", "aromas": ["Berry", "Citrus", "Tropical", "Stone Fruit"],
+            "brewing_values": [
+                {"code": "CON04", "alpha": {"low": 11.5, "ave": 12.25, "high": 13}},
+                {"code": "PEL02", "alpha": {"low": 11.5, "ave": 12.25, "high": 13},
+                 "myrcene": {"low": 50, "ave": 55, "high": 60}},
+            ],
+            "sensory_values": [
+                {"code": "CON04", "sensory_value_items": [
+                    {"aroma": "Citrus", "aroma_intensity": 93},
+                    {"aroma": "Woody", "aroma_intensity": 85},
+                ]},
+                {"code": "PEL02", "sensory_value_items": [
+                    {"aroma": "Citrus", "aroma_intensity": 90},
+                    {"aroma": "Tropical", "aroma_intensity": 70},
+                    {"aroma": "Vegetal", "aroma_intensity": 26},
+                ]},
+            ],
+            "aroma_values": [{"aroma": "Citrus", "aroma_intensity": 999}],  # ne doit PAS être utilisé
+        },
+    }
+    _, _, _, _, _, aroma_intensity = parsers.parse_yakima_hit(hit)
+    assert aroma_intensity == {"citrus": 90.0, "tropical": 70.0, "vegetal": 26.0}
+
+def test_parse_yakima_hit_aroma_intensity_falls_back_to_variety_level():
+    # aucune entrée sensory_values ne correspond au code produit choisi (ou
+    # sensory_values absent) -> repli sur aroma_values (niveau variété).
+    hit = {
+        "url": "/variety/no-sensory-match",
+        "imported_fields": {
+            "display_name": "No Sensory Match", "aromas": [],
+            "brewing_values": [{"code": "PEL02", "myrcene": {"low": 10, "ave": 12, "high": 14}}],
+            "aroma_values": [{"aroma": "Earthy", "aroma_intensity": 42}],
+        },
+    }
+    _, _, _, _, _, aroma_intensity = parsers.parse_yakima_hit(hit)
+    assert aroma_intensity == {"earthy": 42.0}
 
 def test_pubchem_name_fallbacks():
     # échantillons réels : CAS non résolus par PubChem, noms Flavornet en cause

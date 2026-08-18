@@ -42,7 +42,8 @@ def seed_reference(con: sqlite3.Connection) -> None:
 # --------------------------------------------------------------------------- #
 # Houblon depuis fixtures
 # --------------------------------------------------------------------------- #
-def _ingest_variety(con, variety, name, region, comp, descriptors, source, repair=True):
+def _ingest_variety(con, variety, name, region, comp, descriptors, source, repair=True,
+                    aroma_intensity=None):
     comp = {c: v for c, v in comp.items() if c not in DROP_COMPOUNDS}
     comp, confidence, notes = validate_and_repair(comp, repair=repair)
 
@@ -59,6 +60,13 @@ def _ingest_variety(con, variety, name, region, comp, descriptors, source, repai
     for d in descriptors:
         d = reference.DESCRIPTOR_ALIASES.get(d, d)
         con.execute("INSERT OR REPLACE INTO hop_descriptors VALUES (?,?,?)", (variety, d, source))
+    # aroma_intensity : optionnel, seule la roue quantitative Yakima (T26
+    # backlog) l'alimente pour l'instant — BarthHaas/fixtures n'ont pas cette
+    # donnée, pas de valeur inventée en son absence.
+    for d, val in (aroma_intensity or {}).items():
+        d = reference.DESCRIPTOR_ALIASES.get(d, d)
+        con.execute("INSERT OR REPLACE INTO hop_aroma_intensity VALUES (?,?,?,?)",
+                    (variety, d, val, source))
     return confidence
 
 
@@ -422,11 +430,12 @@ def crawl_yakima(out_db: str, limit: int | None = None, timeout: float = 30.0) -
     stats = {"ok": 0, "repaired": 0, "suspect": 0}
     skipped = 0
     for hit in hits:
-        variety, name, region, comp, descriptors = parsers.parse_yakima_hit(hit)
+        variety, name, region, comp, descriptors, aroma_intensity = parsers.parse_yakima_hit(hit)
         variety = _dealias(variety)
         if not variety or not comp:
             skipped += 1; continue
-        conf = _ingest_variety(con, variety, name, region, comp, descriptors, "yakima")
+        conf = _ingest_variety(con, variety, name, region, comp, descriptors, "yakima",
+                               aroma_intensity=aroma_intensity)
         stats[conf] += 1
     con.commit(); con.close()
     print(f"  ok={stats['ok']} repaired={stats['repaired']} suspect={stats['suspect']}"

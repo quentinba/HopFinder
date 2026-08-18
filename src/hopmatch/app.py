@@ -9,6 +9,7 @@ jamais `ingest`.
 Lancer : streamlit run src/hopmatch/app.py [-- --db chemin/vers/aromahops.db]
 """
 from __future__ import annotations
+import math
 import os
 import sys
 from datetime import datetime
@@ -68,6 +69,11 @@ def _cached_descriptors(_con, db_path: str, _version: float) -> list[str]:
 
 
 @st.cache_data
+def _cached_intensity_vocabulary(_con, db_path: str, _version: float) -> list[str]:
+    return sorted(r[0] for r in _con.execute("SELECT DISTINCT descriptor FROM hop_aroma_intensity"))
+
+
+@st.cache_data
 def _cached_stats(_con, db_path: str, _version: float) -> dict:
     return {
         "hops": _con.execute("SELECT COUNT(*) FROM hops").fetchone()[0],
@@ -85,6 +91,11 @@ def _notes(con) -> list[str]:
 def _descriptors(con) -> list[str]:
     db_path = _db_path()
     return _cached_descriptors(con, db_path, _db_version(db_path))
+
+
+def _intensity_vocabulary(con) -> list[str]:
+    db_path = _db_path()
+    return _cached_intensity_vocabulary(con, db_path, _db_version(db_path))
 
 
 def _stats(con) -> dict:
@@ -173,6 +184,93 @@ def _contrast(con):
 _NON_AROMA_DISPLAY = {"total_oil", "alpha_acid", "beta_acid"}
 
 
+def _aroma_wheel(intensity: dict[str, float], vocabulary: list[str]):
+    """Roue d'arôme QUANTITATIVE pour UN houblon (T26 backlog, « comme
+    BeerMaverick/Yakima »). Rayon = intensité 0-100 réelle
+    (`hop_aroma_intensity`, imported_fields.sensory_values/aroma_values côté
+    Algolia YCH) — PAS une présence/absence : une première version binaire
+    (hop_descriptors, 38 termes plats) a été rejetée en direct par
+    l'utilisateur comme non informative, à raison — la vraie donnée
+    quantitative existe et était simplement non exploitée (voir
+    `parsers.parse_yakima_hit`, contrairement à BarthHaas qui n'a pas cette
+    donnée du tout côté HTML statique, voir docs/DATA_SOURCES.md). Vocabulaire
+    fixe à 15 termes (mesuré sur la base réelle : mêmes 15 catégories sur
+    94/151 variétés Yakima, 12-15/15 couvertes par houblon) -> ordre
+    alphabétique stable, mêmes positions d'un houblon à l'autre. BarthHaas n'a pas cette donnée : `intensity` vide pour
+    les houblons non couverts, pas de roue affichée dans ce cas (voir
+    `_browse`), pas de valeur inventée.
+
+    Rendu en polygone fermé (« radar »/spider chart, comme les profils de
+    stats de joueur — demandé par l'utilisateur) plutôt qu'un camembert à
+    rayon variable : une première version en `mark_arc` (theta+radius encodés
+    tous les deux) ressemblait à une cible et s'est aussi révélée buguée en
+    direct (Vega-Lite ne balaie qu'un demi-cercle par défaut dans cette
+    combinaison, même avec un `scale.range` explicite à 2π — non résolu,
+    abandonné plutôt que creusé plus loin). Coordonnées x/y calculées ici en
+    Python (trigonométrie simple), pas via des transforms Vega — plus robuste
+    et vérifiable, `mark_arc` n'a pas de mode polygone natif adapté à ce
+    rendu. L'objection du T4 backlog contre les radars (distorsion par l'aire
+    en comparaison MULTI-houblons) ne s'applique pas ici : un seul polygone,
+    pas de superposition à comparer."""
+    if not vocabulary:
+        return None
+    n = len(vocabulary)
+    r_max = 130.0
+    half_extent = r_max + 45.0
+
+    def _xy(i: int, value: float) -> tuple[float, float]:
+        angle = (i / n) * 2 * math.pi - math.pi / 2
+        r = (max(0.0, min(value, 100.0)) / 100.0) * r_max
+        return r * math.cos(angle), r * math.sin(angle)
+
+    spokes = []
+    labels = []
+    for i, d in enumerate(vocabulary):
+        angle = (i / n) * 2 * math.pi - math.pi / 2
+        ex, ey = r_max * math.cos(angle), r_max * math.sin(angle)
+        spokes.append({"x": 0.0, "y": 0.0, "x2": ex, "y2": ey})
+        lx, ly = (r_max + 20) * math.cos(angle), (r_max + 20) * math.sin(angle)
+        labels.append({"x": lx, "y": ly, "Descripteur": d})
+
+    poly = []
+    for i, d in enumerate(vocabulary):
+        val = intensity.get(d, 0.0)
+        x, y = _xy(i, val)
+        poly.append({"x": x, "y": y, "Descripteur": d, "Intensité": val, "Ordre": i})
+    poly.append(dict(poly[0], Ordre=n))  # referme le polygone
+
+    domain = [-half_extent, half_extent]
+    x_enc = alt.X("x:Q", axis=None, scale=alt.Scale(domain=domain))
+    y_enc = alt.Y("y:Q", axis=None, scale=alt.Scale(domain=domain))
+
+    grid = (
+        alt.Chart(alt.Data(values=spokes))
+        .mark_rule(strokeWidth=1, stroke="#3a3a38")
+        .encode(x=x_enc, y=y_enc, x2="x2:Q", y2="y2:Q")
+    )
+    polygon_line = (
+        alt.Chart(alt.Data(values=poly))
+        .mark_line(color="#2a78d6", strokeWidth=2, order=True)
+        .encode(x=x_enc, y=y_enc, order="Ordre:Q")
+    )
+    points = (
+        alt.Chart(alt.Data(values=poly[:-1]))
+        .mark_point(filled=True, size=45, color="#2a78d6")
+        .encode(x=x_enc, y=y_enc,
+               tooltip=["Descripteur:N", alt.Tooltip("Intensité:Q", format=".0f")])
+    )
+    text = (
+        alt.Chart(alt.Data(values=labels))
+        .mark_text(fontSize=10)
+        .encode(x=x_enc, y=y_enc, text="Descripteur:N")
+    )
+    return (
+        (grid + polygon_line + points + text)
+        .properties(width=360, height=360)
+        .configure_view(strokeWidth=0)
+    )
+
+
 def _browse(con):
     """Mode propre à la GUI (pas d'équivalent CLI) : consulter un houblon
     directement — composition + descripteurs + sources — sans passer par
@@ -195,6 +293,19 @@ def _browse(con):
 
     descs = sorted(hop_desc.get(selected, set()))
     st.write("**Descripteurs :** " + (", ".join(descs) if descs else "aucun enregistré"))
+    intensity = matching.hop_aroma_intensity(con, selected)
+    # any(...) > 0, pas juste `if intensity :` : au moins une variété réelle
+    # (admiral, vérifié en direct) a une entrée sensory_values existante mais
+    # entièrement à 0 côté YCH — cohérent avec la corruption déjà documentée
+    # de cette variété précise (voir _is_plausible_brewing_entry) ; un dict
+    # non vide mais tout à zéro n'est pas une donnée exploitable.
+    if intensity and any(v > 0 for v in intensity.values()):
+        st.altair_chart(_aroma_wheel(intensity, _intensity_vocabulary(con)), width="content")
+    else:
+        st.caption("Pas de roue d'arôme quantitative pour cette variété "
+                   "(donnée Yakima non disponible ou non exploitable ici — "
+                   "BarthHaas seul, variété non couverte, ou entrée YCH "
+                   "corrompue comme pour Admiral).")
 
     hcomp = comp.get(selected, {})
     rows = sorted(

@@ -23,6 +23,13 @@ Réconciliation à la lecture : moyenne des milieux de fourchette, provenance tr
 Unités mixtes (% d'huile vs µg/kg pour les thiols) gérées via la normalisation
 par composé (les unités s'annulent au sein d'un composé).
 
+`hop_aroma_intensity(variety, descriptor, intensity, source)` : roue d'arôme
+QUANTITATIVE (T26 backlog), intensité 0-100, distincte de `hop_descriptors` qui reste
+binaire présence/absence. Yakima uniquement (`imported_fields.sensory_values`/
+`aroma_values`, voir `docs/DATA_SOURCES.md`) — BarthHaas n'a pas cette donnée, jamais
+peuplée pour cette source. Consommée par `matching.hop_aroma_intensity` (helper dédié,
+pas via `matching.load`) et rendue en radar/spider chart dans le mode GUI `browse`.
+
 `flavornet_compounds(cas, compound, descriptors)` : whitelist odeur-active, distincte
 de `molecules` (couche de matching, avec seuils). Sert uniquement à filtrer FooDB à
 l'ingestion (`ingest_foodb`), jointure par CAS. `ingest_foodb` écrit aussi dans

@@ -105,6 +105,16 @@ def get_note_descriptors(con, note: str) -> set[str]:
         "SELECT descriptor FROM note_descriptors WHERE note=?", (note,))}
 
 
+def hop_aroma_intensity(con, variety: str) -> dict[str, float]:
+    """Roue d'arôme QUANTITATIVE d'un houblon (T26 backlog), {descriptor:
+    intensité 0-100} — Yakima uniquement (`hop_aroma_intensity`, distinct de
+    `hop_descriptors` qui est binaire présence/absence). Vide pour un houblon
+    sans cette donnée (BarthHaas seul, ou variété non couverte) : pas de
+    repli inventé."""
+    return {r["descriptor"]: r["intensity"] for r in con.execute(
+        "SELECT descriptor, intensity FROM hop_aroma_intensity WHERE variety=?", (variety,))}
+
+
 def _normalize_descriptors(descriptors: list[str]) -> set[str]:
     """Vocabulaire réel `hop_descriptors` (comme `by_descriptor`), pas inventé —
     même normalisation utilisée par `amplify`/`contrast` pour une sélection

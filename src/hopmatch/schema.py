@@ -15,6 +15,15 @@ CREATE TABLE hop_descriptors (
     variety TEXT, descriptor TEXT, source TEXT,
     PRIMARY KEY (variety, descriptor, source)
 );
+-- Roue d'arôme QUANTITATIVE (T26 backlog). Yakima uniquement : intensité 0-100
+-- par descripteur (imported_fields.sensory_values/aroma_values, Algolia YCH),
+-- une donnée réelle distincte de la simple présence/absence de hop_descriptors
+-- (voir ingest.crawl_yakima et parsers.parse_yakima_hit). BarthHaas n'a pas
+-- cette donnée -> jamais peuplée pour cette source, pas de valeur inventée.
+CREATE TABLE hop_aroma_intensity (
+    variety TEXT, descriptor TEXT, intensity REAL, source TEXT,
+    PRIMARY KEY (variety, descriptor, source)
+);
 CREATE TABLE molecules (
     compound TEXT PRIMARY KEY, odor TEXT, threshold_ppb REAL, pubchem_cid INTEGER
 );
@@ -55,7 +64,8 @@ def connect(path: str) -> sqlite3.Connection:
 def init_db(con: sqlite3.Connection) -> None:
     con.executescript(
         "DROP TABLE IF EXISTS hops; DROP TABLE IF EXISTS hop_composition;"
-        "DROP TABLE IF EXISTS hop_descriptors; DROP TABLE IF EXISTS molecules;"
+        "DROP TABLE IF EXISTS hop_descriptors; DROP TABLE IF EXISTS hop_aroma_intensity;"
+        "DROP TABLE IF EXISTS molecules;"
         "DROP TABLE IF EXISTS aroma_notes; DROP TABLE IF EXISTS note_descriptors;"
         "DROP TABLE IF EXISTS flavornet_compounds; DROP TABLE IF EXISTS flavordb2_thresholds;"
         "DROP TABLE IF EXISTS pubchem_cids;")
