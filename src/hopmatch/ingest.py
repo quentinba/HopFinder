@@ -108,6 +108,15 @@ def _summary(con, stats):
 # Crawl BarthHaas (réseau réel)
 # --------------------------------------------------------------------------- #
 def crawl_barthhaas(out_db: str, sleep: float = 1.5, limit: int | None = None) -> None:
+    """
+    Le slug d'URL BarthHaas colle parfois ®/™ au mot précédent sans séparateur
+    ("Citra®" -> `.../hops/citrar`, pas `.../citra`) — voir
+    `_fix_barthhaas_trademark_slug` pour le détail complet (9 variétés
+    touchées, vérifié en direct). `variety` (clé interne) est corrigé via
+    cette fonction, comparé au <h1> réel de chaque page ; `name` vient
+    directement de ce <h1> (plus fidèle que l'ancien `slug.title()`, qui
+    reproduisait aussi l'artefact et perdait les accents/casse d'origine).
+    """
     import time, re, requests
     from bs4 import BeautifulSoup
     from .schema import connect
@@ -129,13 +138,19 @@ def crawl_barthhaas(out_db: str, sleep: float = 1.5, limit: int | None = None) -
         try:
             html = requests.get(url, timeout=30,
                                 headers={"User-Agent": "hopmatch/0.1 (research)"}).text
-            text = BeautifulSoup(html, "html.parser").get_text("\n")
+            soup = BeautifulSoup(html, "html.parser")
+            h1 = soup.find("h1")
+            h1_title = h1.get_text(strip=True) if h1 else None
+            text = soup.get_text("\n")
             comp = parsers.parse_composition(text, parsers.BARTHHAAS_LABELS)
             if comp:
-                _ingest_variety(con, slug, slug.replace("-", " ").title(),
+                variety = _fix_barthhaas_trademark_slug(slug, h1_title)
+                name = h1_title or slug.replace("-", " ").title()
+                _ingest_variety(con, variety, name,
                                 parsers.parse_region(text), comp,
                                 parsers.parse_descriptors(text), "barthhaas")
-                print(f"  ok {slug} ({len(comp)})")
+                print(f"  ok {slug} ({len(comp)})"
+                     + (f" -> variety corrigée en {variety!r}" if variety != slug else ""))
         except Exception as e:  # noqa
             print(f"  !! {slug}: {e}")
         if i % 10 == 0:
@@ -480,6 +495,47 @@ def _normalize_hop_key(s: str) -> str:
     s = _HOP_NAME_STOPWORDS_RE.sub("", s)
     s = re.sub(r"[^a-z0-9]+", "-", s)
     return re.sub(r"-+", "-", s).strip("-")
+
+
+def _fix_barthhaas_trademark_slug(slug: str, h1_title: str | None) -> str:
+    """BarthHaas transforme parfois ®/™ en un « r »/« tm » collé DIRECTEMENT au
+    mot précédent dans son propre slug d'URL — vérifié en direct sur le
+    catalogue réel (crawl complet des 97 pages, comparaison slug URL vs
+    <h1> réel de chaque fiche) : `/hops-and-products/hops/citrar` alors que
+    le <h1> de la page dit "Citra®", `.../mosaicr` pour "Mosaic®", etc.
+    9 variétés touchées (citra, ekuanot, loral, mosaic, sabro, summit, azacca,
+    talus, bru-1) + amarillo (suffixe cultivar après le "r" collé :
+    `amarillor-vgxp01-cv` -> "Amarillo®" + code produit "VGXP01", absent du
+    <h1> réel). Cette clé erronée empêchait la fusion multi-source avec Yakima
+    (qui utilise la forme propre "citra"/"mosaic"...) : chaque houblon
+    apparaissait deux fois (une fiche BarthHaas sans thiols fusionnés, une
+    fiche Yakima sans les thiols BarthHaas), silencieusement.
+
+    Le suffixe après le "r"/"tm" collé (cf. amarillo) est ENTIÈREMENT retiré,
+    pas seulement le "r" — vérifié en direct sur la réingestion réelle :
+    conserver "-vgxp01-cv" (première version de cette fonction) empêchait la
+    fusion avec Yakima ("amarillo-brand-ama04" déjà dépréfixé en "amarillo"
+    de son côté). "VGXP01" est un code cultivar/SKU interne BarthHaas absent
+    du <h1> — même situation que le "AMA04" que Yakima dépréfixe déjà de son
+    propre côté pour la même variété, donc le même traitement s'applique.
+
+    PAS une troncature générique d'un « r » final — de vrais houblons finissent
+    légitimement par « r » (Saazer, Glacier, Endeavour, Challenger, Cluster,
+    Pioneer...) et ne doivent jamais être touchés. La correction n'est appliquée
+    QUE quand le <h1> réel de la page CONFIRME, par sa propre forme normalisée,
+    que le slug COMMENCE PAR ce nom + "r"/"tm" collé — jamais une supposition
+    sur la forme du mot seul. `h1_title` absent (échec de parsing) -> slug
+    inchangé, filet de sécurité plutôt qu'une correction hasardeuse."""
+    if not h1_title:
+        return slug
+    clean = _normalize_hop_key(h1_title)
+    if not clean:
+        return slug
+    for suffix in ("r", "tm"):
+        glued = clean + suffix
+        if slug == glued or slug.startswith(glued + "-"):
+            return clean
+    return slug
 
 
 def _build_hop_name_index(con) -> dict[str, str]:

@@ -210,6 +210,23 @@ def test_contrast_blend_prefers_real_pairing_over_coverage_gain(db):
         db.execute("DELETE FROM hop_pairings WHERE variety='saazer'")
         db.commit()
 
+def test_contrast_blend_keeps_growing_past_full_or_stuck_coverage(db):
+    # Signalé par l'utilisateur : les blends s'arrêtaient toujours à taille 1
+    # (dès qu'un seul houblon couvrait toute la cible, ou que rien de plus
+    # n'était couvrable). Décision : ne plus s'arrêter tôt, toujours grandir
+    # jusqu'à max_hops (ou épuisement du pool), le houblon suivant étant
+    # choisi par pertinence globale (via="relevance") quand il n'apporte ni
+    # fréquence réelle ni gain de couverture. Sur "citrus,floral" (fixture),
+    # aucun houblon ne couvre "earthy"/"resinous" -> le résidu reste bloqué
+    # dès la taille 2, mais la croissance continue jusqu'à épuisement (4
+    # houblons pertinents au total dans la base fixture).
+    r = matching.contrast_blend(db, descriptors=["citrus", "floral"], max_hops=5)
+    sizes = [b["size"] for b in r["blends"]]
+    assert sizes == [1, 2, 3, 4]  # épuisement du pool, pas un arrêt anticipé
+    assert r["blends"][2]["residual"] == r["blends"][1]["residual"]  # résidu bloqué
+    assert r["blends"][2]["hops"][-1]["via"] == "relevance"
+    assert r["blends"][3]["hops"][-1]["via"] == "relevance"
+
 def test_amplify_falls_back_to_pure_molecular_score_without_descriptors(db):
     # "_passion" n'a pas de note_descriptors (contrairement à "_citrus") : sans
     # garde-fou, le score par défaut plafonnerait à w_mol*100=50 pour un houblon

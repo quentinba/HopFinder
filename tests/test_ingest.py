@@ -29,6 +29,40 @@ def test_normalize_hop_key_strips_trademark_and_brand_words():
     assert ingest._normalize_hop_key("Nelson Sauvin™  Brand - NZ Hops") == \
         ingest._normalize_hop_key("nelson-sauvin")
 
+def test_fix_barthhaas_trademark_slug_strips_glued_r():
+    # cas réel vérifié en direct : slug BarthHaas "citrar" alors que le <h1>
+    # de la page dit "Citra®" -- le ® a été collé en "r" sans séparateur.
+    assert ingest._fix_barthhaas_trademark_slug("citrar", "Citra®") == "citra"
+    assert ingest._fix_barthhaas_trademark_slug("mosaicr", "Mosaic®") == "mosaic"
+    assert ingest._fix_barthhaas_trademark_slug("ekuanotr", "Ekuanot®") == "ekuanot"
+
+def test_fix_barthhaas_trademark_slug_strips_glued_tm():
+    assert ingest._fix_barthhaas_trademark_slug("azaccatm", "Azacca™") == "azacca"
+    assert ingest._fix_barthhaas_trademark_slug("talustm", "Talus™") == "talus"
+
+def test_fix_barthhaas_trademark_slug_drops_suffix_after_glue_for_merge():
+    # "amarillor-vgxp01-cv" : le "r" collé est suivi d'un code cultivar
+    # ("VGXP01") absent du <h1> réel -- tout le suffixe est retiré, pas
+    # seulement le "r", pour permettre la fusion avec la clé Yakima "amarillo"
+    # (vérifié en direct : conserver le suffixe empêchait la fusion).
+    assert ingest._fix_barthhaas_trademark_slug(
+        "amarillor-vgxp01-cv", "Amarillo®") == "amarillo"
+
+def test_fix_barthhaas_trademark_slug_never_touches_real_hop_names_ending_in_r():
+    # NON-RÉGRESSION : de vrais houblons finissent légitimement en "r" et ne
+    # doivent jamais être tronqués (Saazer, Glacier, Endeavour, Challenger,
+    # Cluster, Pioneer...) -- la correction ne s'applique QUE quand le <h1>
+    # réel confirme exactement le motif nom+r/tm collé, jamais par supposition.
+    for slug, h1 in [("saazer", "Saazer"), ("glacier", "Glacier"),
+                     ("endeavour", "Endeavour"), ("challenger", "Challenger"),
+                     ("cluster", "Cluster"), ("pioneer", "Pioneer")]:
+        assert ingest._fix_barthhaas_trademark_slug(slug, h1) == slug
+
+def test_fix_barthhaas_trademark_slug_missing_h1_leaves_slug_unchanged():
+    # pas de <h1> parsé (échec réseau/structure) -> filet de sécurité, pas de
+    # correction hasardeuse.
+    assert ingest._fix_barthhaas_trademark_slug("citrar", None) == "citrar"
+
 def test_resolve_hop_variety_matches_by_variety_or_name(tmp_path):
     con = connect(str(tmp_path / "t.db"))
     init_db(con)

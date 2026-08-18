@@ -73,7 +73,7 @@ l'implémentation ([ ] à faire, [x] fait — voir le commit associé).
 - [x] **T24 — Libellés de mode peu conviviaux**
   `amplify`/`contrast`/`by-descriptor`/`browse` affichés tels quels dans la
   barre latérale. Renommés en `HopFinder - Amplify`/`HopFinder - Contrast`/
-  `Hopfinder from Descriptors`/`Browse hop composition` (`app.MODE_LABELS`,
+  `HopFinder from Descriptors`/`Browse hop informations` (`app.MODE_LABELS`,
   `format_func` sur le radio) — purement cosmétique, les clés internes/CLI ne
   changent pas.
 
@@ -144,6 +144,81 @@ l'implémentation ([ ] à faire, [x] fait — voir le commit associé).
   T10/« But »). Vérifié en direct sur une cible large (10 catégories cœur) :
   Amarillo (meilleur candidat) puis Simcoe/Citra/Mosaic/Chinook, 4 houblons
   sur 5 ajoutés via une fréquence de pairing BeerMaverick réelle.
+
+- [x] **T34 — Libellé "Hopfinder from Descriptors"**
+  Coquille de casse (F minuscule). Renommé "HopFinder from Descriptors"
+  (`app.MODE_LABELS`), cohérent avec "HopFinder - Amplify"/"- Contrast" (T24).
+
+- [x] **T35 — Libellé "Browse hop composition"**
+  Renommé "Browse hop informations" (`app.MODE_LABELS`) — la page affiche
+  aussi les associations houblon<->houblon (T25) et la roue d'arôme (T26),
+  pas seulement la composition.
+
+- [x] **T36 — `--oav` actif par défaut en GUI**
+  La case `--oav (prior de puissance olfactive)` démarrait décochée
+  (`value=False`). Effet réel mesuré et documenté (T23, ~1 note sur 6 change
+  de classement) — passée à `value=True` par défaut, désactivable pour
+  comparer sans.
+
+- [x] **T37 — Curseur "Nombre de résultats" mal placé en Amplify**
+  Dans la sidebar, loin du multiselect de descripteurs qu'il affecte.
+  Déplacé dans le corps de la page Amplify, juste après le multiselect
+  (`st.slider` au lieu de `st.sidebar.slider`) — Contrast garde le sien en
+  sidebar (non demandé pour ce mode).
+
+- [x] **T38 — Curseur de taille de blend 1-5**
+  Retiré (`amplify`/`contrast` appellent désormais `amplify_blend`/
+  `contrast_blend` avec `max_hops=5` fixe) — pas d'utilité à proposer moins
+  de 5 tailles, cf. T33/T41 : le mécanisme grossit maintenant toujours
+  jusqu'à `max_hops`.
+
+- [x] **T39 — Navigation directe résultat → Browse**
+  Bouton (icône `open_in_new`) sur chaque ligne de résultat en `amplify`,
+  `contrast` et `by-descriptor`, ouvrant `browse` pré-sélectionné sur ce
+  houblon. `st.dataframe` ne supporte pas de bouton par ligne : rendu manuel
+  via `st.columns` (`app._render_hop_table`/`_browse_button`). Changer
+  `st.session_state["mode"]` directement lève
+  `StreamlitAPIException` (widget déjà instancié) — relais par une clé
+  différente (`_next_mode`/`_next_browse_hop`) consommée en tête de `main()`
+  avant l'instanciation du radio/selectbox concerné ; recherche `browse`
+  réinitialisée au passage (sinon un filtre resté d'une visite précédente
+  pourrait exclure le houblon ciblé et faire planter le `st.selectbox`).
+
+- [x] **T40 — Houblons avec un "r" résiduel ("Citrar", "Mosaicr"...)**
+  Root cause investiguée en direct plutôt que patchée en surface (exigence
+  explicite de l'utilisateur — un vrai houblon peut légitimement finir par
+  "r") : BarthHaas translittère ® en "r" et ™ en "tm", collés sans séparateur
+  dans son propre générateur de slug. `ingest._fix_barthhaas_trademark_slug`
+  ne déclenche que si le slug égale exactement `normalize(h1) + "r"/"tm"` (+
+  suffixe optionnel) — vérifié sur 6 vrais houblons finissant par "r"
+  (Saazer, Glacier, Endeavour, Challenger, Cluster, Pioneer) qu'aucun n'est
+  touché. 10 houblons concernés (Citra, Mosaic, Ekuanot, Loral, Sabro,
+  Summit, Azacca, Talus, Bru-1, Amarillo) fusionnent maintenant correctement
+  avec leur entrée Yakima au lieu d'exister en double, chacune amputée d'une
+  partie des données (thiols côté BarthHaas, β-pinène/sélinène côté Yakima).
+  203 → 193 houblons en base après réingestion réelle. Voir CLAUDE.md
+  (section BarthHaas) pour le détail complet de l'investigation.
+
+- [x] **T41 — Roue d'arôme (T26) trop petite, illisible en thème sombre**
+  Rayon agrandi (130 → 170), police des labels augmentée (14px). Couleurs
+  explicites par thème (`st.context.theme.type` — seule information de
+  thème exposée par Streamlit, pas de couleur exacte lisible) : les marques
+  Altair `mark_text`/`mark_rule` n'héritent PAS automatiquement du thème
+  Streamlit contrairement aux axes/légendes natifs — vérifié en lisant le
+  rendu réel en thème sombre (labels noirs sur fond sombre, illisibles)
+  avant correction.
+
+- [x] **T42 — Blend `contrast` toujours de taille 1**
+  Signalé par l'utilisateur. PAS un bug : conséquence attendue du early-exit
+  ajouté en T33 (`if not (target - covered): break`), devenu très fréquent
+  une fois le vocabulaire de descripteurs élargi à 104 termes (T25 addendum)
+  — un seul houblon populaire couvre souvent à lui seul les 2-3 descripteurs
+  cibles de `CONTRAST_AFFINITY`. Revirement de méthodologie tranché par
+  l'utilisateur : early-exit retiré, `_pairing_grown_blends` grossit
+  maintenant toujours jusqu'à `max_hops` (ou épuisement du pool). Nouveau
+  statut `via="relevance"` quand ni pairing ni gain de couverture n'existe
+  plus — étiqueté "rien de neuf à couvrir" pour ne jamais laisser croire à
+  une couverture supplémentaire inexistante.
 
 ## Sources de données additionnelles (recherche)
 

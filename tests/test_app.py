@@ -103,12 +103,26 @@ def test_sidebar_shows_db_stats(toy_cwd):
     assert "2 notes" in stats_caption
     assert "3 descripteurs" in stats_caption
 
-def test_amplify_mode_renders_ranked_table(toy_cwd):
+def test_amplify_result_row_opens_browse_for_that_hop(toy_cwd):
+    # bouton "ouvrir dans Browse" par ligne de résultat (demande utilisateur)
+    # -> bascule vers browse ET présélectionne le houblon cliqué.
     at = _app()
     at.run()
     at.sidebar.radio[0].set_value("amplify").run()
     assert not at.exception
-    assert len(at.dataframe) >= 1
+    at.button(key="amplify_hopa").click().run()
+    assert not at.exception
+    assert at.sidebar.radio[0].value == "browse"
+    assert at.selectbox(key="browse_hop").value == "hopa"
+
+def test_amplify_mode_renders_ranked_table(toy_cwd):
+    # rendu ligne par ligne (st.columns), pas st.dataframe, depuis l'ajout du
+    # bouton "ouvrir dans Browse" par ligne -- un bouton par houblon classé.
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("amplify").run()
+    assert not at.exception
+    assert len([b for b in at.button if b.key and b.key.startswith("amplify_")]) >= 1
 
 def test_amplify_warns_on_low_molecular_coverage(toy_cwd):
     # "lownote" (fixture, ~1% de couverture) : voir _build_toy_db.

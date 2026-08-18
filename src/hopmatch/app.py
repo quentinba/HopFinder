@@ -29,8 +29,8 @@ MODE_LABELS = {
     "home": "Accueil",
     "amplify": "HopFinder - Amplify",
     "contrast": "HopFinder - Contrast",
-    "by-descriptor": "Hopfinder from Descriptors",
-    "browse": "Browse hop composition",
+    "by-descriptor": "HopFinder from Descriptors",
+    "browse": "Browse hop informations",
 }
 
 # Page d'accueil (front page) : résumé des outils, avec accès direct à chacun.
@@ -171,10 +171,43 @@ def _stats(con) -> dict:
     return _cached_stats(con, db_path, _db_version(db_path))
 
 
+def _browse_button(variety: str, name: str, key: str) -> None:
+    """Bouton de navigation directe vers Browse hop informations pour un
+    houblon précis (T-nav backlog, demandé pour amplify/contrast/
+    by-descriptor). Même relais session_state que la page d'accueil
+    (`_next_mode`) + une seconde clé dédiée (`_next_browse_hop`) consommées
+    en tout début de `main()`, avant l'instanciation des widgets `mode`/
+    `browse_hop` — Streamlit interdit de modifier le session_state d'un
+    widget déjà instancié dans le même run."""
+    if st.button("", icon=":material/open_in_new:", key=key,
+                help=f"Ouvrir {name} dans Browse hop informations"):
+        st.session_state["_next_mode"] = "browse"
+        st.session_state["_next_browse_hop"] = variety
+        st.rerun()
+
+
+def _render_hop_table(rows: list[dict], columns: list[tuple[str, str]], key_prefix: str) -> None:
+    """Rendu ligne par ligne (pas `st.dataframe` : un bouton "Parcourir" par
+    ligne n'existe pas nativement dans une dataframe). `rows` : dicts avec au
+    moins "variety"/"name" + les clés utilisées par `columns` ; `columns` :
+    [(en-tête, clé)]. Chaque ligne se termine par un bouton vers Browse hop
+    informations pour ce houblon (voir `_browse_button`)."""
+    widths = [3] + [2] * (len(columns) - 1) + [1]
+    header_cols = st.columns(widths)
+    for col, (header, _) in zip(header_cols, columns):
+        col.caption(header)
+    for row in rows:
+        cols = st.columns(widths, vertical_alignment="center")
+        for col, (_, field) in zip(cols, columns):
+            col.write(row[field])
+        with cols[-1]:
+            _browse_button(row["variety"], row["name"], key=f"{key_prefix}_{row['variety']}")
+
+
 def _amplify(con, note):
     st.sidebar.subheader("Options")
     use_oav = st.sidebar.checkbox(
-        "--oav (prior de puissance olfactive)", value=False,
+        "--oav (prior de puissance olfactive)", value=True,
         help="Pondère chaque molécule par 1/seuil olfactif quand ce seuil est "
              "connu (~14 molécules d'huile de houblon courantes : myrcène, "
              "géraniol, thiols... — les autres molécules ne sont pas affectées). "
@@ -182,14 +215,15 @@ def _amplify(con, note):
              "correction pour qu'une molécule très odorante à faible seuil ne "
              "soit pas éclipsée par une molécule ubiquitaire mais peu odorante. "
              "Change le classement sur environ 1 note sur 6 (mesuré sur la base "
-             "réelle).")
-    top = st.sidebar.slider("Nombre de résultats", 1, 30, 8)
+             "réelle). Activé par défaut (demande utilisateur) : effet réel "
+             "mesuré, pas un bruit — désactive-le pour comparer sans.")
     # note_descriptors est vide par défaut pour toute note (pas d'amorce
     # littérature, cf. reference.py) : sans sélection manuelle ici, la couche
     # descripteurs ne peut jamais contribuer au score.
     selected_desc = st.multiselect(
         "Descripteurs de la note (optionnel — active la couche descripteurs)",
         _descriptors(con))
+    top = st.slider("Nombre de résultats", 1, 30, 8)
     r = matching.amplify(con, note, use_oav=use_oav,
                          descriptors=selected_desc or None, top=top)
 
@@ -211,25 +245,31 @@ def _amplify(con, note):
     if not r["ranked"]:
         st.write("Aucun houblon ne recoupe cette note.")
         return
-    st.dataframe(
-        [{"Houblon": h["name"], "Score": h["score"], "Mol.": h["mol"], "Desc.": h["desc"],
+    _render_hop_table(
+        [{"variety": h["variety"], "name": h["name"], "Houblon": h["name"],
+          "Score": h["score"], "Mol.": h["mol"], "Desc.": h["desc"],
           "Contribue via": ", ".join(h["why"]), "Sources": h["sources"]}
          for h in r["ranked"]],
-        width="stretch", hide_index=True)
+        [("Houblon", "Houblon"), ("Score", "Score"), ("Mol.", "Mol."), ("Desc.", "Desc."),
+        ("Contribue via", "Contribue via"), ("Sources", "Sources")],
+        key_prefix="amplify")
 
     st.subheader("Proposer un blend")
     if not r["has_descriptors"]:
         st.caption("Pas de descripteurs pour cette note : aucun blend possible "
                   "(sélectionne des descripteurs ci-dessus).")
     else:
-        max_hops = st.slider("Nombre de houblons max", 1, 5, 5, key="amplify_blend_max_hops")
+        # Toujours 5 (décision utilisateur) : pas de curseur, un blend à 5
+        # tailles complet reste peu coûteux à calculer et laisse voir toutes
+        # les options d'un coup plutôt que de forcer un choix a priori.
         blend_r = matching.amplify_blend(con, note, use_oav=use_oav,
-                                         descriptors=selected_desc or None, max_hops=max_hops)
+                                         descriptors=selected_desc or None, max_hops=5)
         _render_blends(blend_r["blends"])
 
 
 _VIA_LABELS = {"top": "meilleur candidat", "pairing": "pairing BeerMaverick réel",
-              "coverage": "repli couverture (pas de donnée BeerMaverick)"}
+              "coverage": "repli couverture (pas de donnée BeerMaverick)",
+              "relevance": "houblon pertinent en plus (rien de neuf à couvrir)"}
 
 
 def _render_blends(blends: list[dict]) -> None:
@@ -271,15 +311,18 @@ def _contrast(con):
     if not r["ranked"]:
         st.write("Aucun houblon ne recoupe cette cible.")
         return
-    st.dataframe(
-        [{"Houblon": h["name"], "Score": h["score"],
-          "Contraste via": ", ".join(h["contrast_via"]), "Sources": h["sources"]}
+    _render_hop_table(
+        [{"variety": h["variety"], "name": h["name"], "Houblon": h["name"],
+          "Score": h["score"], "Contraste via": ", ".join(h["contrast_via"]),
+          "Sources": h["sources"]}
          for h in r["ranked"]],
-        width="stretch", hide_index=True)
+        [("Houblon", "Houblon"), ("Score", "Score"), ("Contraste via", "Contraste via"),
+        ("Sources", "Sources")],
+        key_prefix="contrast")
 
     st.subheader("Proposer un blend")
-    max_hops = st.slider("Nombre de houblons max", 1, 5, 5, key="contrast_blend_max_hops")
-    blend_r = matching.contrast_blend(con, descriptors=selected, max_hops=max_hops)
+    # Toujours 5 (décision utilisateur) : pas de curseur.
+    blend_r = matching.contrast_blend(con, descriptors=selected, max_hops=5)
     _render_blends(blend_r["blends"])
 
 
@@ -313,12 +356,27 @@ def _aroma_wheel(intensity: dict[str, float], vocabulary: list[str]):
     et vérifiable, `mark_arc` n'a pas de mode polygone natif adapté à ce
     rendu. L'objection du T4 backlog contre les radars (distorsion par l'aire
     en comparaison MULTI-houblons) ne s'applique pas ici : un seul polygone,
-    pas de superposition à comparer."""
+    pas de superposition à comparer.
+
+    Couleurs explicitement adaptées au thème (`st.context.theme.type`) : les
+    marks Altair "libres" (`mark_rule`/`mark_text` sans encodage de couleur)
+    ne suivent PAS automatiquement le thème Streamlit contrairement aux
+    axes/légendes natifs — signalé en direct par l'utilisateur (grille et
+    libellés restaient dans une teinte sombre fixe, illisible en thème
+    sombre). `st.context.theme` n'expose que `.type` (pas les couleurs
+    réelles du thème, vérifié dans le code source Streamlit) : palette de
+    contraste choisie à la main pour les deux cas plutôt que devinée."""
     if not vocabulary:
         return None
+    dark = st.context.theme.type == "dark"
+    text_color = "#f2f2f0" if dark else "#1a1a18"
+    grid_color = "#5a5a56" if dark else "#3a3a38"
+    accent = "#4da3ff" if dark else "#2a78d6"
+
     n = len(vocabulary)
-    r_max = 130.0
-    half_extent = r_max + 45.0
+    r_max = 170.0  # agrandi (demande utilisateur) — était 130
+    label_radius = r_max + 30
+    half_extent = label_radius + 40
 
     def _xy(i: int, value: float) -> tuple[float, float]:
         angle = (i / n) * 2 * math.pi - math.pi / 2
@@ -331,7 +389,7 @@ def _aroma_wheel(intensity: dict[str, float], vocabulary: list[str]):
         angle = (i / n) * 2 * math.pi - math.pi / 2
         ex, ey = r_max * math.cos(angle), r_max * math.sin(angle)
         spokes.append({"x": 0.0, "y": 0.0, "x2": ex, "y2": ey})
-        lx, ly = (r_max + 20) * math.cos(angle), (r_max + 20) * math.sin(angle)
+        lx, ly = label_radius * math.cos(angle), label_radius * math.sin(angle)
         labels.append({"x": lx, "y": ly, "Descripteur": d})
 
     poly = []
@@ -347,28 +405,28 @@ def _aroma_wheel(intensity: dict[str, float], vocabulary: list[str]):
 
     grid = (
         alt.Chart(alt.Data(values=spokes))
-        .mark_rule(strokeWidth=1, stroke="#3a3a38")
+        .mark_rule(strokeWidth=1, stroke=grid_color)
         .encode(x=x_enc, y=y_enc, x2="x2:Q", y2="y2:Q")
     )
     polygon_line = (
         alt.Chart(alt.Data(values=poly))
-        .mark_line(color="#2a78d6", strokeWidth=2, order=True)
+        .mark_line(color=accent, strokeWidth=2, order=True)
         .encode(x=x_enc, y=y_enc, order="Ordre:Q")
     )
     points = (
         alt.Chart(alt.Data(values=poly[:-1]))
-        .mark_point(filled=True, size=45, color="#2a78d6")
+        .mark_point(filled=True, size=60, color=accent)
         .encode(x=x_enc, y=y_enc,
                tooltip=["Descripteur:N", alt.Tooltip("Intensité:Q", format=".0f")])
     )
     text = (
         alt.Chart(alt.Data(values=labels))
-        .mark_text(fontSize=10)
+        .mark_text(fontSize=14, color=text_color)
         .encode(x=x_enc, y=y_enc, text="Descripteur:N")
     )
     return (
         (grid + polygon_line + points + text)
-        .properties(width=360, height=360)
+        .properties(width=480, height=480)
         .configure_view(strokeWidth=0)
     )
 
@@ -380,7 +438,7 @@ def _browse(con):
     d'arôme quantitative (T26) et les associations houblon<->houblon
     (T25, voir `_hop_associations`)."""
     hops, comp, hop_desc, _ = matching.load(con)
-    query = st.text_input("Rechercher (nom ou variété)")
+    query = st.text_input("Rechercher (nom ou variété)", key="browse_search")
     varieties = sorted(hops, key=lambda v: hops[v]["name"].lower())
     if query:
         q = query.strip().lower()
@@ -390,7 +448,8 @@ def _browse(con):
         st.write("Aucun houblon ne correspond à cette recherche.")
         return
 
-    selected = st.selectbox("Houblon", varieties, format_func=lambda v: hops[v]["name"])
+    selected = st.selectbox("Houblon", varieties, format_func=lambda v: hops[v]["name"],
+                            key="browse_hop")
     h = hops[selected]
     st.subheader(h["name"])
     st.caption(f"Région : {h['region'] or 'inconnue'} · Sources : {h['sources']}")
@@ -532,6 +591,7 @@ def _by_descriptor(con):
                 f"{h['name']} — recoupe {', '.join(h['matched_descriptors'])} "
                 f"[{h['sources']}]"):
             st.caption("Tous les descripteurs : " + ", ".join(h["all_descriptors"]))
+            _browse_button(h["variety"], h["name"], key=f"bydesc_{h['variety']}")
             if h["compounds"]:
                 st.dataframe(
                     [{"Composé": c["compound"], "Valeur": round(c["mid"], 2),
@@ -544,6 +604,12 @@ def main():
     st.set_page_config(page_title="hopmatch", page_icon="🌿")
     if "_next_mode" in st.session_state:
         st.session_state["mode"] = st.session_state.pop("_next_mode")
+    if "_next_browse_hop" in st.session_state:
+        # reset la recherche : sinon un filtre resté d'une précédente visite
+        # de Browse pourrait exclure le houblon ciblé -> st.selectbox
+        # planterait ("value not in options") en tentant de le présélectionner.
+        st.session_state["browse_search"] = ""
+        st.session_state["browse_hop"] = st.session_state.pop("_next_browse_hop")
     st.title("hopmatch")
     st.caption("Note olfactive → molécules → houblons")
 

@@ -389,10 +389,17 @@ def _pairing_grown_blends(con, candidates: list[dict], target: set[str], max_hop
     possible juste par manque de donnée BeerMaverick, mais toujours signaler
     la provenance de chaque houblon plutôt que de la cacher.
 
-    Arrête la croissance dès couverture complète de `target` : pas la peine
-    de proposer une taille de plus qui n'ajoute rien. S'arrête aussi si plus
-    aucun candidat n'apporte de gain de couverture ET qu'aucune fréquence
-    réelle n'est disponible (blend "épuisé")."""
+    Va TOUJOURS jusqu'à `max_hops` (ou épuisement des candidats) — ne s'arrête
+    PAS dès couverture complète (décision utilisateur, 2026-08 : voir un blend
+    à 5 même quand 1 seul houblon couvre déjà toute la cible reste une info
+    utile — l'utilisateur compare lui-même la taille/couverture/authenticité,
+    l'outil ne décide pas à sa place). Quand il ne reste ni fréquence réelle
+    ni gain de couverture (cible déjà entièrement couverte, ou plus aucun
+    candidat n'apporte quoi que ce soit de neuf), repli sur le houblon suivant
+    par PERTINENCE globale (`via="relevance"`) plutôt que de s'arrêter — un
+    houblon pertinent de plus reste une proposition valable, signalée comme
+    telle (ni pairing réel, ni gain de couverture). S'arrête seulement quand
+    le pool de candidats est épuisé."""
     if not candidates or not target:
         return []
     freq = _hop_pairing_frequencies(con)
@@ -419,10 +426,12 @@ def _pairing_grown_blends(con, candidates: list[dict], target: set[str], max_hop
                                   if blend else set())
                 remaining_target = target - covered_so_far
                 gain_candidates = [c for c in pool if c["covers"] & remaining_target]
-                if not gain_candidates:
-                    break
-                chosen = max(gain_candidates, key=lambda c: len(c["covers"] & remaining_target))
-                via = "coverage"
+                if gain_candidates:
+                    chosen = max(gain_candidates,
+                                key=lambda c: len(c["covers"] & remaining_target))
+                    via = "coverage"
+                else:
+                    chosen, via = pool[0], "relevance"
         blend.append((chosen["variety"], via))
         pool = [c for c in pool if c["variety"] != chosen["variety"]]
         covered = set().union(*(by_variety[v]["covers"] for v, _ in blend))
@@ -435,8 +444,6 @@ def _pairing_grown_blends(con, candidates: list[dict], target: set[str], max_hop
             "covered": sorted(target & covered),
             "residual": sorted(target - covered),
         })
-        if not (target - covered):
-            break
     return blends
 
 

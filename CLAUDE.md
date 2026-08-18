@@ -66,6 +66,23 @@ composition du blend). Vérifié en direct sur données réelles : sur une cible
 Simcoe/Citra/Mosaic/Chinook, les 4 par pairing réel BeerMaverick — 4 additions sur 5
 via une fréquence de recette vérifiée, pas une heuristique de couverture.
 
+**`_pairing_grown_blends` ne s'arrête plus à la couverture complète (2026-08-18, décision
+utilisateur — revirement de méthodologie explicite).** Signalé par l'utilisateur : en
+`contrast`, le blend proposé restait bloqué à taille 1. Investigation en direct : ce
+n'était PAS un bug mais le comportement voulu du T33 (`if not (target - covered): break`)
+qui devenait très fréquent une fois le vocabulaire de descripteurs élargi à 104 termes
+(voir BeerMaverick ci-dessus) — un seul houblon populaire couvre souvent à lui seul les
+2-3 descripteurs cibles de `CONTRAST_AFFINITY`, donc plus aucune taille >1 n'était
+générée. L'utilisateur a tranché : voir un blend à 5 houblons reste une info utile même
+quand 1 seul houblon couvre déjà toute la cible (piste éventuelle de substitution/
+diversité), donc le early-exit est retiré — le mécanisme grossit maintenant TOUJOURS
+jusqu'à `max_hops` (ou épuisement du pool de candidats). Nouveau statut `via="relevance"`
+(distinct de `"coverage"`) quand aucun gain de couverture n'est plus possible ET qu'aucun
+pairing BeerMaverick ne s'applique depuis le blend courant : ajoute alors le houblon
+suivant par pertinence de classement pur, explicitement étiqueté "rien de neuf à
+couvrir" en CLI/GUI pour ne jamais laisser croire à une couverture supplémentaire
+inexistante — honnêteté d'abord, même principe que les molécules orphelines.
+
 ## Décisions de conception (ne pas revenir dessus sans raison)
 - **Descripteurs = couche primaire** (roues d'arôme BarthHaas/Yakima). Robuste, sans
   concentration. Les molécules sont la couche secondaire.
@@ -94,6 +111,25 @@ via une fréquence de recette vérifiée, pas une heuristique de couverture.
 ## Réalité des données (vérifiée)
 - **BarthHaas** : source houblon primaire. HTML servi, parsable, inclut les THIOLS.
   Crawler implémenté (`ingest.crawl_barthhaas`).
+  **Bug de slug marque déposée corrigé (2026-08-18, signalé par l'utilisateur : "Citrar"/
+  "Mosaicr" en `browse`).** Root cause vérifiée en direct (crawl complet des 97 pages
+  BarthHaas, comparaison slug brut vs vrai `<h1>` via `ingest._normalize_hop_key`) : le
+  générateur de slug de BarthHaas translittère ® en un simple "r" et ™ en "tm", collé
+  SANS séparateur au mot précédent ("Citra®" → `citrar`, "Azacca™" → `azaccatm`) — un
+  défaut du site source, pas un bug de parsing hopmatch au sens classique, mais hopmatch
+  utilisait ce slug comme clé d'identité et le prenait donc pour une vraie variété.
+  9 houblons touchés (+ `amarillor-vgxp01-cv`, cas étendu avec code cultivar SKU en plus
+  de la marque). Corrigé chirurgicalement par `ingest._fix_barthhaas_trademark_slug(slug,
+  h1_title)` : ne déclenche QUE si le slug est exactement `normalize(h1) + "r"/"tm"` (ou
+  ce préfixe + un tiret) — vérifié sur les vrais houblons finissant légitimement par "r"
+  (Saazer, Glacier, Endeavour, Challenger, Cluster, Pioneer...) qu'aucun n'est touché,
+  conformément à l'exigence explicite de l'utilisateur de ne PAS tronquer bêtement un "r"
+  final. Conséquence : ces 10 houblons fusionnent désormais correctement avec leur entrée
+  Yakima (`barthhaas,yakima` au lieu de deux lignes séparées, chacune privée d'une partie
+  des données — Yakima manque les thiols, BarthHaas manque β-pinène/sélinène) ; 203 → 193
+  houblons en base après réingestion réelle. BeerMaverick non affecté (vérifié : même
+  décompte de pairings/substitutions/descripteurs avant/après, car il résout déjà par les
+  clés Yakima propres qui existaient indépendamment).
 - **Yakima Chief** : secondaire. Ajoute β-pinène, sélinène. Vrai rempart anti-bot devant
   le HTML (Vercel Security Checkpoint) — `requests` seul ne passe jamais (vérifié, même
   avec UA de navigateur). Contournement : leur front s'appuie sur Algolia avec une clé
@@ -328,6 +364,19 @@ retiré. Vocabulaire de descripteurs élargi de 38 à 104 termes via les tags Be
 côté Yakima seul). `contrast_blend` refondu + `amplify_blend` ajouté (T33, priorité à la
 fréquence réelle de pairing BeerMaverick plutôt qu'à la couverture pure, plusieurs
 tailles de blend 1-5 proposées — voir la section dédiée ci-dessus).
+Batch GUI/data du 2026-08-18 (9 changements demandés par l'utilisateur) : libellés
+"HopFinder from Descriptors"/"Browse hop informations" ; `--oav` actif par défaut en GUI ;
+curseur "Nombre de résultats" déplacé dans la page Amplify (repli sidebar conservé pour
+Contrast) ; curseur de taille de blend retiré, toujours 5 (`amplify_blend`/
+`contrast_blend` appelés avec `max_hops=5` fixe) ; bouton "ouvrir dans Browse" sur chaque
+ligne de résultat (`amplify`, `contrast`, `by-descriptor` — relais `session_state`
+`_next_mode`/`_next_browse_hop` consommé en tête de `main()`) ; correction du bug de slug
+marque déposée BarthHaas (voir la section BarthHaas ci-dessus, fusion Citra/Mosaic/etc.
+avec Yakima) ; roue d'arôme agrandie (rayon 130→170) et adaptative au thème clair/sombre
+(`st.context.theme.type`, seule info de thème exposée par Streamlit — palette choisie à la
+main, pas de lecture de couleur exacte possible) ; `_pairing_grown_blends` ne s'arrête
+plus à la couverture complète (voir section dédiée ci-dessus, corrige le blend `contrast`
+bloqué à taille 1).
 Reste :
 1. Jointure FooDB/hop_composition au-delà des ~734 composés Flavornet si le vocabulaire
    s'élargit beaucoup (crawl Yakima déjà réel, plus d'aliments FooDB).

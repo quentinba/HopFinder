@@ -16,6 +16,16 @@
   (`data-values="3,6,4,..."`) mais les libellés d'axes sont injectés en JS, pas dans le HTML
   statique — piste non résolue. **Yakima reste la source fiable pour `hop_descriptors`.**
 - Statut : `ingest.crawl_barthhaas` implémenté (composition fiable, descripteurs indisponibles).
+- **Bug de slug marque déposée (corrigé 2026-08-18)** : le générateur de slug du site
+  translittère ® en "r" et ™ en "tm", collés sans séparateur au mot précédent
+  (`Citra®` → `citrar`, `Azacca™` → `azaccatm`) — vérifié en direct par crawl complet des
+  97 pages et comparaison slug/`<h1>` réel. hopmatch utilisait ce slug comme clé
+  d'identité, empêchant la fusion avec l'entrée Yakima propre (`citra`). Corrigé par
+  `ingest._fix_barthhaas_trademark_slug`, qui ne déclenche que si le slug égale
+  exactement `normalize(h1) + "r"/"tm"` (+ suffixe éventuel) — vérifié sur de vrais
+  houblons finissant légitimement par "r" (Saazer, Glacier, Endeavour, Challenger,
+  Cluster, Pioneer) qu'aucun n'est touché. 10 variétés concernées, 203 → 193 houblons en
+  base après réingestion. Voir CLAUDE.md pour le détail complet.
 
 **Yakima Chief** — https://www.yakimachief.com/variety/{slug}
 - Accès : le site a un vrai rempart anti-bot devant le HTML (Vercel Security Checkpoint) —
