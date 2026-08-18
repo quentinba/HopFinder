@@ -205,6 +205,23 @@ def descriptor_overlap(note_desc: set[str], hop_desc: set[str]) -> float:
     return len(note_desc & hop_desc) / len(note_desc) if note_desc else 0.0
 
 
+# Seuil d'avertissement "couverture moléculaire faible" (CLI/GUI, pas utilisé
+# pour le scoring lui-même). Mesuré sur les 506 notes réelles : la couverture
+# ne dépasse JAMAIS 12% sur toute la base (médiane 1,3%) — la chimie de
+# l'huile de houblon recoupe peu la plupart des arômes alimentaires (voir
+# CLAUDE.md, section "But" — même constat qui a mené au retrait de combine()).
+# En dessous de ce seuil, le classement moléculaire risque de dégénérer en un
+# simple tri par quantité brute d'UNE molécule commune (souvent le géraniol,
+# présent dans énormément d'aliments sans rapport) plutôt que de refléter la
+# signature propre de la note — vérifié en direct : 163/506 notes n'ont QUE le
+# géraniol comme molécule productible, et les 2 houblons les plus riches en
+# géraniol de toute la base (Talus®, Ekuanot®) raflent #1 sur 44% des notes
+# classées quand aucun descripteur n'est fourni. Un seuil à 20% flagge la quasi-
+# totalité du corpus réel — c'est le reflet honnête des données, pas un seuil
+# mal choisi (voir la discussion complète dans docs/BACKLOG.md).
+LOW_COVERAGE_WARNING_THRESHOLD = 0.20
+
+
 def coverage(note_profile, comp):
     """Molécules de la note couvrables par ≥1 houblon, et orphelines."""
     producible = {m for m in note_profile

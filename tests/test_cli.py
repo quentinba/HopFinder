@@ -67,6 +67,25 @@ def test_amplify_unknown_note_returns_1(db_path, capsys):
     out = capsys.readouterr().out
     assert "Note inconnue" in out
 
+def test_amplify_warns_on_low_molecular_coverage(db_path, capsys):
+    # note à couverture quasi nulle : une grosse molécule orpheline (10.0)
+    # domine largement une petite productible (0.1) -> couverture ~1%, bien
+    # sous LOW_COVERAGE_WARNING_THRESHOLD (20%).
+    con = connect(db_path)
+    con.executemany("INSERT INTO aroma_notes VALUES (?,?,?,?)", [
+        ("lownote", "molx", 0.1, "toy"), ("lownote", "bigorphan", 10.0, "toy"),
+    ])
+    con.commit(); con.close()
+    assert main(["amplify", "lownote", "--db", db_path]) == 0
+    out = capsys.readouterr().out
+    assert "ATTENTION" in out and "couverture moléculaire faible" in out
+
+def test_amplify_no_low_coverage_warning_when_coverage_high(db_path, capsys):
+    # "mynote" (fixture) : 100% de couverture -> pas d'avertissement.
+    assert main(["amplify", "mynote", "--db", db_path]) == 0
+    out = capsys.readouterr().out
+    assert "ATTENTION" not in out
+
 def test_amplify_with_manual_descriptors(db_path, capsys):
     assert main(["amplify", "mynote", "--db", db_path,
                 "--descriptors", "citrus,woody"]) == 0

@@ -4,7 +4,7 @@
 question concrète : *quel houblon accorder à un ajout* (yuzu, basilic…) — en le
 prolongeant (`amplify`) ou en le contrastant (`contrast`) ?
 
-> État : `pytest` vert (92 tests). Toutes les sources tournent contre les sites externes :
+> État : `pytest` vert (96 tests). Toutes les sources tournent contre les sites externes :
 > `crawl_barthhaas`, `crawl_yakima`, `ingest_flavornet`, `ingest_foodb`, `ingest_flavordb2`,
 > `resolve_pubchem_cids`, `ingest_beermaverick`, `by-descriptor`,
 > `--oav` (prior de puissance olfactive, approximatif) — voir [Feuille de route](#feuille-de-route).
@@ -77,7 +77,8 @@ et *ce qu'elle vaut*.
 | Base | Monde | Rôle | Accès | Qualité / limite | Licence |
 |---|---|---|---|---|---|
 | **BarthHaas** | houblon | composition (dont thiols) | HTML servi | propre, producteur ; pas de descripteurs fiables | données producteur |
-| **Yakima Chief** | houblon | β-pinène, sélinène, roue d'arôme | API Algolia (checkpoint devant le HTML) | propre, labo ASBC | données producteur |
+| **Yakima Chief** | houblon | β-pinène, sélinène, roue d'arôme, variétés similaires | API Algolia (checkpoint devant le HTML) | propre, labo ASBC | données producteur |
+| **BeerMaverick** | houblon↔houblon | pairings/substitutions | HTML statique | agrégateur, pas une mesure de labo | non publiée |
 | **FooDB** | ingrédient→molécule | composition + concentration | dump bulk | lacunaire, bruitée, figée 2020 | **non commerciale** |
 | **Flavornet** | molécule | whitelist odeur-active | HTML statique | curée mais petite/ancienne | académique |
 | **FlavorDB2** | molécule | seuils olfactifs | scrape HTML (fiche par CID) | seuils utiles, texte libre, présence seule | **CC BY-NC-SA** |
@@ -351,6 +352,18 @@ fournit ça automatiquement (voir « pourquoi la sélection manuelle » sous `co
 `hopmatch amplify mango` → houblons classés par recoupement molécules/descripteurs avec le
 profil FooDB de "mango" (myrcène, terpinolène...).
 
+**Avertissement couverture moléculaire faible.** Signalé en direct par l'utilisateur (test de
+"strawberry") : sans descripteurs, la couche moléculaire seule dégénère exactement comme
+`combine()` (voir l'encadré ci-dessus) — 163/506 notes réelles n'ont QUE le géraniol comme
+molécule productible, et le score se réduit alors à un simple tri par quantité brute de
+géraniol, sans rapport avec la note. Mesuré : Talus® Brand et Ekuanot® Brand (les 2 houblons
+les plus riches en géraniol de la base) raflent #1 sur 44 % de toutes les notes classées quand
+aucun descripteur n'est fourni. La couche descripteurs corrige ça concrètement quand elle est
+alimentée (vérifié : Talus tombe de #1 à #6 sur "strawberry" avec `--descriptors fruity,berry`)
+— `amplify` affiche donc désormais un avertissement (`ATTENTION` en CLI, `st.warning` en GUI)
+dès que la couverture moléculaire passe sous 20 % (`matching.LOW_COVERAGE_WARNING_THRESHOLD`),
+pour encourager explicitement l'ajout du plus de descripteurs possible.
+
 ### `contrast` : accorder par contraste
 
 **Contexte.** Le contraste **ne se dérive pas d'une similarité moléculaire** — chercher des
@@ -562,7 +575,7 @@ hopmatch contrast-blend --descriptors citrus,herbal --max-hops 3   # + blend par
 hopmatch descriptors              # vocabulaire de descripteurs disponible
 hopmatch by-descriptor citrus,tropical   # découverte, sans note requise
 
-pytest -q                         # 92 tests (nécessite l'extra [dev])
+pytest -q                         # 96 tests (nécessite l'extra [dev])
 ```
 
 ### GUI navigateur
@@ -644,7 +657,13 @@ pipeline suffisant), `by-descriptor`, `ingest.crawl_yakima` (via Algolia), `inge
 cf. `parsers.pubchem_name_fallbacks` — quand le CAS seul ne résout rien ; remplace la table
 d'alias manuelle pour les synonymes purs et la recherche par nom exact de `ingest_flavordb2`),
 GUI Streamlit (`src/hopmatch/app.py`, lecture seule), `contrast`/`contrast_blend`
-généralisés par sélection manuelle de descripteurs.
+généralisés par sélection manuelle de descripteurs, libellés de mode conviviaux
+(`app.MODE_LABELS`), roue d'arôme quantitative par houblon en `browse` (radar/spider
+chart, Yakima uniquement), associations houblon<->houblon en `browse` (`hop_similar`
+Yakima + `hop_pairings`/`hop_substitutions` BeerMaverick, `ingest.ingest_beermaverick`),
+avertissement de couverture moléculaire faible sur `amplify` (voir la section dédiée
+ci-dessus et [Sources de données](#les-bases-de-données--pourquoi-et-comment-chacune)
+pour BeerMaverick).
 
 **Résidu PubChem accepté, pas une piste ouverte.** 6/734 CAS restent sans CID (0,8%) après CAS
 + repli par nom : recherché aussi par CAS comme identifiant d'enregistrement PubChem (endpoint

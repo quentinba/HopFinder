@@ -44,6 +44,11 @@ def _build_toy_db(path):
     con.executemany("INSERT INTO hop_composition VALUES (?,?,?,?,?,?,?,?)", rows)
     con.executemany("INSERT INTO aroma_notes VALUES (?,?,?,?)", [
         ("mynote", "molx", 1.0, "toy"), ("mynote", "moly", 0.5, "toy"),
+        # couverture quasi nulle (~1%) : une grosse molécule orpheline (10.0)
+        # domine largement une petite productible (0.1) — pour tester
+        # l'avertissement de couverture faible sans dépendre du timing du
+        # cache mtime-based (voir _db_version) sur un insert après coup.
+        ("lownote", "molx", 0.1, "toy"), ("lownote", "bigorphan", 10.0, "toy"),
     ])
     con.commit()
     con.close()
@@ -79,13 +84,13 @@ def test_app_loads_with_no_exception_default_amplify_mode(toy_cwd):
 def test_sidebar_shows_db_stats(toy_cwd):
     # T6 backlog : contexte base (nombre de houblons/notes/descripteurs)
     # visible en barre latérale, avec les vrais chiffres de la base jouet
-    # (2 houblons, 1 note, 2 descripteurs distincts : citrus/woody/floral -> 3).
+    # (2 houblons, 2 notes, 2 descripteurs distincts : citrus/woody/floral -> 3).
     at = _app()
     at.run()
     assert not at.exception
     stats_caption = next(c.value for c in at.sidebar.caption if "houblons" in c.value)
     assert "2 houblons" in stats_caption
-    assert "1 notes" in stats_caption
+    assert "2 notes" in stats_caption
     assert "3 descripteurs" in stats_caption
 
 def test_amplify_mode_renders_ranked_table(toy_cwd):
@@ -93,6 +98,23 @@ def test_amplify_mode_renders_ranked_table(toy_cwd):
     at.run()
     assert not at.exception
     assert len(at.dataframe) >= 1
+
+def test_amplify_warns_on_low_molecular_coverage(toy_cwd):
+    # "lownote" (fixture, ~1% de couverture) : voir _build_toy_db.
+    at = _app()
+    at.run()
+    at.sidebar.selectbox[0].set_value("lownote").run()
+    assert not at.exception
+    assert any("Couverture moléculaire faible" in w.value for w in at.warning)
+
+def test_amplify_no_low_coverage_warning_when_coverage_high(toy_cwd):
+    # "lownote" trie avant "mynote" alphabétiquement -> sélection explicite,
+    # pas de dépendance à l'ordre par défaut du selectbox.
+    at = _app()
+    at.run()
+    at.sidebar.selectbox[0].set_value("mynote").run()
+    assert not at.exception
+    assert not any("Couverture moléculaire faible" in w.value for w in at.warning)
 
 def test_missing_db_shows_error_not_exception():
     # cwd SANS aromahops.db : doit afficher st.error proprement (st.stop()),

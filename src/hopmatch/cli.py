@@ -23,6 +23,12 @@ def _print_amplify(r):
               "prior de puissance approximatif — pas une mesure de concentration réelle)")
     if not r.get("has_descriptors", True):
         print("  (pas de descripteurs pour cette note : score 100% moléculaire)")
+    if r["coverage"] < matching.LOW_COVERAGE_WARNING_THRESHOLD:
+        print(f"  ATTENTION : couverture moléculaire faible ({r['coverage']*100:.0f}%) — "
+              "le classement moléculaire seul risque d'être dominé par une seule molécule "
+              "commune à beaucoup d'aliments, pas par la signature propre de cette note "
+              "(chimie de l'huile de houblon peu recoupante, voir CLAUDE.md). Ajoutez le "
+              "plus de descripteurs possible (--descriptors) pour un résultat plus fiable.")
     if r["orphan"]:
         print("  orphelines (ajout requis) :", ", ".join(r["orphan"]))
     for i, h in enumerate(r["ranked"], 1):

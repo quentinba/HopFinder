@@ -24,6 +24,25 @@ correcte) : un problème de fond, aucun algorithme ne change le recoupement chim
 réel. Ne pas réintroduire sans un changement de fond côté données (une source qui
 couvre bien plus de composés aromatiques par aliment).
 
+**Le même problème de fond touche aussi `amplify()` (avertissement ajouté, PAS
+retiré — décision utilisateur, 2026-08).** Signalé en direct par l'utilisateur en
+testant "strawberry" : la couche moléculaire seule, sans descripteurs, se dégrade
+exactement comme `combine()` — 163/506 notes réelles n'ont QUE le géraniol comme
+molécule productible, et le score se réduit alors à `amount(ce houblon, géraniol) /
+amount(houblon le plus riche en géraniol de toute la base)` : un simple tri par
+quantité brute d'UNE molécule, sans rapport avec la note en question. Mesuré : sans
+descripteurs, Talus® Brand (le houblon avec le plus de géraniol, 0.036) et Ekuanot®
+Brand (0.0315) raflent #1 sur 44 % des 258 notes ayant un classement moléculaire non
+vide (166+55/506). Contrairement à `combine()`, PAS retiré : la couche descripteurs
+(`matching.descriptor_overlap`, indépendante de la concentration moléculaire) corrige
+concrètement le classement quand l'utilisateur en fournit — vérifié sur "strawberry" +
+["fruity","berry"] : Talus tombe de #1 à #6. La couverture ne dépassant jamais 12 % sur
+toute la base (voir ci-dessus), un avertissement (`matching.LOW_COVERAGE_WARNING_THRESHOLD
+= 0.20`) s'affiche désormais en CLI (`ATTENTION`) et GUI (`st.warning`) dès que
+`coverage < 20%`, encourageant explicitement l'ajout de descripteurs — voir
+`cli._print_amplify`/`app._amplify`. Ce seuil flagge la quasi-totalité des notes
+réelles : reflet honnête des données, pas un seuil mal choisi.
+
 ## Décisions de conception (ne pas revenir dessus sans raison)
 - **Descripteurs = couche primaire** (roues d'arôme BarthHaas/Yakima). Robuste, sans
   concentration. Les molécules sont la couche secondaire.
