@@ -4,7 +4,7 @@
 question concrète : *quel houblon accorder à un ajout* (yuzu, basilic…) — en le
 prolongeant (`amplify`) ou en le contrastant (`contrast`) ?
 
-> État : `pytest` vert (106 tests). Toutes les sources tournent contre les sites externes :
+> État : `pytest` vert (107 tests). Toutes les sources tournent contre les sites externes :
 > `crawl_barthhaas`, `crawl_yakima`, `ingest_flavornet`, `ingest_foodb`, `ingest_flavordb2`,
 > `resolve_pubchem_cids`, `ingest_beermaverick`, `by-descriptor`,
 > `--oav` (prior de puissance olfactive, approximatif) — voir [Feuille de route](#feuille-de-route).
@@ -610,7 +610,7 @@ hopmatch contrast-blend --descriptors citrus,herbal --max-hops 5   # blends 1-5,
 hopmatch descriptors              # vocabulaire de descripteurs disponible
 hopmatch by-descriptor citrus,tropical   # découverte, sans note requise
 
-pytest -q                         # 106 tests (nécessite l'extra [dev])
+pytest -q                         # 107 tests (nécessite l'extra [dev])
 ```
 
 ### GUI navigateur
@@ -621,6 +621,13 @@ ci-dessus) :
 ```bash
 streamlit run src/hopmatch/app.py
 ```
+
+**Page d'accueil.** Mode par défaut (`app._home`, `MODE_LABELS["home"]`) : résume les 4
+outils (cartes avec icône/description/exemple) et propose un bouton "Ouvrir" par outil
+pour y accéder directement — bascule `app.MODE_LABELS`/le radio de mode via une clé de
+relais (`st.session_state["_next_mode"]`, consommée en tout début de `main()` avant
+l'instanciation du widget radio ; Streamlit interdit de modifier `session_state["mode"]`
+une fois ce widget déjà créé dans le même run).
 
 Les quatre modes (amplify/contrast/by-descriptor/browse) et les options
 (`--oav`, `max_hops`, nombre de résultats) sont dans la barre

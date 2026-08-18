@@ -73,12 +73,22 @@ def _app():
     return AppTest.from_file(APP_PATH, default_timeout=20)
 
 
-def test_app_loads_with_no_exception_default_amplify_mode(toy_cwd):
+def test_app_loads_with_no_exception_default_home_mode(toy_cwd):
+    # "home" (Accueil) est le mode par défaut (premier de la liste du radio) —
+    # front page résumant les 4 outils, avec un bouton "Ouvrir" par outil.
     at = _app()
     at.run()
     assert not at.exception
     assert at.title[0].value == "hopmatch"
-    # "amplify" est le mode par défaut (premier de la liste du radio)
+    assert at.sidebar.radio[0].value == "home"
+    assert len(at.button) == 4
+
+def test_home_open_button_switches_to_target_mode(toy_cwd):
+    at = _app()
+    at.run()
+    at.button(key="home_open_amplify").click().run()
+    assert not at.exception
+    assert at.sidebar.radio[0].value == "amplify"
     assert "mynote" in [o for o in at.sidebar.selectbox[0].options]
 
 def test_sidebar_shows_db_stats(toy_cwd):
@@ -96,6 +106,7 @@ def test_sidebar_shows_db_stats(toy_cwd):
 def test_amplify_mode_renders_ranked_table(toy_cwd):
     at = _app()
     at.run()
+    at.sidebar.radio[0].set_value("amplify").run()
     assert not at.exception
     assert len(at.dataframe) >= 1
 
@@ -103,6 +114,7 @@ def test_amplify_warns_on_low_molecular_coverage(toy_cwd):
     # "lownote" (fixture, ~1% de couverture) : voir _build_toy_db.
     at = _app()
     at.run()
+    at.sidebar.radio[0].set_value("amplify").run()
     at.sidebar.selectbox[0].set_value("lownote").run()
     assert not at.exception
     assert any("Couverture moléculaire faible" in w.value for w in at.warning)
@@ -112,6 +124,7 @@ def test_amplify_no_low_coverage_warning_when_coverage_high(toy_cwd):
     # pas de dépendance à l'ordre par défaut du selectbox.
     at = _app()
     at.run()
+    at.sidebar.radio[0].set_value("amplify").run()
     at.sidebar.selectbox[0].set_value("mynote").run()
     assert not at.exception
     assert not any("Couverture moléculaire faible" in w.value for w in at.warning)

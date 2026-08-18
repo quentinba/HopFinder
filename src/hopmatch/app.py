@@ -26,11 +26,79 @@ DEFAULT_DB = "aromahops.db"
 # qui pilotent le dispatch et restent stables (CLI/tests/URLs internes non
 # concernés — habillage d'affichage uniquement, demandé par l'utilisateur).
 MODE_LABELS = {
+    "home": "Accueil",
     "amplify": "HopFinder - Amplify",
     "contrast": "HopFinder - Contrast",
     "by-descriptor": "Hopfinder from Descriptors",
     "browse": "Browse hop composition",
 }
+
+# Page d'accueil (front page) : résumé des outils, avec accès direct à chacun.
+_TOOL_SUMMARIES = [
+    {
+        "mode": "amplify",
+        "icon": ":material/trending_up:",
+        "tagline": "Prolonger un ajout",
+        "description": (
+            "L'ajout (yuzu, basilic...) est déjà dans la bière — trouve un houblon "
+            "qui **prolonge** son caractère plutôt que de le reproduire. Combine "
+            "similarité moléculaire (TF-IDF) et recoupement de la roue d'arôme. "
+            "Propose aussi des blends de 1 à 5 houblons réellement utilisés "
+            "ensemble en recette (BeerMaverick)."
+        ),
+    },
+    {
+        "mode": "contrast",
+        "icon": ":material/contrast:",
+        "tagline": "Accorder par contraste",
+        "description": (
+            "Cherche un houblon au profil **complémentaire** (agrume vif sous un "
+            "houblon dank/résineux), pas similaire — via une carte d'affinités "
+            "descripteurs, jamais moléculaire. Mêmes blends multi-tailles "
+            "qu'Amplify, priorité à la fréquence réelle de pairing en recette."
+        ),
+    },
+    {
+        "mode": "by-descriptor",
+        "icon": ":material/search:",
+        "tagline": "Découverte par descripteurs",
+        "description": (
+            "Aucune note requise : choisis directement des descripteurs "
+            "(agrume, tropical, dank...) et vois quels houblons recoupent le "
+            "plus la roue d'arôme réelle (BarthHaas/Yakima/BeerMaverick)."
+        ),
+    },
+    {
+        "mode": "browse",
+        "icon": ":material/database:",
+        "tagline": "Explorer un houblon",
+        "description": (
+            "Consulte un houblon directement : composition mesurée, "
+            "descripteurs, roue d'arôme quantitative (Yakima), variétés "
+            "similaires et associations en recette réelles (BeerMaverick)."
+        ),
+    },
+]
+
+
+def _home(con) -> None:
+    stats = _stats(con)
+    st.write(f"{stats['hops']} houblons, {stats['notes']} notes, "
+            f"{stats['descriptors']} descripteurs disponibles. Choisis un outil :")
+    cols = st.columns(2)
+    for i, tool in enumerate(_TOOL_SUMMARIES):
+        with cols[i % 2].container(border=True):
+            st.subheader(f"{tool['icon']} {MODE_LABELS[tool['mode']]}")
+            st.caption(tool["tagline"])
+            st.write(tool["description"])
+            if st.button("Ouvrir", key=f"home_open_{tool['mode']}",
+                        icon=":material/arrow_forward:"):
+                # Streamlit interdit de modifier st.session_state["mode"] une
+                # fois le widget radio (key="mode") déjà instancié dans CE run
+                # -- clé de relais consommée en tout début de main(), avant la
+                # création du radio, sur le run suivant.
+                st.session_state["_next_mode"] = tool["mode"]
+                st.rerun()
 
 
 def _db_path() -> str:
@@ -474,6 +542,8 @@ def _by_descriptor(con):
 
 def main():
     st.set_page_config(page_title="hopmatch", page_icon="🌿")
+    if "_next_mode" in st.session_state:
+        st.session_state["mode"] = st.session_state.pop("_next_mode")
     st.title("hopmatch")
     st.caption("Note olfactive → molécules → houblons")
 
@@ -494,8 +564,13 @@ def main():
         f"{stats['descriptors']} descripteurs · modifiée {modified}")
 
     mode = st.sidebar.radio(
-        "Mode", ["amplify", "contrast", "by-descriptor", "browse"],
-        format_func=lambda m: MODE_LABELS[m])
+        "Mode", ["home", "amplify", "contrast", "by-descriptor", "browse"],
+        format_func=lambda m: MODE_LABELS[m], key="mode")
+
+    if mode == "home":
+        st.header(MODE_LABELS[mode])
+        _home(con)
+        return
 
     if mode == "by-descriptor":
         st.header(MODE_LABELS[mode])
