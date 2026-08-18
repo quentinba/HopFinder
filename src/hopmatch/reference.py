@@ -79,6 +79,12 @@ DESCRIPTOR_ALIASES: dict[str, str] = {
     "stonefruit": "stone fruit", "stone fruits": "stone fruit",
     "berries": "berry", "tropical fruit": "tropical", "tropical fruits": "tropical",
     "woody/resinous": "woody", "spice": "spicy", "spices": "spicy",
+    # -- BeerMaverick (ingest_beermaverick, tags #hashtag par page) : vrais
+    # renommages du MÊME concept, pas des sous-familles (celles-ci vont dans
+    # CONTRAST_AFFINITY ci-dessous, en gardant le terme précis visible plutôt
+    # que de l'écraser) --
+    "resin": "resinous", "cannabis": "dank", "black tea": "tea",
+    "slightly spicy": "spicy",
 }
 
 # Carte d'affinités descripteurs pour le MODE CONTRASTE (cas A).
@@ -121,10 +127,16 @@ CONTRAST_AFFINITY: dict[str, list[str]] = {
     "lime":        ["resinous", "woody", "herbal"],
     "orange":      ["resinous", "woody", "herbal"],
     "lemongrass":  ["resinous", "woody", "herbal"],
+    "tangerine":   ["resinous", "woody", "herbal"],
+    "mandarin":    ["resinous", "woody", "herbal"],
+    "marmalade":   ["resinous", "woody", "herbal"],
     # -- sous-familles fruit à noyau -> mêmes cibles que "stone fruit" --
     "apricot":     ["spicy", "woody"],
     "peach":       ["spicy", "woody"],
     "pear":        ["spicy", "woody"],
+    "apple":       ["spicy", "woody"],
+    "cherry":      ["spicy", "woody"],
+    "plum":        ["spicy", "woody"],
     # -- sous-familles tropical/fruité -> mêmes cibles que "tropical" --
     "pineapple":    ["resinous", "dank", "spicy"],
     "passion fruit": ["resinous", "dank", "spicy"],
@@ -132,23 +144,84 @@ CONTRAST_AFFINITY: dict[str, list[str]] = {
     "coconut":      ["resinous", "dank", "spicy"],
     "bubblegum":    ["resinous", "dank", "spicy"],
     "fruity":       ["resinous", "dank", "spicy"],
+    "watermelon":   ["resinous", "dank", "spicy"],
+    "honeydew":     ["resinous", "dank", "spicy"],
+    "lychee":       ["resinous", "dank", "spicy"],
+    "mango":        ["resinous", "dank", "spicy"],
+    "guava":        ["resinous", "dank", "spicy"],
+    "banana":       ["resinous", "dank", "spicy"],
+    "nectar":       ["resinous", "dank", "spicy"],
+    "papaya":       ["resinous", "dank", "spicy"],
     # -- registre baie/fruit sombre -> plus proche du dank/terreux que du tropical --
     "berry":        ["earthy", "dank", "woody"],
     "black currant": ["earthy", "woody", "spicy"],
     "dried fruit":  ["woody", "spicy", "earthy"],
+    "raspberry":    ["earthy", "dank", "woody"],
+    "blackberry":   ["earthy", "dank", "woody"],
+    "strawberry":   ["earthy", "dank", "woody"],
+    "blueberry":    ["earthy", "dank", "woody"],
+    "redcurrant":   ["earthy", "dank", "woody"],
+    "redberry":     ["earthy", "dank", "woody"],
+    "loganberry":   ["earthy", "dank", "woody"],
+    "elderberry":   ["earthy", "dank", "woody"],
+    "gooseberry":   ["earthy", "dank", "woody"],
+    "dark fruit":   ["earthy", "dank", "woody"],
+    "fig":          ["woody", "spicy", "earthy"],  # -> mêmes cibles que "dried fruit"
     # -- sous-familles florales -> mêmes cibles que "floral" --
     "rose":            ["earthy", "woody", "spicy"],
     "sweet aromatic":  ["earthy", "woody", "spicy"],
     "white wine":      ["earthy", "woody", "spicy"],
+    "jasmine":         ["earthy", "woody", "spicy"],
+    "lilac":           ["earthy", "woody", "spicy"],
+    "magnolia":        ["earthy", "woody", "spicy"],
+    "hibiscus":        ["earthy", "woody", "spicy"],
+    "geranium":        ["earthy", "woody", "spicy"],
+    "chamomile":       ["earthy", "woody", "spicy"],
+    "potpourri":       ["earthy", "woody", "spicy"],
+    "blossom":         ["earthy", "woody", "spicy"],
+    "lavender":        ["earthy", "woody", "spicy"],
+    "grapes":          ["earthy", "woody", "spicy"],  # -> mêmes cibles que "white wine"
+    "sauvignon blanc": ["earthy", "woody", "spicy"],  # -> mêmes cibles que "white wine"
+    "wine":            ["earthy", "woody", "spicy"],  # -> mêmes cibles que "white wine"
+    "vanilla":         ["earthy", "woody", "spicy"],  # -> mêmes cibles que "sweet aromatic"
+    "caramel":         ["earthy", "woody", "spicy"],  # -> mêmes cibles que "sweet aromatic"
+    "honey":           ["earthy", "woody", "spicy"],  # -> mêmes cibles que "sweet aromatic"
+    "toffee":          ["earthy", "woody", "spicy"],  # -> mêmes cibles que "sweet aromatic"
+    "molasses":        ["earthy", "woody", "spicy"],  # -> mêmes cibles que "sweet aromatic"
+    "chocolate":       ["earthy", "woody", "spicy"],  # -> mêmes cibles que "sweet aromatic"
+    "candy":           ["earthy", "woody", "spicy"],  # -> mêmes cibles que "sweet aromatic"
+    "candied fruit":   ["earthy", "woody", "spicy"],  # -> mêmes cibles que "sweet aromatic"
     # -- sous-familles herbacées -> mêmes cibles que "herbal" --
     "grassy":   ["citrus", "floral"],
     "hay":      ["citrus", "floral"],
     "mint":     ["citrus", "floral"],
     "tea":      ["citrus", "floral"],
     "green tea": ["citrus", "floral"],
+    "sage":      ["citrus", "floral"],
+    "thyme":     ["citrus", "floral"],
+    "dill":      ["citrus", "floral"],
+    "fennel":    ["citrus", "floral"],
+    "eucalyptus": ["citrus", "floral"],
+    "menthol":   ["citrus", "floral"],
+    "cucumber":  ["citrus", "floral"],
     # -- sous-familles boisées/résineuses --
     "cedar":    ["citrus", "tropical", "floral"],   # -> mêmes cibles que "woody"
     "pine":     ["citrus", "tropical"],             # -> mêmes cibles que "resinous"
+    "tobacco":  ["citrus", "tropical", "floral"],   # -> mêmes cibles que "woody"
+    "leather":  ["citrus", "tropical", "floral"],   # -> mêmes cibles que "woody"
+    "oak":      ["citrus", "tropical", "floral"],   # -> mêmes cibles que "woody"
+    "incense":  ["citrus", "tropical"],             # -> mêmes cibles que "resinous"
     # -- épicé --
     "black pepper": ["tropical", "floral", "stone fruit"],  # -> mêmes cibles que "spicy"
+    "curry":        ["tropical", "floral", "stone fruit"],
+    "ginger":       ["tropical", "floral", "stone fruit"],
+    "cinnamon":     ["tropical", "floral", "stone fruit"],
+    "clove":        ["tropical", "floral", "stone fruit"],
+    "nutmeg":       ["tropical", "floral", "stone fruit"],
+    "pepper":       ["tropical", "floral", "stone fruit"],
+    "anise":        ["tropical", "floral", "stone fruit"],
+    "licorice":     ["tropical", "floral", "stone fruit"],
+    # -- terreux (registre allium/savoureux, proche des houblons dits "earthy") --
+    "onion":  ["floral"],
+    "garlic": ["floral"],
 }

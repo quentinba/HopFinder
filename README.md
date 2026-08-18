@@ -4,7 +4,7 @@
 question concrète : *quel houblon accorder à un ajout* (yuzu, basilic…) — en le
 prolongeant (`amplify`) ou en le contrastant (`contrast`) ?
 
-> État : `pytest` vert (96 tests). Toutes les sources tournent contre les sites externes :
+> État : `pytest` vert (101 tests). Toutes les sources tournent contre les sites externes :
 > `crawl_barthhaas`, `crawl_yakima`, `ingest_flavornet`, `ingest_foodb`, `ingest_flavordb2`,
 > `resolve_pubchem_cids`, `ingest_beermaverick`, `by-descriptor`,
 > `--oav` (prior de puissance olfactive, approximatif) — voir [Feuille de route](#feuille-de-route).
@@ -78,7 +78,7 @@ et *ce qu'elle vaut*.
 |---|---|---|---|---|---|
 | **BarthHaas** | houblon | composition (dont thiols) | HTML servi | propre, producteur ; pas de descripteurs fiables | données producteur |
 | **Yakima Chief** | houblon | β-pinène, sélinène, roue d'arôme, variétés similaires | API Algolia (checkpoint devant le HTML) | propre, labo ASBC | données producteur |
-| **BeerMaverick** | houblon↔houblon | pairings/substitutions | HTML statique | agrégateur, pas une mesure de labo | non publiée |
+| **BeerMaverick** | houblon↔houblon + descripteurs | pairings/substitutions, roue d'arôme (104 termes) | HTML statique | agrégateur, pas une mesure de labo | non publiée |
 | **FooDB** | ingrédient→molécule | composition + concentration | dump bulk | lacunaire, bruitée, figée 2020 | **non commerciale** |
 | **Flavornet** | molécule | whitelist odeur-active | HTML statique | curée mais petite/ancienne | académique |
 | **FlavorDB2** | molécule | seuils olfactifs | scrape HTML (fiche par CID) | seuils utiles, texte libre, présence seule | **CC BY-NC-SA** |
@@ -103,7 +103,9 @@ et *ce qu'elle vaut*.
   ce cas (présence d'un point final) et renvoie une liste vide plutôt que d'extraire un faux
   descripteur — sans ce garde-fou, la quasi-totalité des variétés récupéraient un descripteur
   bruit (« typical aroma profile », un millésime de récolte comme « 2023 »). BarthHaas reste la
-  source de composition ; **Yakima est la seule source fiable pour les descripteurs**.
+  source de composition ; les descripteurs viennent de Yakima et BeerMaverick (voir plus bas —
+  BeerMaverick s'est révélé le vocabulaire le plus riche des deux, signalé en direct par
+  l'utilisateur : "dank" n'était tagué que sur 1/203 houblons côté Yakima).
 
 **Yakima Chief (YCH)** — *source secondaire, complémentaire.*
 - **Pourquoi.** Complète BarthHaas avec le **β-pinène** et le **sélinène**, et fournit une
@@ -384,6 +386,19 @@ composés communs.
 `hopmatch contrast --descriptors citrus,floral` → cible earthy/herbal/resinous/woody/spicy →
 les houblons noble/herbacés ressortent.
 
+**Vocabulaire de descripteurs élargi (38 → 104 termes).** Signalé en direct par l'utilisateur :
+`contrast --descriptors tropical` ciblait "dank" (via `CONTRAST_AFFINITY`) mais quasiment aucun
+houblon ne le couvrait. Vérifié en direct sur l'API Algolia Yakima : "Dank" n'y est tagué que
+sur 1/203 houblons de toute la base (CTZ), alors même que Chinook/Columbus (classiquement
+"dank" chez les brasseurs) n'ont pas ce tag chez Yakima — leur champ `aromas` est une liste
+courte éditoriale, pas exhaustive. BeerMaverick expose un vocabulaire bien plus riche et
+correctement sélectif (bloc `#pine #dank #cannabis...` par page, 131 tags distincts sur 142
+pages) : Chinook/Columbus y sont bien tagués "dank", Mosaic/Simcoe non — cohérent avec l'usage
+réel. `ingest.ingest_beermaverick` écrit désormais ces tags dans `hop_descriptors`
+(source='beermaverick', filtrés/normalisés — voir `ingest._normalize_beermaverick_tag`) :
+vocabulaire réel passé de 38 à 104 descripteurs, "dank" couvert par 6 houblons au lieu d'1,
+`contrast --descriptors tropical` renvoie maintenant Chinook à 100% (dank+resinous+spicy).
+
 **Pourquoi la sélection manuelle (`--descriptors`) est le chemin normal, pas un `note`
 curé.** `contrast` par `note` exige que `note_descriptors` soit déjà peuplé pour cette
 note-là — vide par défaut pour toutes les notes, puisqu'il n'y a plus d'amorce littérature
@@ -575,7 +590,7 @@ hopmatch contrast-blend --descriptors citrus,herbal --max-hops 3   # + blend par
 hopmatch descriptors              # vocabulaire de descripteurs disponible
 hopmatch by-descriptor citrus,tropical   # découverte, sans note requise
 
-pytest -q                         # 96 tests (nécessite l'extra [dev])
+pytest -q                         # 101 tests (nécessite l'extra [dev])
 ```
 
 ### GUI navigateur
@@ -663,7 +678,9 @@ chart, Yakima uniquement), associations houblon<->houblon en `browse` (`hop_simi
 Yakima + `hop_pairings`/`hop_substitutions` BeerMaverick, `ingest.ingest_beermaverick`),
 avertissement de couverture moléculaire faible sur `amplify` (voir la section dédiée
 ci-dessus et [Sources de données](#les-bases-de-données--pourquoi-et-comment-chacune)
-pour BeerMaverick).
+pour BeerMaverick), vocabulaire de descripteurs élargi de 38 à 104 termes via les tags
+BeerMaverick (voir la section `contrast` ci-dessus — corrige la couverture "dank" quasi
+inexistante côté Yakima seul).
 
 **Résidu PubChem accepté, pas une piste ouverte.** 6/734 CAS restent sans CID (0,8%) après CAS
 + repli par nom : recherché aussi par CAS comme identifiant d'enregistrement PubChem (endpoint

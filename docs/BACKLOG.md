@@ -110,6 +110,21 @@ l'implémentation ([ ] à faire, [x] fait — voir le commit associé).
   (`ingest._resolve_hop_variety`) : 143/203 de nos variétés ont une page
   BeerMaverick correspondante.
 
+  **Addendum — vocabulaire de descripteurs élargi de 38 à 104 termes.**
+  Signalé par l'utilisateur : `contrast --descriptors tropical` ciblait "dank"
+  mais quasiment aucun houblon ne le couvrait, et Mosaic (censé l'avoir selon
+  l'utilisateur) ne l'avait pas non plus. Vérifié en direct : Yakima ne tague
+  "Dank" que sur 1/203 houblons (CTZ) — `imported_fields.aromas` est une liste
+  courte éditoriale, pas exhaustive. BeerMaverick expose un vrai bloc de tags
+  par page (`<b>Tags:</b> #pine #dank...`), 131 tags distincts sur 142 pages,
+  correctement sélectif (Chinook/Columbus tagués "dank", Mosaic/Simcoe non —
+  cohérent avec l'usage réel). Ingéré dans `hop_descriptors`
+  (source='beermaverick'), filtré (`ingest._BEERMAVERICK_TAG_DROPLIST`) puis
+  normalisé (`ingest._normalize_beermaverick_tag` + nouvelles entrées
+  `reference.CONTRAST_AFFINITY`/`DESCRIPTOR_ALIASES`). Résultat : "dank" passe
+  de 1 à 6 houblons couverts ; `contrast --descriptors tropical` renvoie
+  maintenant Chinook à 100%.
+
 ## Sources de données additionnelles (recherche)
 
 - **Investigué à nouveau, PAS retenu — Hopsteiner (shop.hopsteiner.com)**.

@@ -497,6 +497,35 @@ def _resolve_hop_variety(index: dict[str, str], candidate: str) -> str | None:
     return index.get(_normalize_hop_key(candidate))
 
 
+# Tags BeerMaverick QUI NE SONT PAS des descripteurs d'arôme réels — mesuré sur
+# un crawl complet des 142 pages réconciliées (131 tags distincts au total) :
+# adjectifs de qualité génériques ("mild", "clean", "smooth"...), classification
+# de style plutôt qu'arôme ("noble", "bohemian"), ou tag circulaire/vide de sens
+# pour un descripteur de houblon ("hoppy"). Filtrés à l'ingestion plutôt que
+# laissés polluer `hop_descriptors` avec du bruit non-olfactif — même esprit que
+# la whitelist Flavornet pour FooDB (`ingest_foodb`), un filtre AVANT écriture,
+# pas une correction après coup.
+_BEERMAVERICK_TAG_DROPLIST = {
+    "balsamic", "bohemian", "clean", "cognac", "cream", "crisp", "delicate",
+    "fresh", "green", "green_fruit", "hoppy", "mellow", "mild", "mojito",
+    "neutral", "noble", "pleasant", "pungent", "smooth", "sweet", "sweet_fruit",
+    "tangy", "wild", "yogurt", "zest",
+}
+
+
+def _normalize_beermaverick_tag(tag: str) -> str | None:
+    """Underscore->espace puis résolution alias (`reference.DESCRIPTOR_ALIASES` —
+    vrais renommages du même concept) ; les sous-familles réelles (raspberry,
+    jasmine, curry...) restent des entrées distinctes dans
+    `reference.CONTRAST_AFFINITY`, pas écrasées ici — voir le commentaire de ce
+    fichier pour le détail. None si le tag est dans `_BEERMAVERICK_TAG_DROPLIST`
+    (pas un descripteur d'arôme)."""
+    if tag in _BEERMAVERICK_TAG_DROPLIST:
+        return None
+    d = tag.replace("_", " ")
+    return reference.DESCRIPTOR_ALIASES.get(d, d)
+
+
 def ingest_beermaverick(out_db: str, limit: int | None = None, sleep: float = 1.0,
                         timeout: float = 30.0) -> None:
     """
@@ -525,6 +554,16 @@ def ingest_beermaverick(out_db: str, limit: int | None = None, sleep: float = 1.
     son nom affiché (leur graphique ne fournit pas de slug) — `paired_variety`/
     `substitute_variety` restent NULL si non reconnus, mais `paired_name`/
     `substitute_name` (texte brut) sont TOUJOURS renseignés, rien n'est perdu.
+
+    Écrit aussi des DESCRIPTEURS dans `hop_descriptors` (source='beermaverick',
+    coexiste avec barthhaas/yakima — `matching.load` les union sans distinction
+    de source) depuis le bloc « Tags: #pine #dank... » de chaque page — un
+    vocabulaire RÉEL bien plus riche que la liste courte `aromas` de Yakima
+    (vérifié en direct sur Chinook/Columbus : Yakima ne tague aucun des deux
+    "dank", BeerMaverick le fait pour les deux, correctement, alors que Mosaic/
+    Simcoe n'ont PAS ce tag chez eux non plus — cohérent avec l'usage brassicole
+    réel). Filtré (`_BEERMAVERICK_TAG_DROPLIST`) puis normalisé
+    (`_normalize_beermaverick_tag`) — voir `parsers.parse_beermaverick_tags`.
     """
     import time, requests
     from .schema import connect
@@ -541,7 +580,7 @@ def ingest_beermaverick(out_db: str, limit: int | None = None, sleep: float = 1.
     print(f"BeerMaverick : {len(slugs)} pages houblon (sitemap)")
 
     index = _build_hop_name_index(con)
-    covered = skipped = n_pairings = n_subs = 0
+    covered = skipped = n_pairings = n_subs = n_tags = 0
     for i, slug in enumerate(slugs, 1):
         variety = _resolve_hop_variety(index, slug)
         if not variety:
@@ -563,13 +602,20 @@ def ingest_beermaverick(out_db: str, limit: int | None = None, sleep: float = 1.
             con.execute("INSERT OR REPLACE INTO hop_substitutions VALUES (?,?,?,?)",
                         (variety, sub_name, sub_variety, "beermaverick"))
             n_subs += 1
+        for raw_tag in parsers.parse_beermaverick_tags(html):
+            d = _normalize_beermaverick_tag(raw_tag)
+            if d is None:
+                continue
+            con.execute("INSERT OR REPLACE INTO hop_descriptors VALUES (?,?,?)",
+                        (variety, d, "beermaverick"))
+            n_tags += 1
         covered += 1
         if i % 10 == 0:
             con.commit()
         time.sleep(sleep)
     con.commit(); con.close()
     print(f"  {covered} variétés couvertes ({skipped} pages sans équivalent local), "
-         f"{n_pairings} pairings, {n_subs} substitutions.")
+         f"{n_pairings} pairings, {n_subs} substitutions, {n_tags} descripteurs.")
 
 
 def _find_csv(folder: str, name: str) -> str:

@@ -242,6 +242,28 @@ réelles : reflet honnête des données, pas un seuil mal choisi.
   ont une page BeerMaverick correspondante (mesuré sur le sitemap complet) ; les pages sans
   équivalent local sont simplement ignorées, aucun houblon fabriqué. `ingest.ingest_beermaverick`
   IMPLÉMENTÉ. Écrit `hop_pairings`/`hop_substitutions` (tables dédiées).
+  **Écrit aussi de vrais descripteurs dans `hop_descriptors` (source='beermaverick'), découvert
+  en creusant un retour utilisateur** : `contrast(descriptors=["tropical"])` ciblait "dank"
+  (via `CONTRAST_AFFINITY`) mais quasiment AUCUN houblon ne le couvrait — vérifié en direct sur
+  l'API Algolia : Yakima ne tague "Dank" QUE sur 1/203 houblons (CTZ) dans toute la base, alors
+  même que Chinook/Columbus (classiquement "dank" chez les brasseurs) n'ont pas ce tag chez
+  Yakima. Cause : `imported_fields.aromas` (Yakima) est une liste COURTE éditoriale, pas
+  exhaustive (déjà documenté pour T26). BeerMaverick expose un bloc `<b>Tags:</b> #pine #dank
+  #cannabis...` par page, un vocabulaire RÉEL bien plus riche (131 tags distincts sur 142 pages
+  crawlées) et correctement sélectif — Chinook/Columbus taggés "dank", Mosaic/Simcoe non
+  (cohérent avec l'usage brassicole réel, vérifié en direct). Run réel : vocabulaire
+  `hop_descriptors` passé de 38 à **104 descripteurs distincts**, "dank" désormais sur 6
+  houblons (CTZ, Amarillo, Chinook, Columbus, Galaxy, Summit) au lieu d'1 seul ; `contrast`
+  sur "tropical" renvoie maintenant Chinook à 100% (dank+resinous+spicy) au lieu d'aucun
+  houblon crédible. Filtrage (`ingest._BEERMAVERICK_TAG_DROPLIST`, ~25 tags de qualité
+  générique non-olfactifs comme "mild"/"clean"/"hoppy") puis normalisation
+  (`ingest._normalize_beermaverick_tag`) : vrais renommages du même concept vers
+  `reference.DESCRIPTOR_ALIASES` (ex. "resin"→"resinous", "cannabis"→"dank" — quasi-synonyme
+  en terminologie houblon) ; sous-familles réelles (raspberry, jasmine, curry...) gardées comme
+  entrées DISTINCTES dans `reference.CONTRAST_AFFINITY` (même valeur-cible que leur catégorie
+  cœur), jamais écrasées vers un terme générique — même principe que "grapefruit"/"lemon" déjà
+  présents. Les 104 descripteurs réels sont TOUS couverts par `CONTRAST_AFFINITY` (vérifié,
+  zéro non-mappé).
   **En complément, côté Yakima** : `imported_fields.similar_varieties` (curé par YCH
   lui-même, référencé par uid Contentstack, résolu directement dans `crawl_yakima` contre le
   lot complet) donne une TROISIÈME relation — similarité/substitut selon Yakima, distincte des

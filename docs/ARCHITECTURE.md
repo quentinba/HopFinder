@@ -41,6 +41,13 @@ restant `NULL` quand le houblon-cible n'est pas dans notre catalogue (voir
 `ingest._resolve_hop_variety`, normalisation tolérante ®/™/« Brand »). Consommées par
 `matching.hop_similar_varieties`/`hop_pairings`/`hop_substitutions` (helpers dédiés).
 
+**`ingest_beermaverick` écrit aussi dans `hop_descriptors`** (source='beermaverick', coexiste
+avec barthhaas/yakima) depuis le bloc « Tags: #pine #dank... » de chaque page — vocabulaire
+réel bien plus riche que la liste courte `aromas` de Yakima (découvert en corrigeant une
+couverture "dank" quasi inexistante, signalée par l'utilisateur — voir `docs/DATA_SOURCES.md`).
+Vocabulaire réel total : 38 → 104 descripteurs distincts, tous couverts par
+`reference.CONTRAST_AFFINITY`.
+
 `flavornet_compounds(cas, compound, descriptors)` : whitelist odeur-active, distincte
 de `molecules` (couche de matching, avec seuils). Sert uniquement à filtrer FooDB à
 l'ingestion (`ingest_foodb`), jointure par CAS. `ingest_foodb` écrit aussi dans

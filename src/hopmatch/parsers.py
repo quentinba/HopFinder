@@ -430,3 +430,27 @@ def parse_beermaverick_substitutions(html: str) -> list[tuple[str, str]]:
     if not m:
         return []
     return _BM_HOP_LINK_RE.findall(m.group(1))
+
+
+_BM_TAGS_RE = re.compile(r"<b>Tags:</b>.*?</p>", re.S)
+_BM_TAG_LINK_RE = re.compile(r"/hops/tag/([a-z_]+)/")
+
+
+def parse_beermaverick_tags(html: str) -> list[str]:
+    """
+    Extrait le bloc « Tags: #pine #resin #dank... » d'une page
+    beermaverick.com/hop/{slug}/ — un vocabulaire de descripteurs RÉEL et bien
+    plus riche que la liste courte `aromas` de Yakima (vérifié en direct sur
+    Chinook/Columbus : Yakima ne tague AUCUN des deux "dank" alors que
+    BeerMaverick le fait pour les deux, correctement — voir CLAUDE.md pour le
+    détail complet de cette investigation). Renvoie les slugs bruts avec
+    underscore (`black_pepper`), pas encore normalisés : la conversion
+    underscore->espace + résolution alias/sous-famille (`reference.
+    DESCRIPTOR_ALIASES`/`CONTRAST_AFFINITY`) et le filtrage des tags non-arôme
+    (`ingest._BEERMAVERICK_TAG_DROPLIST` : "mild", "clean", "hoppy"...) se font
+    à l'ingestion, pas ici (ce module reste un parseur brut sans connaissance
+    métier, comme `parse_descriptors`)."""
+    m = _BM_TAGS_RE.search(html)
+    if not m:
+        return []
+    return _BM_TAG_LINK_RE.findall(m.group(0))

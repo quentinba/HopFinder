@@ -240,15 +240,29 @@ def test_contrast_flags_unmapped_descriptors_without_dropping_mapped_ones(db):
 
 def test_contrast_full_real_vocabulary_has_no_unmapped_descriptor():
     # Vérifie que CONTRAST_AFFINITY couvre bien tout le vocabulaire réel
-    # hop_descriptors observé sur la base construite (38 descripteurs) —
-    # non-régression pour l'extension de couverture (T2 du backlog).
+    # hop_descriptors observé sur la base construite — non-régression pour
+    # l'extension de couverture (T2 du backlog, puis élargi de 38 à 104
+    # descripteurs par l'ingestion des tags BeerMaverick, voir
+    # ingest.ingest_beermaverick/_normalize_beermaverick_tag et CLAUDE.md).
     real_vocabulary = {
-        "apricot", "berry", "black currant", "black pepper", "bubblegum", "cedar",
-        "citrus", "coconut", "dank", "dried fruit", "earthy", "floral", "fruity",
-        "grapefruit", "grassy", "green tea", "hay", "herbal", "lemon", "lemongrass",
-        "lime", "melon", "mint", "orange", "passion fruit", "peach", "pear", "pine",
-        "pineapple", "resinous", "rose", "spicy", "stone fruit", "sweet aromatic",
-        "tea", "tropical", "white wine", "woody",
+        "anise", "apple", "apricot", "banana", "berry", "black currant",
+        "black pepper", "blackberry", "blossom", "blueberry", "bubblegum",
+        "candied fruit", "candy", "caramel", "cedar", "chamomile", "cherry",
+        "chocolate", "cinnamon", "citrus", "clove", "coconut", "cucumber",
+        "curry", "dank", "dark fruit", "dill", "dried fruit", "earthy",
+        "elderberry", "eucalyptus", "fennel", "fig", "floral", "fruity",
+        "garlic", "geranium", "ginger", "gooseberry", "grapefruit", "grapes",
+        "grassy", "green tea", "guava", "hay", "herbal", "hibiscus", "honey",
+        "honeydew", "incense", "jasmine", "lavender", "leather", "lemon",
+        "lemongrass", "licorice", "lilac", "lime", "loganberry", "lychee",
+        "magnolia", "mandarin", "mango", "marmalade", "melon", "menthol",
+        "mint", "molasses", "nectar", "nutmeg", "oak", "onion", "orange",
+        "papaya", "passion fruit", "peach", "pear", "pepper", "pine",
+        "pineapple", "plum", "potpourri", "raspberry", "redberry", "redcurrant",
+        "resinous", "rose", "sage", "sauvignon blanc", "spicy", "stone fruit",
+        "strawberry", "sweet aromatic", "tangerine", "tea", "thyme", "tobacco",
+        "toffee", "tropical", "vanilla", "watermelon", "white wine", "wine",
+        "woody",
     }
     assert real_vocabulary <= set(reference.CONTRAST_AFFINITY)
     # toutes les valeurs restent dans le noyau fermé des 10 catégories cœur

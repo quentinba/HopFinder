@@ -113,6 +113,24 @@
   ne fournit pas de slug) — `paired_variety`/`substitute_variety` restent `NULL` si non
   reconnus, mais `paired_name`/`substitute_name` (texte brut) sont TOUJOURS renseignés, rien
   n'est perdu silencieusement.
+- **Descripteurs d'arôme, découverts en creusant un retour utilisateur** : chaque page a aussi
+  un bloc `<b>Tags:</b> #pine #dank #cannabis...` (liens `/hops/tag/{tag}/`), un vocabulaire RÉEL
+  bien plus riche que la liste courte `imported_fields.aromas` de Yakima. Signalé par
+  l'utilisateur : `contrast --descriptors tropical` ciblait "dank" mais quasiment aucun houblon
+  ne le couvrait. Vérifié en direct sur l'API Algolia YCH : "Dank" n'y est tagué que sur 1/203
+  houblons (CTZ), alors que Chinook/Columbus (classiquement "dank" chez les brasseurs) n'ont pas
+  ce tag chez Yakima. BeerMaverick tague correctement Chinook/Columbus "dank" et PAS Mosaic/
+  Simcoe — cohérent avec l'usage brassicole réel. Run réel (142 pages) : 131 tags distincts.
+  `parsers.parse_beermaverick_tags` extrait les slugs bruts (underscore) ; `ingest.
+  _normalize_beermaverick_tag` filtre les tags non-olfactifs (`_BEERMAVERICK_TAG_DROPLIST` —
+  ~25 adjectifs de qualité génériques : "mild", "clean", "hoppy", "noble"...) puis applique
+  underscore→espace + `reference.DESCRIPTOR_ALIASES` pour les VRAIS renommages du même concept
+  ("resin"→"resinous", "cannabis"→"dank"). Les sous-familles réelles (raspberry, jasmine,
+  curry, mandarin...) restent des entrées DISTINCTES dans `reference.CONTRAST_AFFINITY` (même
+  cible que leur catégorie cœur) plutôt qu'écrasées vers un terme générique — même principe déjà
+  utilisé pour grapefruit/lemon/lime sous "citrus". Écrit dans `hop_descriptors`
+  (source='beermaverick', coexiste avec barthhaas/yakima). Vocabulaire réel total passé de 38 à
+  **104 descripteurs**, tous couverts par `CONTRAST_AFFINITY` (vérifié, zéro non-mappé).
 - Statut : `ingest.ingest_beermaverick` IMPLÉMENTÉ.
 
 ## Côté note (ingrédient → molécules)

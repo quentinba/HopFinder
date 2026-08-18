@@ -361,6 +361,27 @@ def test_parse_beermaverick_substitutions():
 def test_parse_beermaverick_substitutions_absent_returns_empty():
     assert parsers.parse_beermaverick_substitutions("<p>rien ici</p>") == []
 
+def test_parse_beermaverick_tags():
+    # gabarit trimmé d'une vraie page beermaverick.com/hop/chinook/ (vérifié
+    # en direct) : Chinook y est bien tagué "dank", contrairement à Yakima qui
+    # ne le tague sur aucun des deux (voir CLAUDE.md).
+    html = """
+    <p><b>Tags:</b> <em style="color:#666;" >
+    <a href="/hops/tag/pine/" class="text-muted" >#pine</a>&nbsp;
+    <a href="/hops/tag/resin/" class="text-muted" >#resin</a>&nbsp;
+    <a href="/hops/tag/grapefruit/" class="text-muted" >#grapefruit</a>&nbsp;
+    <a href="/hops/tag/spicy/" class="text-muted" >#spicy</a>&nbsp;
+    <a href="/hops/tag/dank/" class="text-muted" >#dank</a>&nbsp;
+    <a href="/hops/tag/cannabis/" class="text-muted" >#cannabis</a>&nbsp;
+    </em></p>
+    """
+    assert parsers.parse_beermaverick_tags(html) == [
+        "pine", "resin", "grapefruit", "spicy", "dank", "cannabis",
+    ]
+
+def test_parse_beermaverick_tags_absent_returns_empty():
+    assert parsers.parse_beermaverick_tags("<p>rien ici</p>") == []
+
 def test_pubchem_name_fallbacks():
     # échantillons réels : CAS non résolus par PubChem, noms Flavornet en cause
     assert parsers.pubchem_name_fallbacks("δ-cadinol") == ["δ-cadinol", "delta-cadinol"]

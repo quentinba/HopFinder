@@ -47,6 +47,27 @@ def test_resolve_hop_variety_none_for_unknown_hop(tmp_path):
     con.commit()
     assert ingest._resolve_hop_variety(ingest._build_hop_name_index(con), "adeena") is None
 
+def test_normalize_beermaverick_tag_drops_non_aroma_quality_words():
+    # "mild"/"clean"/"hoppy"... ne sont pas des descripteurs d'arôme (voir
+    # _BEERMAVERICK_TAG_DROPLIST) -> None, jamais écrits dans hop_descriptors.
+    for tag in ("mild", "clean", "hoppy", "noble", "bohemian"):
+        assert ingest._normalize_beermaverick_tag(tag) is None
+
+def test_normalize_beermaverick_tag_applies_underscore_and_alias():
+    # "resin" est un vrai renommage du même concept que "resinous" (DESCRIPTOR_ALIASES).
+    assert ingest._normalize_beermaverick_tag("resin") == "resinous"
+    # "cannabis" est un quasi-synonyme de "dank" en terminologie houblon.
+    assert ingest._normalize_beermaverick_tag("cannabis") == "dank"
+    # underscore -> espace avant résolution alias ("tropical fruit" -> "tropical" existait déjà).
+    assert ingest._normalize_beermaverick_tag("tropical_fruit") == "tropical"
+
+def test_normalize_beermaverick_tag_keeps_subfamily_terms_distinct():
+    # les sous-familles réelles (raspberry, jasmine...) restent des descripteurs
+    # à part entière, pas écrasées vers leur catégorie cœur (contrairement aux
+    # vrais renommages ci-dessus) -> voir reference.CONTRAST_AFFINITY.
+    assert ingest._normalize_beermaverick_tag("raspberry") == "raspberry"
+    assert ingest._normalize_beermaverick_tag("black_pepper") == "black pepper"
+
 def test_build_cas_to_hop_name_from_pubchem_cids_table():
     from hopmatch.schema import connect, init_db
     con = connect(":memory:")
