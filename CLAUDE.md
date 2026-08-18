@@ -43,6 +43,29 @@ toute la base (voir ci-dessus), un avertissement (`matching.LOW_COVERAGE_WARNING
 `cli._print_amplify`/`app._amplify`. Ce seuil flagge la quasi-totalité des notes
 réelles : reflet honnête des données, pas un seuil mal choisi.
 
+**`contrast_blend` refondu + `amplify_blend` ajouté (T33 backlog, décision utilisateur,
+2026-08) — priorité à la fréquence RÉELLE d'usage, pas à la couverture pure.**
+L'utilisateur a jugé l'ancien `contrast_blend` (couverture ensembliste gloutonne pure,
+un seul blend "optimal") peu utile — rien ne garantissait que les houblons combinés
+soient réellement utilisés ensemble en pratique. Nouvelle méthodologie explicitement
+demandée : proposer PLUSIEURS tailles de blend (1 à 5, pas un seul "meilleur"),
+et à chaque taille >1, choisir le houblon par fréquence RÉELLE de pairing
+BeerMaverick (`hop_pairings`) avec un houblon déjà dans le blend — la couverture
+reste calculée/rapportée mais ne pilote plus le choix en priorité. Repli EXPLICITE
+sur la couverture gloutonne classique (`via="coverage"`) quand aucune fréquence
+réelle n'existe depuis le blend courant (36/203 houblons seulement ont une donnée
+`hop_pairings`, mesuré) — jamais un blend plus petit que possible juste par manque
+de données, mais toujours la provenance signalée (`via`: "top"|"pairing"|"coverage").
+Mécanisme partagé (`matching._pairing_grown_blends`) entre `contrast_blend` (cible =
+`CONTRAST_AFFINITY`, inchangé) et le nouveau `amplify_blend` (cible = descripteurs
+propres de la note, **PAS de reconstruction moléculaire/NNLS** — ce serait recréer
+`combine()`, déjà retiré pour la dégénérescence documentée ci-dessus ; le score
+moléculaire d'`amplify` sert seulement à classer les candidats, jamais à piloter la
+composition du blend). Vérifié en direct sur données réelles : sur une cible large
+(les 10 catégories cœur), le mécanisme choisit Amarillo (meilleur candidat) puis
+Simcoe/Citra/Mosaic/Chinook, les 4 par pairing réel BeerMaverick — 4 additions sur 5
+via une fréquence de recette vérifiée, pas une heuristique de couverture.
+
 ## Décisions de conception (ne pas revenir dessus sans raison)
 - **Descripteurs = couche primaire** (roues d'arôme BarthHaas/Yakima). Robuste, sans
   concentration. Les molécules sont la couche secondaire.
@@ -300,7 +323,11 @@ ci-dessus). `ingest.ingest_beermaverick` IMPLÉMENTÉ.
 implémentée puis RETIRÉE le même jour (bug de double comptage, voir la section
 « Décisions de conception » ci-dessus). `--oav` réexaminé (T23) : conservé, effet réel
 mesuré (~1 note sur 6 change de classement), documentation CLI/GUI enrichie plutôt que
-retiré.
+retiré. Vocabulaire de descripteurs élargi de 38 à 104 termes via les tags BeerMaverick
+(voir la section BeerMaverick ci-dessus — corrige la couverture "dank" quasi inexistante
+côté Yakima seul). `contrast_blend` refondu + `amplify_blend` ajouté (T33, priorité à la
+fréquence réelle de pairing BeerMaverick plutôt qu'à la couverture pure, plusieurs
+tailles de blend 1-5 proposées — voir la section dédiée ci-dessus).
 Reste :
 1. Jointure FooDB/hop_composition au-delà des ~734 composés Flavornet si le vocabulaire
    s'élargit beaucoup (crawl Yakima déjà réel, plus d'aliments FooDB).

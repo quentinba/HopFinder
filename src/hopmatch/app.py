@@ -149,6 +149,40 @@ def _amplify(con, note):
          for h in r["ranked"]],
         width="stretch", hide_index=True)
 
+    st.subheader("Proposer un blend")
+    if not r["has_descriptors"]:
+        st.caption("Pas de descripteurs pour cette note : aucun blend possible "
+                  "(sélectionne des descripteurs ci-dessus).")
+    else:
+        max_hops = st.slider("Nombre de houblons max", 1, 5, 5, key="amplify_blend_max_hops")
+        blend_r = matching.amplify_blend(con, note, use_oav=use_oav,
+                                         descriptors=selected_desc or None, max_hops=max_hops)
+        _render_blends(blend_r["blends"])
+
+
+_VIA_LABELS = {"top": "meilleur candidat", "pairing": "pairing BeerMaverick réel",
+              "coverage": "repli couverture (pas de donnée BeerMaverick)"}
+
+
+def _render_blends(blends: list[dict]) -> None:
+    """Rendu partagé amplify_blend/contrast_blend (T33 backlog) : plusieurs
+    tailles de blend affichées côte à côte plutôt qu'un seul "meilleur" blend
+    — chaque houblon signale sa provenance (fréquence RÉELLE de pairing
+    BeerMaverick vs. repli par couverture), jamais caché derrière un score
+    unique fusionné."""
+    if not blends:
+        st.write("Aucune combinaison trouvée.")
+        return
+    for b in blends:
+        st.write(f"**Taille {b['size']}**")
+        st.dataframe(
+            [{"Houblon": h["name"], "Couvre": ", ".join(h["covers"]) or "(rien de nouveau)",
+              "Origine": _VIA_LABELS[h["via"]], "Sources": h["sources"]}
+             for h in b["hops"]],
+            width="stretch", hide_index=True)
+        if b["residual"]:
+            st.caption("Non couvert : " + ", ".join(b["residual"]))
+
 
 def _contrast(con):
     # contrast a besoin de note_descriptors pour une note, table vide par
@@ -176,17 +210,9 @@ def _contrast(con):
         width="stretch", hide_index=True)
 
     st.subheader("Proposer un blend")
-    max_hops = st.slider("Nombre de houblons max", 1, 6, 3)
-    blend = matching.contrast_blend(con, descriptors=selected, max_hops=max_hops)
-    if not blend["blend"]:
-        st.write("Aucune combinaison trouvée.")
-        return
-    st.dataframe(
-        [{"Houblon": h["name"], "Couvre": ", ".join(h["covers"]), "Sources": h["sources"]}
-         for h in blend["blend"]],
-        width="stretch", hide_index=True)
-    if blend["residual"]:
-        st.warning("Non couvert par le blend : " + ", ".join(blend["residual"]))
+    max_hops = st.slider("Nombre de houblons max", 1, 5, 5, key="contrast_blend_max_hops")
+    blend_r = matching.contrast_blend(con, descriptors=selected, max_hops=max_hops)
+    _render_blends(blend_r["blends"])
 
 
 _NON_AROMA_DISPLAY = {"total_oil", "alpha_acid", "beta_acid"}

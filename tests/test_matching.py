@@ -163,14 +163,52 @@ def test_contrast_manual_descriptors_generalize_beyond_curated_notes(db):
     r = matching.contrast(db, descriptors=["woody"])
     assert r["affinity_target"] == sorted(set(reference.CONTRAST_AFFINITY["woody"]))
 
-def test_contrast_blend_covers_target_within_max_hops(db):
+def test_contrast_blend_returns_growing_sizes_with_via_provenance(db):
+    # T33 backlog : plusieurs tailles de blend (1..max_hops), pas un seul
+    # blend "optimal" -- chaque taille rapporte sa propre couverture/résidu.
     r = matching.contrast_blend(db, note="_citrus", max_hops=2)
-    assert len(r["blend"]) <= 2
-    assert set(r["covered"]) | set(r["residual"]) == set(r["affinity_target"])
-    covered_via_blend = set()
-    for h in r["blend"]:
-        covered_via_blend.update(h["covers"])
-    assert covered_via_blend == set(r["covered"])
+    assert [b["size"] for b in r["blends"]] == list(range(1, len(r["blends"]) + 1))
+    assert len(r["blends"]) <= 2
+    target = set(r["affinity_target"])
+    for b in r["blends"]:
+        assert set(b["covered"]) | set(b["residual"]) == target
+        assert len(b["hops"]) == b["size"]
+        covered_via_hops = set()
+        for h in b["hops"]:
+            covered_via_hops.update(h["covers"])
+        assert covered_via_hops == set(b["covered"])
+    # aucune donnée hop_pairings dans la base fixture -> jamais "pairing" ;
+    # le premier houblon d'une taille 1 est toujours "top" (pas de notion de
+    # pairing pour un seul houblon).
+    all_via = {h["via"] for b in r["blends"] for h in b["hops"]}
+    assert "pairing" not in all_via
+    assert r["blends"][0]["hops"][0]["via"] == "top"
+
+def test_contrast_blend_prefers_real_pairing_over_coverage_gain(db):
+    # Démontre le renversement de priorité demandé par l'utilisateur : la
+    # fréquence RÉELLE de pairing BeerMaverick doit l'emporter sur la
+    # couverture, même quand le houblon "réellement associé" n'ajoute AUCUNE
+    # couverture nouvelle (cas extrême, le plus probant). Sur la base fixture,
+    # taille 1 = saazer (couvre herbal+spicy) ; sans donnée réelle, taille 2 =
+    # citra par couverture (ajoute "woody"). En insérant un pairing réel
+    # saazer<->mosaic (mosaic ne couvre QUE "herbal", déjà couvert par saazer
+    # -> gain de couverture nul), mosaic doit quand même gagner la taille 2.
+    db.execute("INSERT INTO hop_pairings VALUES (?,?,?,?,?)",
+              ("saazer", "Mosaic", "mosaic", 90.0, "beermaverick"))
+    db.commit()
+    try:
+        r = matching.contrast_blend(db, note="_citrus", max_hops=2)
+        assert r["blends"][1]["hops"][0]["variety"] == "saazer"
+        second = r["blends"][1]["hops"][1]
+        assert second["variety"] == "mosaic"
+        assert second["via"] == "pairing"
+        # "covers" = couverture PROPRE du houblon (herbal), pas le gain marginal
+        # pour le blend -- déjà couvert par saazer, d'où "covered" inchangé :
+        assert second["covers"] == ["herbal"]
+        assert r["blends"][1]["covered"] == r["blends"][0]["covered"]  # aucun gain réel
+    finally:
+        db.execute("DELETE FROM hop_pairings WHERE variety='saazer'")
+        db.commit()
 
 def test_amplify_falls_back_to_pure_molecular_score_without_descriptors(db):
     # "_passion" n'a pas de note_descriptors (contrairement à "_citrus") : sans
@@ -196,6 +234,35 @@ def test_amplify_manual_descriptors_activates_desc_layer(db):
     r = matching.amplify(db, "_passion", descriptors=["citrus", "tropical"])
     assert r["has_descriptors"] is True
     assert any(h["desc"] > 0 for h in r["ranked"])
+
+def test_amplify_blend_without_descriptors_returns_empty_with_flag(db):
+    # "_passion" sans descriptors= : rien à couvrir par un blend -> pas
+    # d'erreur, juste has_descriptors=False et blends vide (même esprit que
+    # le repli honnête d'amplify()).
+    r = matching.amplify_blend(db, "_passion")
+    assert r["has_descriptors"] is False
+    assert r["blends"] == []
+
+def test_amplify_blend_targets_note_descriptors_not_molecules(db):
+    # T31/T32 backlog : la cible du blend est le descripteur (comme
+    # contrast_blend), PAS la molécule -- pas de NNLS/reconstruction
+    # moléculaire (voir combine(), retiré). "_passion" n'a pas de
+    # note_descriptors propres -> sélection manuelle.
+    r = matching.amplify_blend(db, "_passion", descriptors=["citrus", "tropical"], max_hops=2)
+    assert r["has_descriptors"] is True
+    assert r["target_descriptors"] == ["citrus", "tropical"]
+    target = set(r["target_descriptors"])
+    assert [b["size"] for b in r["blends"]] == list(range(1, len(r["blends"]) + 1))
+    for b in r["blends"]:
+        assert set(b["covered"]) | set(b["residual"]) == target
+        covered_via_hops = set()
+        for h in b["hops"]:
+            covered_via_hops.update(h["covers"])
+        assert covered_via_hops == set(b["covered"])
+        # "covers" ne doit contenir QUE des descripteurs de la cible, jamais
+        # de molécule (why d'amplify() reste dans un champ séparé, pas repris ici).
+        for h in b["hops"]:
+            assert set(h["covers"]) <= target
 
 def test_amplify_manual_descriptors_override_note_descriptors(db):
     # "_citrus" a note_descriptors=["citrus","floral"] -> passer une sélection

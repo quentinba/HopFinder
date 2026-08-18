@@ -98,8 +98,10 @@ BarthHaas/Yakima (propres) ; utile si tu ingères un dataset brut.
   est `descriptors=[...]` : sélection manuelle par l'utilisateur sur le
   vocabulaire réel `hop_descriptors` (même principe que `by_descriptor`),
   fonctionne pour n'importe quelle note sans curation. `contrast_blend` propose
-  une combinaison parcimonieuse (couverture ensembliste gloutonne, pas de NNLS)
-  avec résidu non couvert rapporté.
+  plusieurs tailles de blend (1-5, T33 backlog) — houblons choisis par fréquence
+  RÉELLE de pairing BeerMaverick en priorité (`_pairing_grown_blends`), repli
+  couverture gloutonne explicite si aucune donnée réelle, jamais de NNLS.
+  `amplify_blend` : même mécanisme, cible = descripteurs de la note.
 - `by_descriptor` = recoupement `hop_descriptors ∩ sélection`, sans note requise.
   Orthogonal à `amplify`/`contrast` : grounded sur les roues d'arôme réelles (pas
   `CONTRAST_AFFINITY`), ne dépend ni de FooDB ni de `crawl_yakima`. Tri par nb de

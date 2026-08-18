@@ -4,7 +4,7 @@
 question concrète : *quel houblon accorder à un ajout* (yuzu, basilic…) — en le
 prolongeant (`amplify`) ou en le contrastant (`contrast`) ?
 
-> État : `pytest` vert (101 tests). Toutes les sources tournent contre les sites externes :
+> État : `pytest` vert (106 tests). Toutes les sources tournent contre les sites externes :
 > `crawl_barthhaas`, `crawl_yakima`, `ingest_flavornet`, `ingest_foodb`, `ingest_flavordb2`,
 > `resolve_pubchem_cids`, `ingest_beermaverick`, `by-descriptor`,
 > `--oav` (prior de puissance olfactive, approximatif) — voir [Feuille de route](#feuille-de-route).
@@ -366,6 +366,16 @@ alimentée (vérifié : Talus tombe de #1 à #6 sur "strawberry" avec `--descrip
 dès que la couverture moléculaire passe sous 20 % (`matching.LOW_COVERAGE_WARNING_THRESHOLD`),
 pour encourager explicitement l'ajout du plus de descripteurs possible.
 
+**Proposer un blend (T31/T32 backlog).** `matching.amplify_blend` (CLI :
+`hopmatch amplify-blend`) — équivalent de `contrast_blend` ci-dessous pour `amplify`, même
+mécanisme partagé (`_pairing_grown_blends`, priorité à la fréquence réelle de pairing
+BeerMaverick). La cible du blend est le **descripteur** propre de la note (comme
+`contrast_blend`), jamais une reconstruction moléculaire — **pas de NNLS ici non plus** : ce
+serait recréer `combine()`, déjà retiré (voir l'encadré tout en haut). Le score moléculaire
+d'`amplify` sert seulement à classer les candidats, jamais à piloter la composition du blend.
+Nécessite des descripteurs pour la note (sinon rien à couvrir — `has_descriptors: False`,
+blend vide, pas d'erreur).
+
 ### `contrast` : accorder par contraste
 
 **Contexte.** Le contraste **ne se dérive pas d'une similarité moléculaire** — chercher des
@@ -411,12 +421,21 @@ chemin normal : l'utilisateur décrit lui-même sa note avec le vocabulaire rée
 d'arôme — fonctionne pour n'importe quelle note sans rien inventer côté données, et sans
 note requise du tout.
 
-**Proposer un blend.** `matching.contrast_blend` (CLI : `hopmatch contrast-blend`) combine
-plusieurs houblons pour couvrir la cible de contraste, par couverture ensembliste **gloutonne**
-sur `hop_descriptors` (pas de NNLS ici — le contraste reste non-moléculaire par design) :
-à chaque étape, le houblon qui couvre le plus de descripteurs-cible encore non couverts, jusqu'à
-`--max-hops` ou couverture complète. Rapporte explicitement ce qui n'est pas couvert, plutôt
-qu'une liste tronquée silencieuse.
+**Proposer un blend (T33 backlog, refondu 2026-08 — décision utilisateur).**
+`matching.contrast_blend` (CLI : `hopmatch contrast-blend`) propose **plusieurs tailles de
+blend (1 à 5)**, pas un seul blend "optimal" — l'utilisateur a jugé l'ancienne version
+(couverture ensembliste gloutonne pure) peu utile : rien ne garantissait que les houblons
+combinés soient réellement utilisés ensemble. Nouvelle priorité : à chaque taille >1, le
+houblon choisi est celui avec la fréquence **RÉELLE** de pairing la plus haute avec un houblon
+déjà dans le blend (BeerMaverick, `hop_pairings`) — la couverture reste calculée et rapportée
+mais ne pilote plus le choix en priorité. Repli explicite sur la couverture gloutonne
+classique quand aucune fréquence réelle n'existe (36/203 houblons seulement ont une donnée
+BeerMaverick, mesuré) — jamais un blend plus petit que possible par manque de données, mais
+chaque houblon signale sa provenance (`via`: meilleur candidat / pairing réel / repli
+couverture). Toujours pas de NNLS (le contraste reste non-moléculaire par design). Mécanisme
+partagé (`matching._pairing_grown_blends`) avec `amplify_blend` ci-dessous. Vérifié en direct
+sur les 10 catégories cœur : Amarillo (meilleur candidat) puis Simcoe/Citra/Mosaic/Chinook,
+4 houblons sur 5 ajoutés via une fréquence de pairing BeerMaverick réelle.
 
 > ⚠️ La carte d'affinités est un **prior heuristique**, pas une donnée sourcée (voir
 > [section dédiée](#ce-qui-est-un-prior-pas-une-donnée)). À ancrer sur un corpus de recettes
@@ -584,13 +603,14 @@ hopmatch list                     # notes et houblons disponibles
 hopmatch amplify mango                    # prolonger
 hopmatch amplify "sweet basil" --oav      # + prior de puissance olfactive
 hopmatch amplify mango --descriptors citrus,tropical  # + couche descripteurs (sélection manuelle)
+hopmatch amplify-blend mango --descriptors citrus,tropical --max-hops 5  # blends 1-5, priorité pairing réel
 hopmatch contrast --descriptors citrus,herbal        # contraster (sélection manuelle)
-hopmatch contrast-blend --descriptors citrus,herbal --max-hops 3   # + blend parcimonieux
+hopmatch contrast-blend --descriptors citrus,herbal --max-hops 5   # blends 1-5, priorité pairing réel
 
 hopmatch descriptors              # vocabulaire de descripteurs disponible
 hopmatch by-descriptor citrus,tropical   # découverte, sans note requise
 
-pytest -q                         # 101 tests (nécessite l'extra [dev])
+pytest -q                         # 106 tests (nécessite l'extra [dev])
 ```
 
 ### GUI navigateur
@@ -680,7 +700,9 @@ avertissement de couverture moléculaire faible sur `amplify` (voir la section d
 ci-dessus et [Sources de données](#les-bases-de-données--pourquoi-et-comment-chacune)
 pour BeerMaverick), vocabulaire de descripteurs élargi de 38 à 104 termes via les tags
 BeerMaverick (voir la section `contrast` ci-dessus — corrige la couverture "dank" quasi
-inexistante côté Yakima seul).
+inexistante côté Yakima seul), `contrast_blend` refondu + `amplify_blend` ajouté (T33,
+plusieurs tailles de blend 1-5, priorité à la fréquence réelle de pairing BeerMaverick —
+voir les sections `amplify`/`contrast` ci-dessus pour le détail complet).
 
 **Résidu PubChem accepté, pas une piste ouverte.** 6/734 CAS restent sans CID (0,8%) après CAS
 + repli par nom : recherché aussi par CAS comme identifiant d'enregistrement PubChem (endpoint

@@ -45,17 +45,37 @@ def _print_contrast(r):
         print(f"  {i:<2}{h['name']:<14}{h['score']:>6}  via {', '.join(h['contrast_via'])}")
 
 
+def _print_blends(blends):
+    if not blends:
+        print("  aucune combinaison trouvée.")
+        return
+    for b in blends:
+        print(f"  -- taille {b['size']} --")
+        for h in b["hops"]:
+            via = {"top": "meilleur candidat", "pairing": "pairing BeerMaverick réel",
+                  "coverage": "repli couverture, pas de donnée BeerMaverick"}[h["via"]]
+            print(f"    {h['name']:<14}couvre {', '.join(h['covers']) or '(rien de nouveau)'}"
+                 f"  [{via}]")
+        if b["residual"]:
+            print("    non couvert :", ", ".join(b["residual"]))
+
+
 def _print_contrast_blend(r):
     print(f"\n[CONTRAST-BLEND] {r['note']}  — cible d'affinité : {', '.join(r['affinity_target'])}")
     if r.get("unmapped"):
         print("  (pas de carte d'affinité pour :", ", ".join(r["unmapped"]),
              "— ignorés, pas d'effet sur la cible)")
-    if not r["blend"]:
-        print("  aucune combinaison trouvée.")
-    for h in r["blend"]:
-        print(f"  {h['name']:<14}couvre {', '.join(h['covers'])}")
-    if r["residual"]:
-        print("  non couvert :", ", ".join(r["residual"]))
+    _print_blends(r["blends"])
+
+
+def _print_amplify_blend(r):
+    print(f"\n[AMPLIFY-BLEND] {r['note']}")
+    if not r["has_descriptors"]:
+        print("  pas de descripteurs pour cette note : aucun blend possible "
+             "(voir --descriptors).")
+        return
+    print(f"  cible descripteurs : {', '.join(r['target_descriptors'])}")
+    _print_blends(r["blends"])
 
 
 def _print_by_descriptor(ranked, selected):
@@ -129,9 +149,20 @@ def main(argv=None):
                          "le vocabulaire réel — voir `hopmatch descriptors` — séparés "
                          "par virgule, ex: herbal,woody")
 
+    amb = sub.add_parser("amplify-blend",
+                         help="cas d'usage : amplify, blends de taille croissante "
+                              "(1-5, priorité fréquence réelle BeerMaverick)")
+    amb.add_argument("note")
+    amb.add_argument("--db", default=DEFAULT_DB)
+    amb.add_argument("--oav", action="store_true")
+    amb.add_argument("--descriptors",
+                     help="cible du blend (vocabulaire réel, comme amplify) — requis en "
+                          "pratique, un blend n'a rien à couvrir sans descripteurs")
+    amb.add_argument("--max-hops", type=int, default=5)
+
     for name in ("contrast", "contrast-blend"):
         s = sub.add_parser(name, help="cas d'usage : contraster"
-                                     + (" (combinaison parcimonieuse)" if "blend" in name else ""))
+                                     + (" (blends de taille croissante)" if "blend" in name else ""))
         s.add_argument("note", nargs="?", default=None,
                        help="note avec note_descriptors déjà peuplé ; omis si --descriptors fourni")
         s.add_argument("--descriptors",
@@ -140,7 +171,10 @@ def main(argv=None):
                             "ex: citrus,tropical")
         s.add_argument("--db", default=DEFAULT_DB)
         if name == "contrast-blend":
-            s.add_argument("--max-hops", type=int, default=3)
+            s.add_argument("--max-hops", type=int, default=5,
+                           help="1-5 : houblons choisis par fréquence réelle de pairing "
+                                "BeerMaverick en priorité, repli couverture si aucune "
+                                "donnée réelle (voir matching._pairing_grown_blends)")
 
     lst = sub.add_parser("list", help="lister notes et houblons")
     lst.add_argument("--db", default=DEFAULT_DB)
@@ -183,6 +217,11 @@ def main(argv=None):
             descriptors = _split_descriptors(a.descriptors)
             _print_amplify(matching.amplify(con, a.note.lower(), use_oav=a.oav,
                                             descriptors=descriptors))
+        elif a.cmd == "amplify-blend":
+            descriptors = _split_descriptors(a.descriptors)
+            _print_amplify_blend(matching.amplify_blend(
+                con, a.note.lower(), use_oav=a.oav, descriptors=descriptors,
+                max_hops=a.max_hops))
         elif a.cmd in ("contrast", "contrast-blend"):
             descriptors = _split_descriptors(a.descriptors)
             note = a.note.lower() if a.note else None

@@ -62,6 +62,18 @@ def test_amplify_dispatches_and_prints_ranking(db_path, capsys):
     assert "[AMPLIFY] mynote" in out
     assert "Hopa" in out  # molx (poids 1.0) > moly (poids 0.5) -> hopa en tête
 
+def test_amplify_blend_dispatches(db_path, capsys):
+    assert main(["amplify-blend", "mynote", "--db", db_path,
+                "--descriptors", "citrus,woody", "--max-hops", "2"]) == 0
+    out = capsys.readouterr().out
+    assert "[AMPLIFY-BLEND] mynote" in out
+    assert "cible descripteurs : citrus, woody" in out
+
+def test_amplify_blend_without_descriptors_reports_no_blend(db_path, capsys):
+    assert main(["amplify-blend", "mynote", "--db", db_path]) == 0
+    out = capsys.readouterr().out
+    assert "aucun blend possible" in out
+
 def test_amplify_unknown_note_returns_1(db_path, capsys):
     assert main(["amplify", "not-a-note", "--db", db_path]) == 1
     out = capsys.readouterr().out

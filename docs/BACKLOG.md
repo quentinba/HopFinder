@@ -125,6 +125,26 @@ l'implémentation ([ ] à faire, [x] fait — voir le commit associé).
   de 1 à 6 houblons couverts ; `contrast --descriptors tropical` renvoie
   maintenant Chinook à 100%.
 
+- [x] **T33 — `contrast_blend` refondu + `amplify_blend` ajouté**
+  L'utilisateur a jugé l'ancien `contrast_blend` (couverture ensembliste
+  gloutonne, un seul blend "optimal") peu utile — rien ne garantissait que
+  les houblons combinés soient réellement utilisés ensemble. Nouvelle
+  méthodologie explicitement demandée : proposer PLUSIEURS tailles de blend
+  (1 à 5), et à chaque taille >1, choisir le houblon par fréquence RÉELLE de
+  pairing BeerMaverick (`hop_pairings`) avec un houblon déjà dans le blend —
+  la couverture reste calculée/rapportée mais ne pilote plus le choix.
+  Repli explicite sur la couverture gloutonne classique quand aucune
+  fréquence réelle n'existe (36/203 houblons seulement ont une donnée
+  `hop_pairings`, mesuré) — jamais un blend plus petit que possible par
+  manque de données, mais provenance signalée par houblon (`via`:
+  "top"/"pairing"/"coverage"). Mécanisme partagé
+  (`matching._pairing_grown_blends`) avec le nouveau `amplify_blend` (cible =
+  descripteurs de la note, **pas de NNLS** — décision explicite pour ne pas
+  recréer `combine()`, déjà retiré pour la dégénérescence documentée en
+  T10/« But »). Vérifié en direct sur une cible large (10 catégories cœur) :
+  Amarillo (meilleur candidat) puis Simcoe/Citra/Mosaic/Chinook, 4 houblons
+  sur 5 ajoutés via une fréquence de pairing BeerMaverick réelle.
+
 ## Sources de données additionnelles (recherche)
 
 - **Investigué à nouveau, PAS retenu — Hopsteiner (shop.hopsteiner.com)**.
