@@ -227,6 +227,74 @@ def test_contrast_blend_keeps_growing_past_full_or_stuck_coverage(db):
     assert r["blends"][2]["hops"][-1]["via"] == "relevance"
     assert r["blends"][3]["hops"][-1]["via"] == "relevance"
 
+def test_contrast_blend_base_variety_overrides_top_pick(db):
+    # Décision utilisateur (2026-08-19) : le score est souvent homogène
+    # (plusieurs houblons ex-aequo "meilleur candidat"), donc l'utilisateur
+    # choisit lui-même le houblon de base plutôt que `candidates[0]` imposé.
+    # Sur "citrus,floral" (fixture), citra/mosaic/simcoe sont tous à 20.0 --
+    # choisir "mosaic" doit être respecté même si citra vient avant en
+    # pertinence pure.
+    r = matching.contrast_blend(db, descriptors=["citrus", "floral"], max_hops=1,
+                                base_variety="mosaic")
+    assert r["blends"][0]["hops"][0]["variety"] == "mosaic"
+    assert r["blends"][0]["hops"][0]["via"] == "chosen"
+
+def test_contrast_blend_base_variety_falls_back_to_top_when_absent(db):
+    # base_variety hors des candidats (variété inconnue ou non pertinente
+    # pour cette cible) -> repli sur candidates[0], pas d'erreur.
+    r = matching.contrast_blend(db, descriptors=["citrus", "floral"], max_hops=1,
+                                base_variety="does-not-exist")
+    assert r["blends"][0]["hops"][0]["via"] == "top"
+
+def test_contrast_blend_mixes_relevance_and_pairing_not_pure_frequency(db):
+    # Renversement méthodologique demandé par l'utilisateur : la fréquence
+    # BeerMaverick ne doit plus, seule, décider de l'addition suivante --
+    # parmi les candidats dans le TOP-N pairing du houblon de base, il faut
+    # prendre le plus PERTINENT, pas celui de plus haute fréquence brute.
+    # simcoe a la fréquence la + haute (99) mais mosaic est plus pertinent
+    # (score 20 vs 20, mais mosaic précède simcoe dans le classement --
+    # cf. test ci-dessus) : mosaic doit gagner malgré sa fréquence + basse.
+    db.executemany("INSERT INTO hop_pairings VALUES (?,?,?,?,?)", [
+        ("saazer", "Simcoe", "simcoe", 99.0, "beermaverick"),
+        ("saazer", "Mosaic", "mosaic", 10.0, "beermaverick"),
+    ])
+    db.commit()
+    try:
+        r = matching.contrast_blend(db, descriptors=["citrus", "floral"], max_hops=2,
+                                    base_variety="saazer")
+        assert r["blends"][1]["hops"][0]["variety"] == "saazer"
+        second = r["blends"][1]["hops"][1]
+        assert second["variety"] == "mosaic"
+        assert second["via"] == "pairing"
+    finally:
+        db.execute("DELETE FROM hop_pairings WHERE variety='saazer'")
+        db.commit()
+
+def test_pairing_top_n_excludes_low_ranked_partners(db):
+    # "top N" du pairing, pas "n'importe quelle fréquence positive" : un
+    # partenaire hors du top N ne doit pas déclencher via="pairing" même
+    # s'il a une fréquence enregistrée.
+    db.execute("INSERT INTO hop_pairings VALUES (?,?,?,?,?)",
+              ("saazer", "Mosaic", "mosaic", 5.0, "beermaverick"))
+    db.commit()
+    try:
+        r = matching.contrast_blend(db, descriptors=["citrus", "floral"], max_hops=2,
+                                    base_variety="saazer", top_candidates=30)
+        second = r["blends"][1]["hops"][1]
+        # pairing_top_n par défaut (10) laisse largement passer ce seul
+        # partenaire -- vérifie explicitement qu'un top_n=0 l'exclut et
+        # retombe sur couverture/pertinence.
+        from hopmatch.matching import _pairing_grown_blends, contrast
+        cr = contrast(db, descriptors=["citrus", "floral"], top=30)
+        target = set(cr["affinity_target"])
+        candidates = [dict(h, covers=set(h["contrast_via"])) for h in cr["ranked"]]
+        blends = _pairing_grown_blends(db, candidates, target, max_hops=2,
+                                       base_variety="saazer", pairing_top_n=0)
+        assert blends[1]["hops"][1]["via"] != "pairing"
+    finally:
+        db.execute("DELETE FROM hop_pairings WHERE variety='saazer'")
+        db.commit()
+
 def test_amplify_falls_back_to_pure_molecular_score_without_descriptors(db):
     # "_passion" n'a pas de note_descriptors (contrairement à "_citrus") : sans
     # garde-fou, le score par défaut plafonnerait à w_mol*100=50 pour un houblon

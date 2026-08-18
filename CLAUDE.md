@@ -83,6 +83,44 @@ suivant par pertinence de classement pur, explicitement étiqueté "rien de neuf
 couvrir" en CLI/GUI pour ne jamais laisser croire à une couverture supplémentaire
 inexistante — honnêteté d'abord, même principe que les molécules orphelines.
 
+**Houblon de base choisi par l'utilisateur + mélange pertinence/pairing au lieu d'une
+cascade top→pairing→couverture (2026-08-19, décision utilisateur — second revirement).**
+Signalé après le premier passage T33/ci-dessus : (1) le score de `contrast` est souvent
+homogène (plusieurs houblons ex-aequo "meilleur candidat" — ex. citra/mosaic/simcoe tous
+à 20.0 sur une cible "citrus,floral" typique), donc imposer `candidates[0]` comme houblon
+de taille 1 masque un choix arbitraire parmi des ex-aequo ; (2) le mécanisme de pairing
+tel qu'implémenté en T33 se comportait en CASCADE (essayer le pairing partout jusqu'à
+épuisement, puis retomber sur la couverture) plutôt qu'un vrai MÉLANGE des deux signaux
+comme demandé à l'origine. Deux changements dans `matching._pairing_grown_blends` :
+(1) nouveau paramètre `base_variety` — taille 1 devient le choix EXPLICITE de
+l'utilisateur (`via="chosen"`) plutôt que `candidates[0]` par défaut (repli sur
+`candidates[0]`/`via="top"` si omis, ex. usage CLI/programmatique) ; exposé en GUI juste
+au-dessus de la section blend (`app._select_base_hop`) pour amplify ET contrast. (2)
+Le choix des additions suivantes (taille k>1) ne prend plus « la fréquence de pairing la
+plus haute, n'importe où dans le pool » mais filtre d'abord les candidats restants
+(`pool`, déjà trié par PERTINENCE) à ceux présents dans le TOP `_PAIRING_TOP_N` (10 par
+défaut, pas n'importe quelle fréquence positive) des partenaires BeerMaverick d'au moins
+un houblon déjà dans le blend (`matching._top_pairing_partners`), puis prend le PLUS
+PERTINENT de ce sous-ensemble filtré — jamais celui de plus haute fréquence brute.
+Vérifié par test (`test_contrast_blend_mixes_relevance_and_pairing_not_pure_frequency`) :
+un candidat de fréquence 99 mais moins pertinent perd contre un candidat de fréquence 10
+mais plus pertinent, dès lors que les deux sont dans le top-10 pairing du houblon de
+base — exactement le mélange demandé, pas une cascade. Repli inchangé (couverture puis
+pertinence) si aucun candidat restant n'est dans le top-N pairing d'un houblon du blend.
+
+**Bouton de navigation directe vers Browse retiré, remplacé par des expanders de détail
+sur place (2026-08-19, décision utilisateur).** Le bouton "ouvrir dans Browse" par ligne
+de résultat (T39, ajouté 2026-08-18) faisait perdre la page amplify/contrast en cours
+(résultats + blend) sans moyen d'y revenir, signalé en direct par l'utilisateur. Retiré
+entièrement (`app._browse_button`/`_render_hop_table` supprimés, tableaux de résultats
+revenus à `st.dataframe` simple) et remplacé par `app._hop_detail_expanders` : un
+expander par houblon SOUS le tableau de résultats (descripteurs complets, composition,
+sources), rendu directement dans la page courante — même esprit que la liste
+d'expanders déjà présente sous la heatmap de `by-descriptor` (suggéré explicitement par
+l'utilisateur en exemple). Le relais `_next_browse_hop`/`browse_hop` (session_state) est
+retiré de `main()` ; `_next_mode` seul reste (utilisé par la page d'accueil, sans rapport
+avec ce bouton).
+
 ## Décisions de conception (ne pas revenir dessus sans raison)
 - **Descripteurs = couche primaire** (roues d'arôme BarthHaas/Yakima). Robuste, sans
   concentration. Les molécules sont la couche secondaire.
@@ -377,6 +415,16 @@ avec Yakima) ; roue d'arôme agrandie (rayon 130→170) et adaptative au thème 
 main, pas de lecture de couleur exacte possible) ; `_pairing_grown_blends` ne s'arrête
 plus à la couverture complète (voir section dédiée ci-dessus, corrige le blend `contrast`
 bloqué à taille 1).
+Batch de suivi du 2026-08-19 (retour utilisateur sur 3 points du batch précédent) :
+**roue d'arôme réellement lisible en thème sombre** — le premier passage (palette
+`st.context.theme.type`) restait illisible en vrai, signalé par l'utilisateur ; cause
+réelle trouvée : `st.altair_chart` applique par défaut `theme="streamlit"`, qui réécrit
+la config Vega-Lite globale et écrase les couleurs de mark explicites choisies à la main
+— `theme=None` (voir `app._browse`) laisse Vega-Lite utiliser les couleurs qu'on lui
+donne, pas celles de Streamlit ; **houblon de base + mélange pertinence/pairing** au lieu
+d'une cascade top→pairing→couverture (voir section dédiée ci-dessus) ; **bouton
+Browse retiré**, remplacé par des expanders de détail sur place (voir section dédiée
+ci-dessus).
 Reste :
 1. Jointure FooDB/hop_composition au-delà des ~734 composés Flavornet si le vocabulaire
    s'élargit beaucoup (crawl Yakima déjà réel, plus d'aliments FooDB).

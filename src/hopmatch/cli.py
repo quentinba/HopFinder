@@ -52,8 +52,9 @@ def _print_blends(blends):
     for b in blends:
         print(f"  -- taille {b['size']} --")
         for h in b["hops"]:
-            via = {"top": "meilleur candidat", "pairing": "pairing BeerMaverick réel",
-                  "coverage": "repli couverture, pas de donnée BeerMaverick",
+            via = {"top": "meilleur candidat", "chosen": "houblon de base (choisi)",
+                  "pairing": "pertinent + pairing BeerMaverick (top 10)",
+                  "coverage": "repli couverture, pas de pairing pertinent",
                   "relevance": "houblon pertinent en plus, rien de neuf à couvrir"}[h["via"]]
             print(f"    {h['name']:<14}couvre {', '.join(h['covers']) or '(rien de nouveau)'}"
                  f"  [{via}]")

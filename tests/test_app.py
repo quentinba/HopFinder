@@ -103,26 +103,37 @@ def test_sidebar_shows_db_stats(toy_cwd):
     assert "2 notes" in stats_caption
     assert "3 descripteurs" in stats_caption
 
-def test_amplify_result_row_opens_browse_for_that_hop(toy_cwd):
-    # bouton "ouvrir dans Browse" par ligne de résultat (demande utilisateur)
-    # -> bascule vers browse ET présélectionne le houblon cliqué.
+def test_amplify_shows_inline_hop_detail_expander_without_navigating(toy_cwd):
+    # Remplace l'ancien bouton "ouvrir dans Browse" par ligne de résultat :
+    # signalé par l'utilisateur, cliquer dessus faisait perdre la page
+    # amplify en cours (résultats + blend) sans moyen d'y revenir. Désormais
+    # un détail par houblon s'affiche directement en expander sur la page
+    # courante (même esprit que la liste d'expanders de by-descriptor), sans
+    # navigation.
     at = _app()
     at.run()
     at.sidebar.radio[0].set_value("amplify").run()
     assert not at.exception
-    at.button(key="amplify_hopa").click().run()
-    assert not at.exception
-    assert at.sidebar.radio[0].value == "browse"
-    assert at.selectbox(key="browse_hop").value == "hopa"
+    assert any("Hopa" in e.label for e in at.expander)
+    assert at.sidebar.radio[0].value == "amplify"  # toujours sur la même page
 
 def test_amplify_mode_renders_ranked_table(toy_cwd):
-    # rendu ligne par ligne (st.columns), pas st.dataframe, depuis l'ajout du
-    # bouton "ouvrir dans Browse" par ligne -- un bouton par houblon classé.
     at = _app()
     at.run()
     at.sidebar.radio[0].set_value("amplify").run()
     assert not at.exception
-    assert len([b for b in at.button if b.key and b.key.startswith("amplify_")]) >= 1
+    assert len(at.dataframe) >= 1
+
+def test_amplify_blend_base_hop_selector_appears_with_descriptors(toy_cwd):
+    # Décision utilisateur (2026-08-19) : houblon de base du blend choisi par
+    # l'utilisateur plutôt qu'imposé (le score est souvent homogène).
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("amplify").run()
+    at.multiselect[0].select("citrus").run()
+    assert not at.exception
+    base_select = at.selectbox(key="amplify_base_hop")
+    assert "Hopa" in base_select.options
 
 def test_amplify_warns_on_low_molecular_coverage(toy_cwd):
     # "lownote" (fixture, ~1% de couverture) : voir _build_toy_db.
@@ -169,6 +180,8 @@ def test_contrast_mode_with_manual_descriptors(toy_cwd):
     # dans le tableau de résultats plutôt que dans la légende elle-même.
     assert any("cible d'affinité" in c.value.lower() for c in at.caption)
     assert len(at.dataframe) >= 1
+    assert any("Hopa" in e.label for e in at.expander)  # détail par houblon, sans navigation
+    assert at.selectbox(key="contrast_base_hop") is not None
 
 def test_by_descriptor_mode_lists_matching_hop(toy_cwd):
     at = _app()

@@ -171,37 +171,46 @@ def _stats(con) -> dict:
     return _cached_stats(con, db_path, _db_version(db_path))
 
 
-def _browse_button(variety: str, name: str, key: str) -> None:
-    """Bouton de navigation directe vers Browse hop informations pour un
-    houblon précis (T-nav backlog, demandé pour amplify/contrast/
-    by-descriptor). Même relais session_state que la page d'accueil
-    (`_next_mode`) + une seconde clé dédiée (`_next_browse_hop`) consommées
-    en tout début de `main()`, avant l'instanciation des widgets `mode`/
-    `browse_hop` — Streamlit interdit de modifier le session_state d'un
-    widget déjà instancié dans le même run."""
-    if st.button("", icon=":material/open_in_new:", key=key,
-                help=f"Ouvrir {name} dans Browse hop informations"):
-        st.session_state["_next_mode"] = "browse"
-        st.session_state["_next_browse_hop"] = variety
-        st.rerun()
-
-
-def _render_hop_table(rows: list[dict], columns: list[tuple[str, str]], key_prefix: str) -> None:
-    """Rendu ligne par ligne (pas `st.dataframe` : un bouton "Parcourir" par
-    ligne n'existe pas nativement dans une dataframe). `rows` : dicts avec au
-    moins "variety"/"name" + les clés utilisées par `columns` ; `columns` :
-    [(en-tête, clé)]. Chaque ligne se termine par un bouton vers Browse hop
-    informations pour ce houblon (voir `_browse_button`)."""
-    widths = [3] + [2] * (len(columns) - 1) + [1]
-    header_cols = st.columns(widths)
-    for col, (header, _) in zip(header_cols, columns):
-        col.caption(header)
+def _hop_detail_expanders(hops: dict, comp: dict, hop_desc: dict, rows: list[dict]) -> None:
+    """Détail par houblon en expander, sous le tableau de résultats.
+    Remplace l'ancien bouton de navigation directe vers Browse hop
+    informations (T39) : signalé par l'utilisateur, cliquer dessus faisait
+    perdre la page amplify/contrast en cours (résultats + blend), sans moyen
+    d'y revenir — remplacé par un détail affiché DANS la page courante, sans
+    navigation ni perte d'état, même esprit que la liste d'expanders sous la
+    heatmap de `_by_descriptor` (demandé explicitement par l'utilisateur en
+    exemple : "similar to the detailed list of hops below the from
+    description heatmap"). `rows` : dicts avec "variety"/"name"/"caption"
+    (texte affiché dans l'en-tête de l'expander, ex. score/contribution)."""
+    st.subheader("Détails par houblon")
     for row in rows:
-        cols = st.columns(widths, vertical_alignment="center")
-        for col, (_, field) in zip(cols, columns):
-            col.write(row[field])
-        with cols[-1]:
-            _browse_button(row["variety"], row["name"], key=f"{key_prefix}_{row['variety']}")
+        v = row["variety"]
+        with st.expander(f"{row['name']} — {row['caption']}"):
+            st.caption(f"Sources : {hops[v]['sources']}")
+            descs = sorted(hop_desc.get(v, set()))
+            st.write("**Descripteurs :** " + (", ".join(descs) if descs else "aucun enregistré"))
+            hcomp = comp.get(v, {})
+            crows = sorted(
+                ({"Composé": c, "Valeur": round(cv["mid"], 3), "Unité": cv["unit"],
+                  "Sources": ", ".join(cv["sources"])}
+                 for c, cv in hcomp.items()
+                 if c not in _NON_AROMA_DISPLAY and cv["mid"] is not None),
+                key=lambda r: -r["Valeur"])
+            if crows:
+                st.dataframe(crows[:8], width="stretch", hide_index=True)
+
+
+def _select_base_hop(ranked: list[dict], key: str) -> str:
+    """Houblon de base du blend (taille 1), choisi par l'UTILISATEUR plutôt
+    qu'imposé (décision 2026-08-19) : signalé en direct que le score de
+    contrast/amplify est souvent homogène — plusieurs houblons ex-aequo
+    "meilleur candidat" (ex. citra/mosaic/simcoe tous à 20.0 sur une cible
+    "citrus,floral" typique) — le classement seul ne désigne donc pas un
+    choix évident parmi les ex-aequo."""
+    options = [h["variety"] for h in ranked]
+    names = {h["variety"]: h["name"] for h in ranked}
+    return st.selectbox("Houblon de base pour le blend", options,
+                        format_func=lambda v: names[v], key=key)
 
 
 def _amplify(con, note):
@@ -245,30 +254,36 @@ def _amplify(con, note):
     if not r["ranked"]:
         st.write("Aucun houblon ne recoupe cette note.")
         return
-    _render_hop_table(
-        [{"variety": h["variety"], "name": h["name"], "Houblon": h["name"],
-          "Score": h["score"], "Mol.": h["mol"], "Desc.": h["desc"],
+    st.dataframe(
+        [{"Houblon": h["name"], "Score": h["score"], "Mol.": h["mol"], "Desc.": h["desc"],
           "Contribue via": ", ".join(h["why"]), "Sources": h["sources"]}
          for h in r["ranked"]],
-        [("Houblon", "Houblon"), ("Score", "Score"), ("Mol.", "Mol."), ("Desc.", "Desc."),
-        ("Contribue via", "Contribue via"), ("Sources", "Sources")],
-        key_prefix="amplify")
+        width="stretch", hide_index=True)
+
+    hops, comp, hop_desc, _ = matching.load(con)
+    _hop_detail_expanders(hops, comp, hop_desc, [
+        {"variety": h["variety"], "name": h["name"],
+         "caption": f"score {h['score']} — via {', '.join(h['why']) or '(aucune)'}"}
+        for h in r["ranked"]])
 
     st.subheader("Proposer un blend")
     if not r["has_descriptors"]:
         st.caption("Pas de descripteurs pour cette note : aucun blend possible "
                   "(sélectionne des descripteurs ci-dessus).")
     else:
+        base = _select_base_hop(r["ranked"], key="amplify_base_hop")
         # Toujours 5 (décision utilisateur) : pas de curseur, un blend à 5
         # tailles complet reste peu coûteux à calculer et laisse voir toutes
         # les options d'un coup plutôt que de forcer un choix a priori.
         blend_r = matching.amplify_blend(con, note, use_oav=use_oav,
-                                         descriptors=selected_desc or None, max_hops=5)
+                                         descriptors=selected_desc or None, max_hops=5,
+                                         base_variety=base)
         _render_blends(blend_r["blends"])
 
 
-_VIA_LABELS = {"top": "meilleur candidat", "pairing": "pairing BeerMaverick réel",
-              "coverage": "repli couverture (pas de donnée BeerMaverick)",
+_VIA_LABELS = {"top": "meilleur candidat", "chosen": "houblon de base (choisi)",
+              "pairing": "pertinent + pairing BeerMaverick (top 10)",
+              "coverage": "repli couverture (pas de pairing pertinent)",
               "relevance": "houblon pertinent en plus (rien de neuf à couvrir)"}
 
 
@@ -311,18 +326,22 @@ def _contrast(con):
     if not r["ranked"]:
         st.write("Aucun houblon ne recoupe cette cible.")
         return
-    _render_hop_table(
-        [{"variety": h["variety"], "name": h["name"], "Houblon": h["name"],
-          "Score": h["score"], "Contraste via": ", ".join(h["contrast_via"]),
-          "Sources": h["sources"]}
+    st.dataframe(
+        [{"Houblon": h["name"], "Score": h["score"],
+          "Contraste via": ", ".join(h["contrast_via"]), "Sources": h["sources"]}
          for h in r["ranked"]],
-        [("Houblon", "Houblon"), ("Score", "Score"), ("Contraste via", "Contraste via"),
-        ("Sources", "Sources")],
-        key_prefix="contrast")
+        width="stretch", hide_index=True)
+
+    hops, comp, hop_desc, _ = matching.load(con)
+    _hop_detail_expanders(hops, comp, hop_desc, [
+        {"variety": h["variety"], "name": h["name"],
+         "caption": f"score {h['score']} — contraste via {', '.join(h['contrast_via'])}"}
+        for h in r["ranked"]])
 
     st.subheader("Proposer un blend")
+    base = _select_base_hop(r["ranked"], key="contrast_base_hop")
     # Toujours 5 (décision utilisateur) : pas de curseur.
-    blend_r = matching.contrast_blend(con, descriptors=selected, max_hops=5)
+    blend_r = matching.contrast_blend(con, descriptors=selected, max_hops=5, base_variety=base)
     _render_blends(blend_r["blends"])
 
 
@@ -463,7 +482,14 @@ def _browse(con):
     # de cette variété précise (voir _is_plausible_brewing_entry) ; un dict
     # non vide mais tout à zéro n'est pas une donnée exploitable.
     if intensity and any(v > 0 for v in intensity.values()):
-        st.altair_chart(_aroma_wheel(intensity, _intensity_vocabulary(con)), width="content")
+        # theme=None : par défaut st.altair_chart applique le thème
+        # "streamlit" (config Vega-Lite globale) qui écrase les couleurs
+        # explicites choisies à la main dans _aroma_wheel pour s'adapter au
+        # clair/sombre -- vérifié en direct (labels illisibles en thème
+        # sombre malgré la palette choisie) : c'est ce thème global qui gagne
+        # sur les couleurs de mark, pas un mauvais choix de couleur.
+        st.altair_chart(_aroma_wheel(intensity, _intensity_vocabulary(con)),
+                        width="content", theme=None)
     else:
         st.caption("Pas de roue d'arôme quantitative pour cette variété "
                    "(donnée Yakima non disponible ou non exploitable ici — "
@@ -591,7 +617,6 @@ def _by_descriptor(con):
                 f"{h['name']} — recoupe {', '.join(h['matched_descriptors'])} "
                 f"[{h['sources']}]"):
             st.caption("Tous les descripteurs : " + ", ".join(h["all_descriptors"]))
-            _browse_button(h["variety"], h["name"], key=f"bydesc_{h['variety']}")
             if h["compounds"]:
                 st.dataframe(
                     [{"Composé": c["compound"], "Valeur": round(c["mid"], 2),
@@ -603,13 +628,15 @@ def _by_descriptor(con):
 def main():
     st.set_page_config(page_title="hopmatch", page_icon="🌿")
     if "_next_mode" in st.session_state:
+        # Relais utilisé par la page d'accueil (_home) : Streamlit interdit
+        # de modifier st.session_state["mode"] une fois le widget radio
+        # (key="mode") déjà instancié dans CE run -- consommé ici, avant sa
+        # création. (L'ancien relais _next_browse_hop, pour la navigation
+        # directe résultat -> Browse, a été retiré en T-nav-v2 : il faisait
+        # perdre le contexte de la page amplify/contrast en cours, remplacé
+        # par des expanders de détail affichés directement sur place — voir
+        # `_hop_detail_expanders`.)
         st.session_state["mode"] = st.session_state.pop("_next_mode")
-    if "_next_browse_hop" in st.session_state:
-        # reset la recherche : sinon un filtre resté d'une précédente visite
-        # de Browse pourrait exclure le houblon ciblé -> st.selectbox
-        # planterait ("value not in options") en tentant de le présélectionner.
-        st.session_state["browse_search"] = ""
-        st.session_state["browse_hop"] = st.session_state.pop("_next_browse_hop")
     st.title("hopmatch")
     st.caption("Note olfactive → molécules → houblons")
 

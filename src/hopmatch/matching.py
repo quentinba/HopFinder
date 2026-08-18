@@ -359,7 +359,20 @@ def _hop_pairing_frequencies(con) -> dict[tuple[str, str], float]:
     return freq
 
 
-def _pairing_grown_blends(con, candidates: list[dict], target: set[str], max_hops: int = 5
+_PAIRING_TOP_N = 10  # cf. `_pairing_grown_blends` — "top N" du pairing BeerMaverick
+
+
+def _top_pairing_partners(freq: dict[tuple[str, str], float], variety: str, n: int) -> set[str]:
+    """Les `n` partenaires BeerMaverick les plus fréquents de `variety` (pas
+    n'importe quel partenaire ayant une fréquence > 0 — un vrai "top N"), cf.
+    `_pairing_grown_blends`."""
+    partners = sorted(
+        ((b, f) for (a, b), f in freq.items() if a == variety), key=lambda x: -x[1])
+    return {b for b, _ in partners[:n]}
+
+
+def _pairing_grown_blends(con, candidates: list[dict], target: set[str], max_hops: int = 5,
+                          base_variety: str | None = None, pairing_top_n: int = _PAIRING_TOP_N
                           ) -> list[dict]:
     """
     T33 backlog (décision utilisateur) : propose des blends de TAILLE
@@ -367,34 +380,44 @@ def _pairing_grown_blends(con, candidates: list[dict], target: set[str], max_hop
     brasseur choisir son compromis taille/couverture/authenticité plutôt que
     de lui imposer un seul résultat.
 
-    Le choix des houblons À CHAQUE TAILLE privilégie la fréquence RÉELLE
-    d'association en recette (BeerMaverick, `hop_pairings`) — PAS la
-    couverture ensembliste pure comme l'ancienne version de `contrast_blend` :
-    demande explicite de l'utilisateur, la couverture reste calculée et
-    rapportée mais ne pilote plus le choix des houblons en priorité.
-
     `candidates` : liste déjà triée par pertinence décroissante, chaque entrée
     a au moins une clé "covers" (set[str], sous-ensemble de `target` que ce
     houblon couvre — le filtre de pertinence, càd ne garder que les houblons
     avec `covers` non vide, est déjà appliqué en amont par l'appelant).
 
-    Taille 1 : le houblon le plus pertinent tout court (`candidates[0]`) — la
-    notion de "pairing" n'existe pas pour un seul houblon seul.
-    Taille k>1 : le houblon dont la fréquence RÉELLE de pairing avec
-    N'IMPORTE LEQUEL des houblons déjà dans le blend est la plus haute, parmi
-    les candidats restants (`via="pairing"`). Repli EXPLICITE sur la
-    couverture gloutonne classique (`via="coverage"` : houblon qui ajoute le
-    plus de `target` encore non couvert) si aucune fréquence réelle n'existe
-    depuis le blend courant — ne jamais renvoyer un blend plus petit que
-    possible juste par manque de donnée BeerMaverick, mais toujours signaler
-    la provenance de chaque houblon plutôt que de la cacher.
+    Taille 1 : `base_variety` si fourni (`via="chosen"`) — décision utilisateur
+    (2026-08-19) : le score de `contrast`/`amplify` est souvent homogène (peu
+    de descripteurs cibles -> plusieurs houblons à égalité de "meilleur
+    candidat"), donc le classement seul ne désigne pas un choix évident ;
+    l'utilisateur choisit lui-même le houblon de base en GUI/CLI plutôt que de
+    se voir imposer `candidates[0]` arbitrairement parmi des ex-aequo. Repli
+    sur `candidates[0]` (`via="top"`) si `base_variety` est omis ou absent des
+    candidats (usage programmatique/CLI sans sélection).
+
+    Taille k>1 (revirement méthodologique, décision utilisateur 2026-08-19) :
+    **mélange score ET pairing, jamais l'un puis l'autre en cascade.** Version
+    précédente : le houblon de plus haute fréquence de pairing gagnait, quel
+    que soit son score de pertinence — l'utilisateur a signalé qu'à l'usage,
+    ça revenait à choisir par BeerMaverick seul jusqu'à épuisement puis à
+    retomber sur la couverture, pas le mélange voulu. Nouvelle règle : parmi
+    les candidats restants dans l'ordre de pertinence (`pool`, déjà trié),
+    ne garder que ceux qui figurent dans le TOP `pairing_top_n` (dix par
+    défaut, pas "n'importe quelle fréquence positive") des partenaires
+    BeerMaverick d'au moins un houblon déjà dans le blend, puis prendre le
+    PLUS PERTINENT de ce sous-ensemble (`pool` reste trié par score, donc le
+    premier match) — `via="pairing"`. Repli EXPLICITE sur la couverture
+    gloutonne classique (`via="coverage"` : houblon qui ajoute le plus de
+    `target` encore non couvert) si aucun candidat restant n'est dans le top
+    pairing d'un houblon du blend — ne jamais renvoyer un blend plus petit
+    que possible juste par manque de donnée BeerMaverick, mais toujours
+    signaler la provenance de chaque houblon plutôt que de la cacher.
 
     Va TOUJOURS jusqu'à `max_hops` (ou épuisement des candidats) — ne s'arrête
     PAS dès couverture complète (décision utilisateur, 2026-08 : voir un blend
     à 5 même quand 1 seul houblon couvre déjà toute la cible reste une info
     utile — l'utilisateur compare lui-même la taille/couverture/authenticité,
-    l'outil ne décide pas à sa place). Quand il ne reste ni fréquence réelle
-    ni gain de couverture (cible déjà entièrement couverte, ou plus aucun
+    l'outil ne décide pas à sa place). Quand il ne reste ni pairing top-N ni
+    gain de couverture (cible déjà entièrement couverte, ou plus aucun
     candidat n'apporte quoi que ce soit de neuf), repli sur le houblon suivant
     par PERTINENCE globale (`via="relevance"`) plutôt que de s'arrêter — un
     houblon pertinent de plus reste une proposition valable, signalée comme
@@ -411,16 +434,17 @@ def _pairing_grown_blends(con, candidates: list[dict], target: set[str], max_hop
         if not pool:
             break
         if size == 1:
-            chosen, via = pool[0], "top"
+            if base_variety is not None and base_variety in by_variety:
+                chosen, via = by_variety[base_variety], "chosen"
+            else:
+                chosen, via = pool[0], "top"
         else:
-            best, best_freq = None, -1.0
-            for cand in pool:
-                for existing_v, _via in blend:
-                    f = freq.get((existing_v, cand["variety"]))
-                    if f is not None and f > best_freq:
-                        best, best_freq = cand, f
-            if best is not None:
-                chosen, via = best, "pairing"
+            partner_set: set[str] = set()
+            for existing_v, _via in blend:
+                partner_set |= _top_pairing_partners(freq, existing_v, pairing_top_n)
+            paired_candidates = [c for c in pool if c["variety"] in partner_set]
+            if paired_candidates:
+                chosen, via = paired_candidates[0], "pairing"  # pool reste trié par pertinence
             else:
                 covered_so_far = (set().union(*(by_variety[v]["covers"] for v, _ in blend))
                                   if blend else set())
@@ -448,25 +472,28 @@ def _pairing_grown_blends(con, candidates: list[dict], target: set[str], max_hop
 
 
 def contrast_blend(con, note: str | None = None, descriptors: list[str] | None = None,
-                   max_hops: int = 5, top_candidates: int = 30):
+                   max_hops: int = 5, top_candidates: int = 30, base_variety: str | None = None):
     """
     Propose des blends de taille croissante (1..max_hops) plutôt qu'un seul
     blend "optimal" — voir `_pairing_grown_blends` pour le mécanisme complet
-    (fréquence RÉELLE de pairing BeerMaverick en priorité, repli couverture
-    explicite). `contrast` reste non-moléculaire par design (cf.
+    (houblon de base choisi par l'utilisateur via `base_variety`, additions
+    suivantes mélangeant pertinence ET top-N pairing BeerMaverick, repli
+    couverture explicite). `contrast` reste non-moléculaire par design (cf.
     ARCHITECTURE.md) : la cible et la pertinence des candidats viennent
     toujours de `CONTRAST_AFFINITY`/`hop_descriptors`, jamais des molécules.
     """
     r = contrast(con, note=note, descriptors=descriptors, top=top_candidates)
     target = set(r["affinity_target"])
     candidates = [dict(h, covers=set(h["contrast_via"])) for h in r["ranked"]]
-    blends = _pairing_grown_blends(con, candidates, target, max_hops=max_hops)
+    blends = _pairing_grown_blends(con, candidates, target, max_hops=max_hops,
+                                   base_variety=base_variety)
     return {"mode": "contrast_blend", "note": r["note"], "affinity_target": r["affinity_target"],
            "unmapped": r["unmapped"], "blends": blends}
 
 
 def amplify_blend(con, note: str, w_mol: float = 0.5, w_desc: float = 0.5, use_oav=False,
-                  max_hops: int = 5, top_candidates: int = 30, descriptors: list[str] | None = None):
+                  max_hops: int = 5, top_candidates: int = 30, descriptors: list[str] | None = None,
+                  base_variety: str | None = None):
     """
     Équivalent de `contrast_blend` pour `amplify` (T31/T32 backlog, décision
     utilisateur explicite) : propose des blends de taille croissante (1..max_hops),
@@ -502,7 +529,8 @@ def amplify_blend(con, note: str, w_mol: float = 0.5, w_desc: float = 0.5, use_o
         covers = target & hop_desc.get(h["variety"], set())
         if covers:
             candidates.append(dict(h, covers=covers))
-    blends = _pairing_grown_blends(con, candidates, target, max_hops=max_hops)
+    blends = _pairing_grown_blends(con, candidates, target, max_hops=max_hops,
+                                   base_variety=base_variety)
     return {"mode": "amplify_blend", "note": note, "target_descriptors": sorted(target),
            "has_descriptors": True, "blends": blends}
 

@@ -220,6 +220,50 @@ l'implémentation ([ ] à faire, [x] fait — voir le commit associé).
   plus — étiqueté "rien de neuf à couvrir" pour ne jamais laisser croire à
   une couverture supplémentaire inexistante.
 
+- [x] **T43 — Roue d'arôme toujours illisible en thème sombre après T41**
+  Le premier passage (palette choisie via `st.context.theme.type`) ne
+  suffisait pas, signalé par l'utilisateur après vérification en direct.
+  Cause réelle : `st.altair_chart` applique par défaut `theme="streamlit"`,
+  qui réécrit la config Vega-Lite globale et écrase les couleurs de mark
+  explicites (`mark_text`/`mark_rule` sans encodage de couleur) — pas un
+  mauvais choix de couleur, un thème global qui gagne dessus. Corrigé par
+  `theme=None` sur cet appel `st.altair_chart` (`app._browse`), laissant
+  Vega-Lite utiliser la palette choisie à la main plutôt que celle de
+  Streamlit.
+
+- [x] **T44 — Blend `contrast`/`amplify` : houblon de base + mélange
+  pertinence/pairing plutôt qu'une cascade**
+  Deux problèmes signalés ensemble par l'utilisateur après T33/T42 : (1) le
+  score de `contrast` est souvent homogène (plusieurs houblons ex-aequo
+  "meilleur candidat"), donc imposer `candidates[0]` comme houblon de base
+  masque un choix arbitraire ; (2) le mécanisme de pairing choisissait le
+  houblon de plus haute fréquence de pairing n'importe où dans le pool
+  restant, PAS un mélange pertinence+pairing comme demandé à l'origine —
+  en pratique une cascade (pairing jusqu'à épuisement, puis couverture).
+  Corrigé : `matching._pairing_grown_blends` accepte `base_variety` (choisi
+  par l'utilisateur en GUI via `app._select_base_hop`, affiché juste
+  au-dessus du blend pour amplify ET contrast — repli sur `candidates[0]`
+  si omis) ; les additions suivantes filtrent d'abord les candidats restants
+  (déjà triés par pertinence) à ceux présents dans le TOP 10
+  (`_PAIRING_TOP_N`) des partenaires BeerMaverick d'un houblon déjà dans le
+  blend, puis prennent le PLUS PERTINENT de ce sous-ensemble — jamais celui
+  de plus haute fréquence brute. Vérifié par test : un candidat de fréquence
+  99 mais moins pertinent perd contre un candidat de fréquence 10 mais plus
+  pertinent, dès lors que les deux sont dans le top-10 pairing du houblon de
+  base.
+
+- [x] **T45 — Bouton "ouvrir dans Browse" retiré, remplacé par des
+  expanders sur place**
+  Signalé par l'utilisateur : cliquer le bouton ajouté en T39 faisait perdre
+  la page amplify/contrast en cours (résultats + blend), sans moyen d'y
+  revenir. Retiré entièrement (`_render_hop_table`/`_browse_button`
+  supprimés, tableaux revenus à `st.dataframe`) et remplacé par
+  `app._hop_detail_expanders` : un expander de détail par houblon
+  (descripteurs, composition, sources) directement SOUS le tableau de
+  résultats, sans navigation — même esprit que la liste d'expanders déjà
+  présente sous la heatmap de `by-descriptor` (suggéré explicitement par
+  l'utilisateur en exemple).
+
 ## Sources de données additionnelles (recherche)
 
 - **Investigué à nouveau, PAS retenu — Hopsteiner (shop.hopsteiner.com)**.
