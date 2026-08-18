@@ -4,10 +4,10 @@
 question concrète : *quel houblon accorder à un ajout* (yuzu, basilic…) — en le
 prolongeant (`amplify`) ou en le contrastant (`contrast`) ?
 
-> État : `pytest` vert (79 tests). Toutes les sources tournent contre les sites externes :
+> État : `pytest` vert (92 tests). Toutes les sources tournent contre les sites externes :
 > `crawl_barthhaas`, `crawl_yakima`, `ingest_flavornet`, `ingest_foodb`, `ingest_flavordb2`,
-> `resolve_pubchem_cids`, `by-descriptor`, `--oav` (prior de puissance olfactive, approximatif)
-> — voir [Feuille de route](#feuille-de-route).
+> `resolve_pubchem_cids`, `ingest_beermaverick`, `by-descriptor`,
+> `--oav` (prior de puissance olfactive, approximatif) — voir [Feuille de route](#feuille-de-route).
 
 ---
 
@@ -528,11 +528,12 @@ l'initialisent si elle n'existe pas) et fusionne les variétés déjà présente
 
 ```bash
 hopmatch crawl-barthhaas          # ~90 variétés BarthHaas
-hopmatch crawl-yakima             # ~152 variétés Yakima Chief (via Algolia)
+hopmatch crawl-yakima             # ~152 variétés Yakima Chief (via Algolia) + hop_similar
 hopmatch ingest-flavornet         # whitelist odeur-active (~734 composés) — avant les deux suivants
 hopmatch resolve-pubchem-cids     # jointure structurale CAS->CID — avant les deux suivants
 hopmatch ingest-flavordb2         # seuils olfactifs, bornés à cette whitelist
 hopmatch ingest-foodb              # télécharge+extrait le dump FooDB si absent, puis ingère
+hopmatch ingest-beermaverick      # pairings/substitutions houblon<->houblon (agrégateur)
 ```
 
 L'ordre ci-dessus est celui des dépendances réelles entre commandes (`ingest-flavornet`
@@ -561,7 +562,7 @@ hopmatch contrast-blend --descriptors citrus,herbal --max-hops 3   # + blend par
 hopmatch descriptors              # vocabulaire de descripteurs disponible
 hopmatch by-descriptor citrus,tropical   # découverte, sans note requise
 
-pytest -q                         # 79 tests (nécessite l'extra [dev])
+pytest -q                         # 92 tests (nécessite l'extra [dev])
 ```
 
 ### GUI navigateur
@@ -590,8 +591,20 @@ camembert à rayon variable, voir le commentaire de `app._aroma_wheel`) —
 intensité 0-100 réelle (`hop_aroma_intensity`, table dédiée alimentée par
 `crawl_yakima` depuis `imported_fields.sensory_values`/`aroma_values`), pas
 une simple présence/absence. BarthHaas n'a pas cette donnée : rien n'est
-affiché pour les variétés non couvertes (pas de valeur inventée). La barre
-latérale affiche aussi le nombre de houblons/notes/descripteurs chargés et la
+affiché pour les variétés non couvertes (pas de valeur inventée).
+
+`browse` affiche aussi trois associations houblon<->houblon (T25 backlog),
+chacune étiquetée avec sa propre source — trois questions différentes, jamais
+présentées comme interchangeables : **Variétés similaires** (Yakima,
+`imported_fields.similar_varieties`, curé par YCH) ; **Associations
+fréquentes en recette** (BeerMaverick, fréquence relative dans des recettes
+publiées analysées par eux — un agrégateur, pas une mesure de labo) ;
+**Substitutions suggérées** (BeerMaverick, choix éditorial de brasseurs
+expérimentés). Réconciliation par nom normalisé (`ingest._resolve_hop_variety`,
+tolère ®/™/« Brand »/« NZ Hops »...) : 143/203 de nos variétés ont une page
+BeerMaverick correspondante. Voir `docs/DATA_SOURCES.md` pour le détail complet.
+
+La barre latérale affiche aussi le nombre de houblons/notes/descripteurs chargés et la
 date de dernière modification de la base. Pour pointer vers une autre base :
 `streamlit run src/hopmatch/app.py -- --db chemin.db`.
 

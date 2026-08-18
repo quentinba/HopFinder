@@ -22,6 +22,31 @@ def test_canonical_compound_falls_back_to_manual_alias_for_aggregation():
 def test_canonical_compound_keeps_unknown_name_untouched():
     assert ingest._canonical_compound("000-00-0", "some-obscure-compound", {}) == "some-obscure-compound"
 
+def test_normalize_hop_key_strips_trademark_and_brand_words():
+    # "Mosaic® Brand" (Yakima) et "mosaic" (slug BeerMaverick) doivent
+    # converger vers la même clé pour se réconcilier (T25 backlog).
+    assert ingest._normalize_hop_key("Mosaic® Brand") == ingest._normalize_hop_key("mosaic")
+    assert ingest._normalize_hop_key("Nelson Sauvin™  Brand - NZ Hops") == \
+        ingest._normalize_hop_key("nelson-sauvin")
+
+def test_resolve_hop_variety_matches_by_variety_or_name(tmp_path):
+    con = connect(str(tmp_path / "t.db"))
+    init_db(con)
+    con.execute("INSERT INTO hops VALUES (?,?,?,?)",
+               ("mosaic-brand", "Mosaic® Brand", "United States", "yakima"))
+    con.commit()
+    index = ingest._build_hop_name_index(con)
+    # via le slug BeerMaverick (proche de variety, pas identique)
+    assert ingest._resolve_hop_variety(index, "mosaic") == "mosaic-brand"
+    # via le nom affiché (avec habillage commercial différent)
+    assert ingest._resolve_hop_variety(index, "Mosaic") == "mosaic-brand"
+
+def test_resolve_hop_variety_none_for_unknown_hop(tmp_path):
+    con = connect(str(tmp_path / "t.db"))
+    init_db(con)
+    con.commit()
+    assert ingest._resolve_hop_variety(ingest._build_hop_name_index(con), "adeena") is None
+
 def test_build_cas_to_hop_name_from_pubchem_cids_table():
     from hopmatch.schema import connect, init_db
     con = connect(":memory:")

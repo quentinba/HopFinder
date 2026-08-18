@@ -389,3 +389,44 @@ def pubchem_name_fallbacks(name: str) -> list[str]:
             seen.add(v)
             out.append(v)
     return out
+
+
+# --------------------------------------------------------------------------- #
+# BeerMaverick (T25 backlog) — pairing/substitution, PAS une mesure de labo
+# --------------------------------------------------------------------------- #
+_BM_PAIRINGS_RE = re.compile(
+    r"getElementById\('commonChart'\).*?labels:\s*\[(.*?)\].*?data:\s*\[(.*?)\]", re.S)
+_BM_SUBSTITUTIONS_RE = re.compile(r"Hop Substitutions.*?<ul>(.*?)</ul>", re.S)
+_BM_HOP_LINK_RE = re.compile(r'<a href="/hop/([a-z0-9-]+)/"[^>]*>\s*([^<]+?)\s*</a>')
+
+
+def parse_beermaverick_pairings(html: str) -> list[tuple[str, float]]:
+    """
+    Extrait la section « Hop Pairings » d'une page beermaverick.com/hop/{slug}/ :
+    un graphique Chart.js embarqué DIRECTEMENT dans le HTML statique servi
+    (pas besoin de leur endpoint interne /api/js/?hop=<id>, documenté par eux
+    comme "internal use" et donc écarté — voir docs/BACKLOG.md). Fréquence
+    relative (PAS un pourcentage, PAS une mesure de labo : "nous avons analysé
+    des centaines des bières les plus populaires" — un agrégat éditorial,
+    affiché avec cette réserve en GUI). Section absente sur les variétés à
+    faible volume de recettes (ex. Admiral, vérifié en direct) -> []."""
+    m = _BM_PAIRINGS_RE.search(html)
+    if not m:
+        return []
+    labels = [l.strip() for l in re.findall(r"'([^']*)'", m.group(1))]
+    values = [float(x) for x in re.findall(r"[\d.]+", m.group(2))]
+    return list(zip(labels, values))
+
+
+def parse_beermaverick_substitutions(html: str) -> list[tuple[str, str]]:
+    """
+    Extrait la section « Hop Substitutions » (choix éditorial de brasseurs
+    expérimentés, PAS une mesure) — liste `<li><a href="/hop/{slug}/">Nom</a>`
+    dans le HTML statique. Renvoie (slug_beermaverick, nom_affiché) : le slug
+    permet une réconciliation directe vers notre propre `variety` (voir
+    ingest._resolve_hop_variety), plus fiable qu'un matching sur le nom
+    affiché seul."""
+    m = _BM_SUBSTITUTIONS_RE.search(html)
+    if not m:
+        return []
+    return _BM_HOP_LINK_RE.findall(m.group(1))

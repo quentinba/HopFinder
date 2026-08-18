@@ -24,6 +24,31 @@ CREATE TABLE hop_aroma_intensity (
     variety TEXT, descriptor TEXT, intensity REAL, source TEXT,
     PRIMARY KEY (variety, descriptor, source)
 );
+-- Associations houblon<->houblon (T25 backlog), chacune avec sa propre source
+-- affichée en GUI (browse) : trois relations différentes, pas interchangeables.
+-- similar_variety/paired_variety/substitute_variety = notre propre slug variety
+-- SI reconnu (jointure normalisée sur nom, voir ingest._resolve_hop_variety),
+-- sinon NULL (le nom brut *_name reste toujours renseigné, jamais perdu).
+CREATE TABLE hop_similar (
+    -- Yakima : imported_fields.similar_varieties (UID Contentstack, résolu
+    -- directement via le même crawl_yakima -> toujours une variété interne
+    -- connue, jamais de nom brut hors catalogue Yakima).
+    variety TEXT, similar_variety TEXT, source TEXT,
+    PRIMARY KEY (variety, similar_variety, source)
+);
+CREATE TABLE hop_pairings (
+    -- BeerMaverick : "Hop Pairings" (fréquence relative d'association dans des
+    -- recettes réelles, agrégée par eux depuis des bières publiées -- PAS une
+    -- mesure de labo, à afficher avec cette réserve).
+    variety TEXT, paired_name TEXT, paired_variety TEXT, frequency REAL, source TEXT,
+    PRIMARY KEY (variety, paired_name, source)
+);
+CREATE TABLE hop_substitutions (
+    -- BeerMaverick : "Hop Substitutions" (choix de brasseurs expérimentés,
+    -- éditorial -- PAS une mesure).
+    variety TEXT, substitute_name TEXT, substitute_variety TEXT, source TEXT,
+    PRIMARY KEY (variety, substitute_name, source)
+);
 CREATE TABLE molecules (
     compound TEXT PRIMARY KEY, odor TEXT, threshold_ppb REAL, pubchem_cid INTEGER
 );
@@ -65,6 +90,8 @@ def init_db(con: sqlite3.Connection) -> None:
     con.executescript(
         "DROP TABLE IF EXISTS hops; DROP TABLE IF EXISTS hop_composition;"
         "DROP TABLE IF EXISTS hop_descriptors; DROP TABLE IF EXISTS hop_aroma_intensity;"
+        "DROP TABLE IF EXISTS hop_similar; DROP TABLE IF EXISTS hop_pairings;"
+        "DROP TABLE IF EXISTS hop_substitutions;"
         "DROP TABLE IF EXISTS molecules;"
         "DROP TABLE IF EXISTS aroma_notes; DROP TABLE IF EXISTS note_descriptors;"
         "DROP TABLE IF EXISTS flavornet_compounds; DROP TABLE IF EXISTS flavordb2_thresholds;"

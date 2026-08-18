@@ -47,6 +47,14 @@
   ENTIÈREMENT à zéro côté YCH lui-même — cohérent avec la corruption déjà documentée de cette
   variété précise (voir plus bas, `_is_plausible_brewing_entry`) ; `app._browse` vérifie
   `any(v > 0 ...)`, pas juste la présence du dict, avant d'afficher la roue.
+- **Variétés similaires (T25 backlog)** : `imported_fields.similar_varieties` — une liste
+  d'uid Contentstack référençant d'autres variétés du MÊME lot Algolia (substituts/similaires
+  curés par YCH lui-même, pas une mesure). `crawl_yakima` construit une table `uid -> variety`
+  (déprefixée) depuis le lot COMPLET avant de résoudre quoi que ce soit (une variété peut
+  référencer une autre plus loin dans la liste), écrit dans `hop_similar` — toujours une
+  variété interne connue, jamais un nom brut hors catalogue (contrairement à BeerMaverick
+  ci-dessous, où la cible peut rester non reconnue). Run réel : 214 relations sur 152 variétés,
+  60/152 ont au moins une suggestion.
 - **Piège de nommage** : les variétés déposées ont un slug `-brand` (`citra-brand`) qui ne
   fusionnerait jamais avec le slug BarthHaas (`citra`). Mais le catalogue a aussi de vrais
   doublons de SKU sans rapport (`perle` ET `perle-per03` coexistent) — `crawl_yakima` ne
@@ -73,7 +81,39 @@
 - Statut : `ingest.crawl_yakima` implémenté. Fragile par construction (clé/index Algolia non
   documentés publiquement, peuvent changer si YCH modifie son frontend).
 
-**Beermaverick** — agrégé, sans API. Utile en recoupement. Non implémenté.
+**BeerMaverick** — https://beermaverick.com/hop/{slug}/ (T25 backlog)
+- **Réexaminé et RETENU (2026-08, décision utilisateur)**, après avoir d'abord été écarté
+  (voir `docs/BACKLOG.md` pour l'historique de cette réserve initiale). La réserve portait sur
+  leur endpoint interne `/api/js/?hop=<id>`, explicitement documenté par eux comme "internal
+  use" (pas d'accès public officiel). Revérifié en direct : LA MÊME donnée (pairings ET
+  substitutions) est en fait déjà présente dans le HTML statique servi normalement par chaque
+  page produit `beermaverick.com/hop/{slug}/` — un `<script>` Chart.js embarqué pour les
+  pairings, une simple `<ul><li>` pour les substitutions. Aucun besoin de l'endpoint interne :
+  accès identique en nature à BarthHaas (HTML rendu côté serveur, `requests` seul suffit).
+  `robots.txt` : `Disallow:` vide (vérifié) ; sitemap public `beerm-sitemap.xml` (318 pages
+  houblon, énumérables directement).
+- Qualité : AGRÉGATEUR (« nous avons analysé des centaines des bières les plus populaires » —
+  analyse de recettes publiées, pas une mesure de labo indépendante comme BarthHaas/Yakima).
+  Affiché en GUI avec cette réserve systématiquement à côté de la donnée, jamais mélangé aux
+  couches de score (`matching`).
+- **Deux relations distinctes sur la même page, toutes deux implémentées** :
+  - « Hop Pairings » : fréquence RELATIVE (pas un pourcentage) des houblons les plus souvent
+    utilisés ensemble dans les recettes qu'ils ont analysées. Section absente (pas juste vide)
+    sur les variétés à faible volume de recettes — vérifié en direct sur Admiral. Écrit dans
+    `hop_pairings` (`parsers.parse_beermaverick_pairings`).
+  - « Hop Substitutions » : choix éditorial de brasseurs expérimentés (pas une fréquence).
+    Toujours présente quand la page existe, y compris pour des variétés à faible volume
+    (Admiral en a 3). Écrit dans `hop_substitutions` (`parsers.parse_beermaverick_substitutions`).
+- **Réconciliation par nom normalisé** (`ingest._normalize_hop_key`/`_resolve_hop_variety`,
+  tolère ®/™/©, « Brand », « NZ Hops », « US »...) : sur les 318 pages du sitemap, **143/203**
+  de nos variétés ont une page correspondante (mesuré) — les 175 pages BeerMaverick sans
+  équivalent chez nous sont simplement ignorées, aucun houblon fabriqué. Le houblon-cible d'une
+  substitution est réconcilié via le slug fourni par leur propre lien (`/hop/{slug}/`, fiable,
+  direct) ; le houblon-cible d'un pairing seulement via son nom affiché (leur graphique Chart.js
+  ne fournit pas de slug) — `paired_variety`/`substitute_variety` restent `NULL` si non
+  reconnus, mais `paired_name`/`substitute_name` (texte brut) sont TOUJOURS renseignés, rien
+  n'est perdu silencieusement.
+- Statut : `ingest.ingest_beermaverick` IMPLÉMENTÉ.
 
 ## Côté note (ingrédient → molécules)
 

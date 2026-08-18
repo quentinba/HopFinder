@@ -206,8 +206,33 @@ couvre bien plus de composés aromatiques par aliment).
   `p-menthatrien-2-ol` confirmé ailleurs) ne répond sur aucune variante essayée — probablement
   absent de PubChem. Coder un CID à la main ici serait une supposition non vérifiable, pas une
   donnée comme `reference.ALIASES`. Ne pas retenter sans nouvelle piste.
-- **Licence** : le CODE est MIT ; FooDB et FlavorDB2 sont NON COMMERCIALES. Un usage
-  commercial imposerait de retirer/renégocier ces sources.
+- **BeerMaverick** (T25 backlog) : associations houblon<->houblon, absentes de BarthHaas/
+  Yakima. « Hop Pairings » (fréquence relative d'association dans des recettes publiées,
+  analysées par eux) et « Hop Substitutions » (choix éditorial de brasseurs expérimentés).
+  **Réexaminé et RETENU (2026-08, décision utilisateur)** — une investigation précédente
+  avait écarté BeerMaverick à cause de leur endpoint interne `/api/js/?hop=<id>`,
+  explicitement documenté "internal use" (voir `docs/BACKLOG.md` pour l'historique complet
+  de cette réserve). Revérifié en direct : LA MÊME donnée (pairings ET substitutions) est
+  en fait déjà dans le HTML statique servi normalement par chaque page
+  `beermaverick.com/hop/{slug}/` — exactement comme BarthHaas, aucun besoin de cet endpoint
+  interne. `robots.txt` : `Disallow:` vide (vérifié), sitemap public (`beerm-sitemap.xml`,
+  318 pages houblon). AGRÉGATEUR (analyse de recettes publiées), PAS une mesure de labo
+  indépendante comme BarthHaas/Yakima — GUI affiche systématiquement cette réserve avec la
+  donnée, jamais mélangé aux couches de score (`matching`). Réconciliation par nom normalisé
+  (`ingest._resolve_hop_variety`, tolère ®/™/"Brand"/"NZ Hops"...) : 143/203 de nos variétés
+  ont une page BeerMaverick correspondante (mesuré sur le sitemap complet) ; les pages sans
+  équivalent local sont simplement ignorées, aucun houblon fabriqué. `ingest.ingest_beermaverick`
+  IMPLÉMENTÉ. Écrit `hop_pairings`/`hop_substitutions` (tables dédiées).
+  **En complément, côté Yakima** : `imported_fields.similar_varieties` (curé par YCH
+  lui-même, référencé par uid Contentstack, résolu directement dans `crawl_yakima` contre le
+  lot complet) donne une TROISIÈME relation — similarité/substitut selon Yakima, distincte des
+  deux relations BeerMaverick. Écrit `hop_similar`. Les trois tables/sources sont affichées
+  séparément en GUI (`app._hop_associations`), jamais fusionnées : ce sont trois questions
+  différentes ("quoi de similaire ?" x2 sources vs "quoi d'utilisé ensemble ?").
+- **Licence** : le CODE est MIT ; FooDB et FlavorDB2 sont NON COMMERCIALES. BeerMaverick n'a
+  pas de licence de données explicite publiée — contenu affiché avec attribution de source
+  systématique (GUI), en lecture seule, esprit non-commercial comme le reste du projet. Un
+  usage commercial imposerait de retirer/renégocier ces sources.
 
 ## Caveat validation
 `schema.validate_and_repair` corrige l'inversion myrcène/caryophyllène des datasets
@@ -225,7 +250,10 @@ descripteurs (`matching.contrast(descriptors=[...])`, sans dépendre de `note_de
 GUI : mode `browse` (T5), heatmap de comparaison des descripteurs en `by-descriptor` (T4),
 roue d'arôme quantitative par houblon en `browse` (T26, radar/spider chart — voir la
 section Yakima Chief ci-dessus), libellés de mode conviviaux (T24, `app.MODE_LABELS`,
-purement cosmétique côté GUI, les clés internes/CLI ne changent pas).
+purement cosmétique côté GUI, les clés internes/CLI ne changent pas), associations
+houblon<->houblon en `browse` (T25 : `hop_similar` Yakima + `hop_pairings`/
+`hop_substitutions` BeerMaverick, réexaminé et retenu — voir la section BeerMaverick
+ci-dessus). `ingest.ingest_beermaverick` IMPLÉMENTÉ.
 `combine()` (NNLS) implémenté, amélioré (T10), puis RETIRÉ (2026-08-12) — voir la section
 « But » en haut de ce fichier pour le détail de la décision. Option `--biotransform`
 implémentée puis RETIRÉE le même jour (bug de double comptage, voir la section

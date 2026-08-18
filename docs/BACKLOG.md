@@ -93,6 +93,23 @@ l'implémentation ([ ] à faire, [x] fait — voir le commit associé).
   abandonné). 94/151 variétés Yakima couvertes ; BarthHaas n'a pas cette
   donnée, rien affiché pour les variétés non couvertes.
 
+- [x] **T25 — Associations houblon<->houblon en `browse`**
+  Demandé : reproduire les « Hop Pairings » BeerMaverick. Trois relations
+  distinctes implémentées, chacune affichée avec sa propre source (demande
+  explicite de l'utilisateur — jamais présentées comme interchangeables) :
+  **Variétés similaires** (Yakima, `imported_fields.similar_varieties`, curé
+  par YCH, table `hop_similar`) ; **Associations fréquentes en recette**
+  (BeerMaverick, fréquence relative dans des recettes publiées, table
+  `hop_pairings`) ; **Substitutions suggérées** (BeerMaverick, choix éditorial
+  de brasseurs, table `hop_substitutions`). BeerMaverick avait d'abord été
+  écarté (réserve d'accès sur leur endpoint interne) puis réexaminé et retenu
+  après avoir trouvé que la même donnée est déjà dans le HTML statique de
+  chaque page produit — voir l'entrée « Sources de données additionnelles »
+  ci-dessous pour l'historique complet, et `docs/DATA_SOURCES.md` pour le
+  détail d'implémentation. Réconciliation par nom normalisé
+  (`ingest._resolve_hop_variety`) : 143/203 de nos variétés ont une page
+  BeerMaverick correspondante.
+
 ## Sources de données additionnelles (recherche)
 
 - **Investigué à nouveau, PAS retenu — Hopsteiner (shop.hopsteiner.com)**.
@@ -119,13 +136,21 @@ l'implémentation ([ ] à faire, [x] fait — voir le commit associé).
   (sitemap, API publique retrouvée) ou un besoin réel de 3e corroboration
   des descripteurs.
 
-- **Investigué, PAS retenu — BeerMaverick** (beermaverick.com). Endpoint JS
-  interne trouvé (`/api/js/?hop=<id>`) mais explicitement documenté par eux
-  comme "internal use" (pas d'accès public officiel) ; de plus, c'est un
+- **Investigué, initialement PAS retenu, puis RÉEXAMINÉ ET RETENU (T25, 2026-08,
+  décision utilisateur) — BeerMaverick** (beermaverick.com). Verdict initial :
+  endpoint JS interne trouvé (`/api/js/?hop=<id>`) mais explicitement documenté
+  par eux comme "internal use" (pas d'accès public officiel) ; de plus, c'est un
   agrégateur (compile depuis la littérature producteur, pas une mesure labo
-  indépendante) — sous le niveau de confiance de BarthHaas/Yakima. Cohérent
-  avec la mention déjà présente dans README ("agrégé, sans API... non
-  implémenté"). Pas de scraping tant que ces deux réserves ne sont pas levées.
+  indépendante) — sous le niveau de confiance de BarthHaas/Yakima. Pas de
+  scraping tant que ces deux réserves n'étaient pas levées.
+  **Réserve d'accès levée à la revérification** : la donnée qui motivait cette
+  investigation (pairings + substitutions) est en fait DÉJÀ dans le HTML statique
+  servi normalement par chaque page `beermaverick.com/hop/{slug}/` — pas besoin
+  de l'endpoint interne du tout, `robots.txt` autorise tout, sitemap public.
+  **Réserve de qualité maintenue mais pas bloquante** : toujours un agrégateur,
+  pas une mesure de labo — affiché en GUI avec cette réserve systématiquement,
+  jamais mélangé aux couches de score. Voir `docs/DATA_SOURCES.md` pour le
+  détail complet de l'implémentation retenue (`ingest.ingest_beermaverick`).
 
 - **Investigué, PAS retenu — John I. Haas "Hops Companion"**
   (johnihaas.com, PDF). Contient de vraies tables de composition par

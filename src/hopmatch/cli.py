@@ -98,6 +98,13 @@ def main(argv=None):
     f2.add_argument("--db", default=DEFAULT_DB)
     f2.add_argument("--sleep", type=float, default=0.3)
 
+    bm = sub.add_parser("ingest-beermaverick",
+                        help="moissonner beermaverick.com (pairings/substitutions houblon<->houblon, "
+                             "agrégateur — pas une mesure de labo)")
+    bm.add_argument("--db", default=DEFAULT_DB)
+    bm.add_argument("--sleep", type=float, default=1.0)
+    bm.add_argument("--limit", type=int)
+
     am = sub.add_parser("amplify", help="cas d'usage : amplify")
     am.add_argument("note")
     am.add_argument("--db", default=DEFAULT_DB)
@@ -156,6 +163,8 @@ def main(argv=None):
         ingest.ingest_foodb(a.db, a.foodb_dir); return 0
     if a.cmd == "ingest-flavordb2":
         ingest.ingest_flavordb2(a.db, sleep=a.sleep); return 0
+    if a.cmd == "ingest-beermaverick":
+        ingest.ingest_beermaverick(a.db, limit=a.limit, sleep=a.sleep); return 0
 
     con = connect(a.db)
     try:

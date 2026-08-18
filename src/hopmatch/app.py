@@ -274,7 +274,9 @@ def _aroma_wheel(intensity: dict[str, float], vocabulary: list[str]):
 def _browse(con):
     """Mode propre à la GUI (pas d'équivalent CLI) : consulter un houblon
     directement — composition + descripteurs + sources — sans passer par
-    amplify/contrast/by-descriptor (T5 backlog)."""
+    amplify/contrast/by-descriptor (T5 backlog). Affiche aussi la roue
+    d'arôme quantitative (T26) et les associations houblon<->houblon
+    (T25, voir `_hop_associations`)."""
     hops, comp, hop_desc, _ = matching.load(con)
     query = st.text_input("Rechercher (nom ou variété)")
     varieties = sorted(hops, key=lambda v: hops[v]["name"].lower())
@@ -317,6 +319,43 @@ def _browse(con):
         st.dataframe(rows, width="stretch", hide_index=True)
     else:
         st.write("Aucune composition enregistrée.")
+
+    st.divider()
+    _hop_associations(con, hops, selected)
+
+
+def _hop_associations(con, hops: dict, selected: str) -> None:
+    """Associations houblon<->houblon (T25 backlog) : trois relations
+    différentes, chacune affichée avec sa propre source — ne jamais les
+    présenter comme interchangeables (similarité YCH != co-usage recette
+    BeerMaverick != choix éditorial BeerMaverick)."""
+    similar = matching.hop_similar_varieties(con, selected)
+    st.write("**Variétés similaires (Yakima)**")
+    if similar:
+        st.write(", ".join(hops[v]["name"] for v in similar if v in hops))
+    else:
+        st.caption("Aucune suggestion Yakima pour cette variété.")
+
+    pairings = matching.hop_pairings(con, selected)
+    st.write("**Associations fréquentes en recette (BeerMaverick — agrégateur, "
+             "analyse de recettes publiées, pas une mesure de labo)**")
+    if pairings:
+        st.dataframe(
+            [{"Houblon": hops[p["variety"]]["name"] if p["variety"] in hops else p["name"],
+              "Fréquence relative": p["frequency"]} for p in pairings],
+            width="stretch", hide_index=True)
+    else:
+        st.caption("Aucune donnée BeerMaverick pour cette variété (volume de "
+                   "recettes insuffisant chez eux, ou variété non couverte).")
+
+    subs = matching.hop_substitutions(con, selected)
+    st.write("**Substitutions suggérées (BeerMaverick — choix éditorial de "
+             "brasseurs expérimentés, pas une mesure)**")
+    if subs:
+        st.write(", ".join(
+            hops[s["variety"]]["name"] if s["variety"] in hops else s["name"] for s in subs))
+    else:
+        st.caption("Aucune donnée BeerMaverick pour cette variété.")
 
 
 _MAX_HEATMAP_HOPS = 12

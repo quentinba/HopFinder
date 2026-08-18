@@ -62,6 +62,44 @@ def test_hop_aroma_intensity_reads_inserted_rows(db):
     db.execute("DELETE FROM hop_aroma_intensity WHERE variety='citra'")
     db.commit()
 
+def test_hop_similar_varieties_empty_without_yakima_data(db):
+    assert matching.hop_similar_varieties(db, "citra") == []
+
+def test_hop_similar_varieties_reads_inserted_rows(db):
+    db.execute("INSERT INTO hop_similar VALUES (?,?,?)", ("citra", "mosaic", "yakima"))
+    db.commit()
+    assert matching.hop_similar_varieties(db, "citra") == ["mosaic"]
+    db.execute("DELETE FROM hop_similar WHERE variety='citra'")
+    db.commit()
+
+def test_hop_pairings_empty_without_beermaverick_data(db):
+    assert matching.hop_pairings(db, "citra") == []
+
+def test_hop_pairings_sorted_by_frequency_desc(db):
+    db.executemany("INSERT INTO hop_pairings VALUES (?,?,?,?,?)", [
+        ("citra", "Simcoe", "simcoe", 27.0, "beermaverick"),
+        ("citra", "Mosaic", "mosaic", 77.0, "beermaverick"),
+        ("citra", "Obscure Hop", None, 5.0, "beermaverick"),  # non réconcilié
+    ])
+    db.commit()
+    r = matching.hop_pairings(db, "citra")
+    assert [p["name"] for p in r] == ["Mosaic", "Simcoe", "Obscure Hop"]
+    assert r[0]["variety"] == "mosaic"
+    assert r[2]["variety"] is None  # nom brut conservé même sans réconciliation
+    db.execute("DELETE FROM hop_pairings WHERE variety='citra'")
+    db.commit()
+
+def test_hop_substitutions_empty_without_beermaverick_data(db):
+    assert matching.hop_substitutions(db, "citra") == []
+
+def test_hop_substitutions_reads_inserted_rows(db):
+    db.execute("INSERT INTO hop_substitutions VALUES (?,?,?,?)",
+              ("citra", "Mosaic", "mosaic", "beermaverick"))
+    db.commit()
+    assert matching.hop_substitutions(db, "citra") == [{"name": "Mosaic", "variety": "mosaic"}]
+    db.execute("DELETE FROM hop_substitutions WHERE variety='citra'")
+    db.commit()
+
 def test_amplify_use_oav_flag_echoed(db):
     r = matching.amplify(db, "_citrus", use_oav=True)
     assert r["use_oav"] is True

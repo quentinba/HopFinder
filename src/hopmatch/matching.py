@@ -115,6 +115,39 @@ def hop_aroma_intensity(con, variety: str) -> dict[str, float]:
         "SELECT descriptor, intensity FROM hop_aroma_intensity WHERE variety=?", (variety,))}
 
 
+def hop_similar_varieties(con, variety: str) -> list[str]:
+    """Variétés similaires/substituts curées par Yakima (T25 backlog,
+    `hop_similar`) — toujours une `variety` de notre propre catalogue (résolue
+    à l'ingestion, voir `ingest.crawl_yakima`), jamais un nom brut hors
+    catalogue. Vide si non couvert (BarthHaas seul, ou pas de suggestion YCH)."""
+    return [r[0] for r in con.execute(
+        "SELECT similar_variety FROM hop_similar WHERE variety=?", (variety,))]
+
+
+def hop_pairings(con, variety: str) -> list[dict]:
+    """Associations fréquentes en recette (T25 backlog, `hop_pairings`,
+    BeerMaverick — AGRÉGATEUR, pas une mesure de labo, à afficher avec cette
+    réserve). Triées par fréquence décroissante. `variety` (clé interne, pour
+    lien cliquable) est None si le nom affiché par BeerMaverick n'a pas pu
+    être réconcilié avec notre catalogue (voir `ingest._resolve_hop_variety`)
+    — `name` (texte brut) reste toujours renseigné."""
+    rows = con.execute(
+        "SELECT paired_name, paired_variety, frequency FROM hop_pairings "
+        "WHERE variety=? ORDER BY frequency DESC", (variety,))
+    return [{"name": r["paired_name"], "variety": r["paired_variety"],
+             "frequency": r["frequency"]} for r in rows]
+
+
+def hop_substitutions(con, variety: str) -> list[dict]:
+    """Substitutions suggérées (T25 backlog, `hop_substitutions`, BeerMaverick
+    — choix éditorial de brasseurs expérimentés, pas une mesure). Même
+    contrat que `hop_pairings` pour `variety`/`name`."""
+    rows = con.execute(
+        "SELECT substitute_name, substitute_variety FROM hop_substitutions WHERE variety=?",
+        (variety,))
+    return [{"name": r["substitute_name"], "variety": r["substitute_variety"]} for r in rows]
+
+
 def _normalize_descriptors(descriptors: list[str]) -> set[str]:
     """Vocabulaire réel `hop_descriptors` (comme `by_descriptor`), pas inventé —
     même normalisation utilisée par `amplify`/`contrast` pour une sélection

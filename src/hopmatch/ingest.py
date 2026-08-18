@@ -17,7 +17,11 @@ RÉEL (tourne ici) :
                            seuils olfactifs bornés à la whitelist Flavornet, accès direct
                            par CID si resolve_pubchem_cids a tourné
   - crawl_yakima         : moissonne yakimachief.com via son index Algolia (réseau ;
-                           requests seul, pas de navigateur — voir docstring)
+                           requests seul, pas de navigateur — voir docstring) — écrit
+                           aussi hop_similar (variétés similaires curées par YCH)
+  - ingest_beermaverick  : moissonne beermaverick.com (réseau ; requests, HTML statique,
+                           pas de navigateur), pairings/substitutions houblon<->houblon
+                           (agrégateur, pas une mesure de labo — voir docstring)
 """
 from __future__ import annotations
 import glob
@@ -384,6 +388,10 @@ def crawl_yakima(out_db: str, limit: int | None = None, timeout: float = 30.0) -
     d'arôme (imported_fields.aromas) — pas de parsing HTML/texte requis pour
     cette source, contrairement à BarthHaas. Voir parsers.parse_yakima_hit.
 
+    Écrit aussi `hop_similar` (T25 backlog) depuis imported_fields.similar_varieties
+    (Yakima uniquement : variétés similaires/substituts curées par YCH lui-même,
+    référencées par uid Contentstack, résolues ici contre le lot complet).
+
     Fragile par nature (clé/index/champs non documentés publiquement, peuvent
     changer sans préavis si YCH modifie son frontend) — si ça casse, ouvrir
     https://www.yakimachief.com/hop-varieties dans un navigateur, onglet réseau,
@@ -427,6 +435,15 @@ def crawl_yakima(out_db: str, limit: int | None = None, timeout: float = 30.0) -
                 return stripped
         return slug
 
+    # uid -> variety (déprefixée), pour résoudre imported_fields.similar_varieties
+    # (T25 backlog) : Contentstack référence les variétés similaires PAR uid,
+    # pas par slug — nécessite le lot complet avant de pouvoir résoudre quoi
+    # que ce soit (une variété peut référencer une autre plus loin dans la liste).
+    uid_to_variety = {
+        hit["uid"]: _dealias((hit.get("url") or "").rsplit("/", 1)[-1])
+        for hit in hits if hit.get("uid")
+    }
+
     stats = {"ok": 0, "repaired": 0, "suspect": 0}
     skipped = 0
     for hit in hits:
@@ -437,9 +454,122 @@ def crawl_yakima(out_db: str, limit: int | None = None, timeout: float = 30.0) -
         conf = _ingest_variety(con, variety, name, region, comp, descriptors, "yakima",
                                aroma_intensity=aroma_intensity)
         stats[conf] += 1
+        for sim in (hit.get("imported_fields") or {}).get("similar_varieties") or []:
+            sim_variety = uid_to_variety.get(sim.get("uid"))
+            if sim_variety and sim_variety != variety:
+                con.execute("INSERT OR REPLACE INTO hop_similar VALUES (?,?,?)",
+                            (variety, sim_variety, "yakima"))
     con.commit(); con.close()
     print(f"  ok={stats['ok']} repaired={stats['repaired']} suspect={stats['suspect']}"
           + (f" | {skipped} sans composition exploitable (ignorées)" if skipped else ""))
+
+
+# --------------------------------------------------------------------------- #
+# BeerMaverick (réseau réel, T25 backlog) — pairing/substitution
+# --------------------------------------------------------------------------- #
+_HOP_NAME_STOPWORDS_RE = re.compile(r"\b(brand|hops?|nz|us|ma)\b")
+
+
+def _normalize_hop_key(s: str) -> str:
+    """Clé de réconciliation nom<->variety, tolérante aux habillages
+    commerciaux (®/™, 'Brand', 'NZ Hops'...) qui diffèrent entre sources —
+    même esprit que la normalisation de descripteurs, appliquée ici aux noms
+    de houblon plutôt qu'aux arômes."""
+    s = s.lower()
+    s = re.sub(r"[®™©]", "", s)
+    s = _HOP_NAME_STOPWORDS_RE.sub("", s)
+    s = re.sub(r"[^a-z0-9]+", "-", s)
+    return re.sub(r"-+", "-", s).strip("-")
+
+
+def _build_hop_name_index(con) -> dict[str, str]:
+    """{clé normalisée: variety} depuis variety ET name — pour réconcilier un
+    slug/nom EXTERNE (BeerMaverick) vers notre propre catalogue, sans jamais
+    fabriquer de houblon : une entrée non reconnue reste non reconnue."""
+    index: dict[str, str] = {}
+    for variety, name in con.execute("SELECT variety, name FROM hops"):
+        index.setdefault(_normalize_hop_key(variety), variety)
+        index.setdefault(_normalize_hop_key(name), variety)
+    return index
+
+
+def _resolve_hop_variety(index: dict[str, str], candidate: str) -> str | None:
+    return index.get(_normalize_hop_key(candidate))
+
+
+def ingest_beermaverick(out_db: str, limit: int | None = None, sleep: float = 1.0,
+                        timeout: float = 30.0) -> None:
+    """
+    beermaverick.com (T25 backlog) : associations houblon<->houblon absentes de
+    BarthHaas/Yakima — « Hop Pairings » (fréquence relative dans des recettes
+    publiées analysées par eux) et « Hop Substitutions » (choix éditorial de
+    brasseurs expérimentés). AGRÉGATEUR, pas une mesure de labo indépendante
+    comme BarthHaas/Yakima — GUI affiche cette réserve, jamais mélangé aux
+    couches de score (`matching`).
+
+    HTML servi normalement côté serveur (`robots.txt` : `Disallow:` vide,
+    vérifié), pas de rempart anti-bot. Une investigation précédente avait
+    écarté BeerMaverick à cause de leur endpoint interne `/api/js/?hop=<id>`,
+    explicitement documenté "internal use" (voir docs/BACKLOG.md) — mais LA
+    MÊME donnée (pairings ET substitutions) est en fait déjà dans le HTML
+    statique de chaque page `/hop/{slug}/`, exactement comme BarthHaas :
+    aucun besoin de cet endpoint. Voir parsers.parse_beermaverick_pairings/
+    parse_beermaverick_substitutions.
+
+    Réconciliation par nom normalisé (`_resolve_hop_variety`) : sur les 318
+    pages du sitemap BeerMaverick, 143/203 de nos variétés ont une page
+    correspondante (mesuré). Les pages BeerMaverick sans équivalent chez nous
+    sont simplement ignorées (skip, pas de houblon fabriqué). Le houblon-cible
+    d'une substitution est réconcilié via le slug BeerMaverick (fiable,
+    fourni par leur propre lien) ; le houblon-cible d'un pairing seulement via
+    son nom affiché (leur graphique ne fournit pas de slug) — `paired_variety`/
+    `substitute_variety` restent NULL si non reconnus, mais `paired_name`/
+    `substitute_name` (texte brut) sont TOUJOURS renseignés, rien n'est perdu.
+    """
+    import time, requests
+    from .schema import connect
+    BASE = "https://beermaverick.com"
+    con = connect(out_db)
+    if not con.execute("SELECT name FROM sqlite_master WHERE name='hops'").fetchone():
+        init_db(con); seed_reference(con); con.commit()
+
+    sitemap = requests.get(f"{BASE}/beerm-sitemap.xml", timeout=timeout,
+                           headers={"User-Agent": "hopmatch/0.1 (research)"}).text
+    slugs = sorted(set(re.findall(r"beermaverick\.com/hop/([a-z0-9-]+)/", sitemap)))
+    if limit:
+        slugs = slugs[:limit]
+    print(f"BeerMaverick : {len(slugs)} pages houblon (sitemap)")
+
+    index = _build_hop_name_index(con)
+    covered = skipped = n_pairings = n_subs = 0
+    for i, slug in enumerate(slugs, 1):
+        variety = _resolve_hop_variety(index, slug)
+        if not variety:
+            skipped += 1
+            continue
+        try:
+            html = requests.get(f"{BASE}/hop/{slug}/", timeout=timeout,
+                                headers={"User-Agent": "hopmatch/0.1 (research)"}).text
+        except Exception as e:  # noqa
+            print(f"  !! {slug}: {e}"); continue
+        for name, freq in parsers.parse_beermaverick_pairings(html):
+            paired = _resolve_hop_variety(index, name)
+            con.execute("INSERT OR REPLACE INTO hop_pairings VALUES (?,?,?,?,?)",
+                        (variety, name, paired, freq, "beermaverick"))
+            n_pairings += 1
+        for sub_slug, sub_name in parsers.parse_beermaverick_substitutions(html):
+            sub_variety = (_resolve_hop_variety(index, sub_slug)
+                          or _resolve_hop_variety(index, sub_name))
+            con.execute("INSERT OR REPLACE INTO hop_substitutions VALUES (?,?,?,?)",
+                        (variety, sub_name, sub_variety, "beermaverick"))
+            n_subs += 1
+        covered += 1
+        if i % 10 == 0:
+            con.commit()
+        time.sleep(sleep)
+    con.commit(); con.close()
+    print(f"  {covered} variétés couvertes ({skipped} pages sans équivalent local), "
+         f"{n_pairings} pairings, {n_subs} substitutions.")
 
 
 def _find_csv(folder: str, name: str) -> str:

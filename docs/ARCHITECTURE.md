@@ -30,6 +30,17 @@ binaire présence/absence. Yakima uniquement (`imported_fields.sensory_values`/
 peuplée pour cette source. Consommée par `matching.hop_aroma_intensity` (helper dédié,
 pas via `matching.load`) et rendue en radar/spider chart dans le mode GUI `browse`.
 
+`hop_similar(variety, similar_variety, source)`, `hop_pairings(variety, paired_name,
+paired_variety, frequency, source)`, `hop_substitutions(variety, substitute_name,
+substitute_variety, source)` : trois associations houblon<->houblon distinctes (T25
+backlog), chacune affichée avec sa propre source en GUI, jamais fusionnées. `hop_similar`
+(Yakima, `imported_fields.similar_varieties`) référence toujours une `variety` connue.
+`hop_pairings`/`hop_substitutions` (BeerMaverick, agrégateur — pas une mesure de labo)
+gardent toujours le nom brut (`paired_name`/`substitute_name`), la `*_variety` réconciliée
+restant `NULL` quand le houblon-cible n'est pas dans notre catalogue (voir
+`ingest._resolve_hop_variety`, normalisation tolérante ®/™/« Brand »). Consommées par
+`matching.hop_similar_varieties`/`hop_pairings`/`hop_substitutions` (helpers dédiés).
+
 `flavornet_compounds(cas, compound, descriptors)` : whitelist odeur-active, distincte
 de `molecules` (couche de matching, avec seuils). Sert uniquement à filtrer FooDB à
 l'ingestion (`ingest_foodb`), jointure par CAS. `ingest_foodb` écrit aussi dans

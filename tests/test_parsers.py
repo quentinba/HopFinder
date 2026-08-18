@@ -316,6 +316,51 @@ def test_parse_yakima_hit_aroma_intensity_falls_back_to_variety_level():
     _, _, _, _, _, aroma_intensity = parsers.parse_yakima_hit(hit)
     assert aroma_intensity == {"earthy": 42.0}
 
+def test_parse_beermaverick_pairings():
+    # gabarit trimmé d'une vraie page beermaverick.com/hop/mosaic/ (vérifié en
+    # direct) : le graphique "Hop Pairings" est un Chart.js embarqué dans le
+    # HTML statique, pas besoin de leur endpoint interne.
+    html = """
+    <h2>Hop Pairings <span class="borderme">with Mosaic Hops</span></h2>
+    <p>...</p>
+    <center><canvas id="commonChart" width="350" height="125"></canvas></center>
+    <script type="pmdelayedscript">
+    var ctx = document.getElementById('commonChart').getContext('2d');
+    var data = {
+    labels: ['Citra ','Simcoe ','El Dorado ','Amarillo ','Galaxy ','Azacca ',],
+    datasets: [{
+    data: [77,27,17,16,16,11,],
+    backgroundColor: ["rgba(46, 134, 193, 1)"],
+    }]
+    }
+    var myBarChart = new Chart(ctx, {type: 'horizontalBar', data: data});
+    </script>
+    """
+    assert parsers.parse_beermaverick_pairings(html) == [
+        ("Citra", 77.0), ("Simcoe", 27.0), ("El Dorado", 17.0),
+        ("Amarillo", 16.0), ("Galaxy", 16.0), ("Azacca", 11.0),
+    ]
+
+def test_parse_beermaverick_pairings_absent_returns_empty():
+    # variétés à faible volume de recettes (ex. Admiral, vérifié en direct) :
+    # la section "Hop Pairings" est absente du HTML, pas juste vide.
+    html = "<h2>Beer Styles using Admiral Hops</h2><p>English IPA & Ale.</p>"
+    assert parsers.parse_beermaverick_pairings(html) == []
+
+def test_parse_beermaverick_substitutions():
+    # gabarit trimmé de la même vraie page Mosaic.
+    html = """
+    <h2><span class="borderme">Mosaic</span> Hop Substitutions</h2>
+    <p>Experienced brewers have chosen the following hop varieties as substitutions of Mosaic:</p>
+    <ul><li><a href="/hop/citra/">Citra</a></li><li><a href="/hop/simcoe/"> Simcoe</a></li></ul>
+    """
+    assert parsers.parse_beermaverick_substitutions(html) == [
+        ("citra", "Citra"), ("simcoe", "Simcoe"),
+    ]
+
+def test_parse_beermaverick_substitutions_absent_returns_empty():
+    assert parsers.parse_beermaverick_substitutions("<p>rien ici</p>") == []
+
 def test_pubchem_name_fallbacks():
     # échantillons réels : CAS non résolus par PubChem, noms Flavornet en cause
     assert parsers.pubchem_name_fallbacks("δ-cadinol") == ["δ-cadinol", "delta-cadinol"]
