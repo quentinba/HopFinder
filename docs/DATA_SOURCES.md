@@ -50,9 +50,14 @@
   MÊME forme produit que la composition retenue (cohérence composition/arôme), repli sur
   `aroma_values` (niveau variété) si aucune entrée `sensory_values` ne correspond. Écrit dans
   `hop_aroma_intensity` (table dédiée, jamais dans `hop_descriptors` qui reste binaire). Run réel
-  (152 variétés) : vocabulaire fixe à 15 catégories (berry, citrus, dried fruit, earthy, floral,
-  grassy, herbal, melon, pomme, spicy, stone fruit, sweet aromatic, tropical, vegetal, woody),
+  (152 variétés) : vocabulaire fixe à 15 catégories (apple, berry, citrus, dried fruit, earthy,
+  floral, grassy, herbal, melon, spicy, stone fruit, sweet aromatic, tropical, vegetal, woody),
   94/151 variétés Yakima couvertes, 12-15/15 catégories par houblon couvert (quasi-complet).
+  **Piège : l'axe "apple" était étiqueté "Pomme" (français) DANS le CMS Yakima lui-même,
+  même sous le filtre `publish_details.locale:"en-us"` (vérifié en direct sur les 153
+  variétés — un seul axe sur 15 concerné, même uid Contentstack réutilisé partout, donc une
+  coquille de saisie source, pas un mélange de locale côté hopmatch). Corrigé par
+  `reference.DESCRIPTOR_ALIASES["pomme"] = "apple"`, signalé par l'utilisateur 2026-08-19.**
   **Un cas dégénéré rencontré et géré** : `admiral` a une entrée `sensory_values` présente mais
   ENTIÈREMENT à zéro côté YCH lui-même — cohérent avec la corruption déjà documentée de cette
   variété précise (voir plus bas, `_is_plausible_brewing_entry`) ; `app._browse` vérifie
@@ -141,6 +146,19 @@
   utilisé pour grapefruit/lemon/lime sous "citrus". Écrit dans `hop_descriptors`
   (source='beermaverick', coexiste avec barthhaas/yakima). Vocabulaire réel total passé de 38 à
   **104 descripteurs**, tous couverts par `CONTRAST_AFFINITY` (vérifié, zéro non-mappé).
+- **Purpose (aromatic/bittering/both), demande utilisateur 2026-08-19** : SEULE source
+  trouvée classant un houblon par usage — ni BarthHaas ni Yakima n'ont ce champ (vérifié en
+  direct sur leurs pages/API ; BarthHaas n'a que "Aroma & Flavor" comme catégorie de
+  PRODUIT DÉRIVÉ, pas d'usage variété). Ligne `<tr><th>Purpose:</th><td>...Aroma|Bittering|
+  Dual...</td></tr>` dans le même tableau "Analyses" HTML statique déjà exploité pour
+  pairings/substitutions/tags — `parsers.parse_beermaverick_purpose`. Vérifié sur 9 houblons
+  connus (Citra=Dual, Warrior/Magnum/Apollo/Bravo/Millennium/Summit=Bittering, Saaz-cz/
+  Hallertau Mittelfrüh/Amarillo=Aroma), cohérent avec l'usage brassicole réel. Mappé vers
+  notre vocabulaire à 3 catégories (`ingest._normalize_beermaverick_purpose` :
+  "Aroma"→"aromatic", "Bittering"→"bittering", "Dual"→"both") et écrit dans `hops.purpose`
+  (nouvelle colonne, pas une table EAV séparée — un seul houblon = un seul purpose, pas
+  multi-source). Run réel (143 variétés couvertes) : 52 aromatic, 20 bittering, 70 both, 52
+  sans donnée.
 - Statut : `ingest.ingest_beermaverick` IMPLÉMENTÉ.
 
 ## Côté note (ingrédient → molécules)

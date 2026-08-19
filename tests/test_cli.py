@@ -24,8 +24,10 @@ def db_path():
     init_db(con)
     con.executemany("INSERT INTO molecules VALUES (?,?,?,?)",
                     [("molx", "x", None, None), ("moly", "y", None, None)])
+    purpose = {"hopa": "aromatic", "hopb": "bittering"}
     for v, desc in (("hopa", ["citrus", "woody"]), ("hopb", ["floral"])):
-        con.execute("INSERT INTO hops VALUES (?,?,?,?)", (v, v.title(), "test", "toy"))
+        con.execute("INSERT INTO hops VALUES (?,?,?,?,?)",
+                    (v, v.title(), "test", "toy", purpose[v]))
         for d in desc:
             con.execute("INSERT INTO hop_descriptors VALUES (?,?,?)", (v, d, "toy"))
     rows = [

@@ -398,6 +398,27 @@ _BM_PAIRINGS_RE = re.compile(
     r"getElementById\('commonChart'\).*?labels:\s*\[(.*?)\].*?data:\s*\[(.*?)\]", re.S)
 _BM_SUBSTITUTIONS_RE = re.compile(r"Hop Substitutions.*?<ul>(.*?)</ul>", re.S)
 _BM_HOP_LINK_RE = re.compile(r'<a href="/hop/([a-z0-9-]+)/"[^>]*>\s*([^<]+?)\s*</a>')
+_BM_PURPOSE_RE = re.compile(r"<th>Purpose:</th>\s*<td>(.*?)</td>", re.S)
+_STRIP_TAGS_RE = re.compile(r"<[^>]+>")
+
+
+def parse_beermaverick_purpose(html: str) -> str | None:
+    """
+    Extrait la ligne « Purpose: Aroma|Bittering|Dual » du tableau
+    « Analyses/Basics » d'une page beermaverick.com/hop/{slug}/ — la SEULE
+    source trouvée qui classe explicitement un houblon par usage (aromatique/
+    amérisant/double-usage) : ni BarthHaas ni Yakima n'exposent ce champ
+    (vérifié en direct sur leurs pages/API respectives, voir CLAUDE.md). Texte
+    brut ("Aroma"/"Bittering"/"Dual"), normalisé à l'ingestion
+    (`ingest._normalize_beermaverick_purpose`) — ce module reste un parseur
+    brut sans connaissance métier, comme les autres `parse_beermaverick_*`.
+    Absent sur certaines pages (page stub/faible volume, comme les
+    substitutions/pairings) -> None, jamais de valeur inventée."""
+    m = _BM_PURPOSE_RE.search(html)
+    if not m:
+        return None
+    text = _STRIP_TAGS_RE.sub("", m.group(1)).strip()
+    return text or None
 
 
 def parse_beermaverick_pairings(html: str) -> list[tuple[str, float]]:

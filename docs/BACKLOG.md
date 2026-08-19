@@ -264,6 +264,60 @@ l'implémentation ([ ] à faire, [x] fait — voir le commit associé).
   présente sous la heatmap de `by-descriptor` (suggéré explicitement par
   l'utilisateur en exemple).
 
+- [x] **T46 — Roue d'arôme : axe "Pomme" en français**
+  Signalé par l'utilisateur : français et anglais mélangés dans la roue
+  d'arôme. Investigué en direct sur l'API Algolia YCH (153 variétés) : PAS un
+  mélange de locale côté hopmatch (`crawl_yakima` filtre déjà strictement
+  `publish_details.locale:"en-us"`) — 14 des 15 axes sont bien en anglais,
+  seul "Pomme" est mal étiqueté DANS le CMS Yakima lui-même, sous la MÊME
+  locale, avec le MÊME uid Contentstack réutilisé identiquement sur ~281
+  variétés (coquille de saisie source unique et cohérente, pas un champ
+  traduit au hasard). Corrigé par un alias ciblé
+  (`reference.DESCRIPTOR_ALIASES["pomme"] = "apple"`), déjà appliqué par le
+  mécanisme d'ingestion existant. 94 lignes stales supprimées puis
+  `crawl-yakima` relancé.
+
+- [x] **T47 — GUI traduite en anglais**
+  Demande utilisateur explicite ; scope confirmé par question de
+  clarification (le texte utilisateur de `app.py` uniquement — labels,
+  captions, warnings, badges ; `cli.py` et tous les commentaires/docstrings,
+  y compris dans `app.py`, restent en français comme le reste du projet).
+  Réécriture complète de `app.py` : tous les libellés/messages ; champs Vega
+  utilisés comme libellés de tooltip (`_aroma_wheel`, `_descriptor_heatmap`)
+  également renommés en anglais, visibles au survol. Voir CLAUDE.md,
+  section Conventions, pour l'exception documentée durablement.
+
+- [x] **T48 — Aromatic/bittering/dual purpose**
+  Demande utilisateur : "I completely forgot something in this app: it's the
+  concept of aromatic vs bittering hops." Recherché sur BarthHaas ET Yakima :
+  aucun des deux n'expose ce classement (vérifié en direct). BeerMaverick
+  seul l'a (`<tr><th>Purpose:</th><td>Aroma|Bittering|Dual</td></tr>`, même
+  tableau HTML déjà exploité pour pairings/tags) — vérifié sur 9 houblons
+  connus, cohérent avec l'usage réel. Écrit dans `hops.purpose` (nouvelle
+  colonne, "aromatic"/"bittering"/"both"/NULL). Affiché en info PRINCIPALE
+  en `browse` (juste sous le nom du houblon) et en colonne colorée
+  (`st.badge`, couleurs sémantiques Streamlit — seul rendu par cellule
+  adapté aux deux thèmes) dans les résultats amplify/contrast. Run réel
+  (143 variétés couvertes) : 52 aromatic, 20 bittering, 70 both, 52 sans
+  donnée. Voir la section BeerMaverick de CLAUDE.md pour le détail complet.
+
+- [x] **T49 — Blends structurés aromatic + bittering**
+  Suite de T48, demande utilisateur explicite : "propose blends with at
+  least 1 aromatic and 1 bittering as a first proposal (n=2) and then
+  propose blends picking only aromatic hops that pairs well with the other
+  aromatic hop (not the bittering)". `matching._pairing_grown_blends` accepte
+  `purpose_by_variety` : si le rôle du houblon de base (taille 1) est connu
+  et unilatéral, la taille 2 cherche explicitement le rôle opposé
+  (`via="complement"`) ; à partir de là, la croissance se restreint aux
+  houblons aromatiques et le pairing BeerMaverick ne regarde que les
+  partenaires aromatiques du blend, jamais l'amérisant. S'arrête dès
+  épuisement du pool aromatique, même avant `max_hops`. Repli silencieux sur
+  la croissance générique (T33/T42/T44) si le rôle de base est inconnu ou
+  qu'aucun candidat complémentaire n'existe. Vérifié en direct sur données
+  réelles (`contrast-blend --descriptors citrus,floral`) : Celeia
+  (aromatic) + Millennium (bittering, complément) à la taille 2, puis
+  seulement des houblons aromatiques/both aux tailles 3-5.
+
 ## Sources de données additionnelles (recherche)
 
 - **Investigué à nouveau, PAS retenu — Hopsteiner (shop.hopsteiner.com)**.

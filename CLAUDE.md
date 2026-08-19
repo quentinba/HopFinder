@@ -212,6 +212,21 @@ avec ce bouton).
   (theta+radius Vega-Lite) ne balayait qu'un demi-cercle par défaut, bug non résolu,
   abandonné pour l'approche polygone. Voir `docs/DATA_SOURCES.md` pour le détail complet.
   `ingest.crawl_yakima` IMPLÉMENTÉ. Fragile (clé/index Algolia non documentés).
+  **Axe "Pomme" corrigé en "apple" (2026-08-19, signalé par l'utilisateur : français et
+  anglais mélangés dans la roue d'arôme).** Investigué en direct sur l'API Algolia réelle
+  (153 variétés) : PAS un mélange de locale côté hopmatch — la requête filtre déjà
+  strictement `publish_details.locale:"en-us"`, une seule locale. Les 14 autres axes sur
+  15 sont bien en anglais ; seul "Pomme" (français) est mal étiqueté DANS le CMS Yakima
+  lui-même, sous la MÊME locale en-us, avec le MÊME uid Contentstack
+  (`cs95db0a8ac5cfd199`) réutilisé identiquement sur les ~281 variétés qui l'ont — une
+  coquille de saisie unique et cohérente côté source, pas un champ traduit au hasard, donc
+  pas d'« version anglaise du site » alternative à cibler. Corrigé par un alias ciblé
+  (`reference.DESCRIPTOR_ALIASES["pomme"] = "apple"`), déjà appliqué par
+  `ingest._ingest_variety` à l'écriture de `hop_aroma_intensity` (mécanisme existant,
+  réutilisé sans changement de code d'ingestion). 94 lignes `descriptor='pomme'` stales
+  supprimées puis `crawl-yakima` relancé : roue d'arôme entièrement anglaise en base
+  (vérifié : `SELECT DISTINCT descriptor FROM hop_aroma_intensity` ne renvoie plus que les
+  15 termes anglais attendus).
 - **FooDB** : source note→molécule. Dump bulk, figé 2020-04-07, licence NON COMMERCIALE.
   `ingest.download_foodb_dump` télécharge+extrait automatiquement le tar.gz
   (`foodb.ca/public/system/downloads/...`, 200 sans authentification, vérifié) si absent
@@ -367,6 +382,48 @@ avec ce bouton).
   deux relations BeerMaverick. Écrit `hop_similar`. Les trois tables/sources sont affichées
   séparément en GUI (`app._hop_associations`), jamais fusionnées : ce sont trois questions
   différentes ("quoi de similaire ?" x2 sources vs "quoi d'utilisé ensemble ?").
+
+  **`hops.purpose` (aromatic/bittering/both) ajouté (2026-08-19, décision utilisateur —
+  "the concept of aromatic vs bittering hops").** Cherché explicitement sur BarthHaas ET
+  Yakima : AUCUN des deux n'expose de classement houblon par usage (vérifié en direct sur
+  leurs pages/API respectives — BarthHaas n'a que "Aroma & Flavor" comme catégorie de
+  PRODUIT DÉRIVÉ, pas d'usage de la variété brute ; Yakima n'a rien d'équivalent dans
+  `imported_fields`). BeerMaverick, en revanche, affiche une ligne « Purpose: Aroma /
+  Bittering / Dual » dans le même tableau HTML statique "Analyses" déjà exploité pour
+  pairings/substitutions/tags — vérifié sur 9 houblons connus (Citra=Dual, Warrior/Magnum/
+  Apollo/Bravo/Millennium/Summit=Bittering, Saaz-cz/Hallertau Mittelfrüh/Amarillo=Aroma),
+  cohérent avec l'usage brassicole réel. `parsers.parse_beermaverick_purpose` extrait le
+  texte brut ; `ingest._normalize_beermaverick_purpose` mappe vers notre vocabulaire à 3
+  catégories (`"Aroma"→"aromatic"`, `"Bittering"→"bittering"`, `"Dual"→"both"` — nom choisi
+  côté hopmatch, pas une retranscription). Écrit dans `hops.purpose` (nouvelle colonne,
+  NULL par défaut — seule BeerMaverick le renseigne, jamais déduit d'un proxy comme l'alpha
+  acide, ce serait fabriquer une donnée). Run réel sur les 143 variétés couvertes par
+  BeerMaverick : 52 aromatic, 20 bittering, 70 both, 52 sans donnée (hors couverture
+  BeerMaverick). Affiché en GUI comme info PRINCIPALE en `browse` (juste sous le nom du
+  houblon, demande utilisateur explicite) et en colonne dans les résultats amplify/contrast
+  (`app._purpose_badge`, couleurs `st.badge` — tokens sémantiques Streamlit, PAS des hex
+  littéraux, seul moyen vérifié de s'adapter aux deux thèmes clair/sombre à la fois).
+
+  **Blends structurés par purpose (`matching._pairing_grown_blends`, paramètre
+  `purpose_by_variety`)** : demande utilisateur explicite — "propose blends with at least 1
+  aromatic and 1 bittering as a first proposal (n=2) and then propose blends picking only
+  aromatic hops that pairs well with the other aromatic hop (not the bittering)". Taille 1
+  = houblon de base (choisi par l'utilisateur, voir T44) ; si son rôle est connu et
+  unilatéral (aromatic OU bittering, jamais "both"), taille 2 cherche explicitement un
+  houblon du rôle OPPOSÉ parmi les candidats (`via="complement"`) — un houblon "both" à la
+  taille 1 satisfait déjà les deux rôles, pas de complément forcé. À partir de là (rôle
+  établi des deux côtés), la croissance se restreint aux houblons AROMATIQUES uniquement
+  (`purpose in {"aromatic","both"}`), et le pairing BeerMaverick ne regarde que les
+  partenaires des houblons AROMATIQUES du blend — jamais l'amérisant, conformément à la
+  demande. S'arrête dès qu'il n'y a plus de candidat aromatique disponible, même avant
+  `max_hops`. Repli SILENCIEUX sur la croissance générique (T33/T42/T44, inchangée) dès que
+  le rôle du houblon de base est inconnu (variété non couverte par BeerMaverick) ou qu'aucun
+  candidat du rôle complémentaire n'existe — jamais d'erreur, jamais un blend plus petit que
+  possible par manque de donnée `purpose`. Vérifié en direct sur données réelles
+  (`contrast-blend --descriptors citrus,floral`) : Celeia (aromatic, meilleur candidat) puis
+  Millennium (bittering, complément) à la taille 2, puis Perle/Falconer's Flight 7Cs/
+  Vanguard (aromatic ou both) aux tailles 3-5 — jamais un second houblon purement
+  amérisant.
 - **Licence** : le CODE est MIT ; FooDB et FlavorDB2 sont NON COMMERCIALES. BeerMaverick n'a
   pas de licence de données explicite publiée — contenu affiché avec attribution de source
   systématique (GUI), en lecture seule, esprit non-commercial comme le reste du projet. Un
@@ -425,6 +482,18 @@ donne, pas celles de Streamlit ; **houblon de base + mélange pertinence/pairing
 d'une cascade top→pairing→couverture (voir section dédiée ci-dessus) ; **bouton
 Browse retiré**, remplacé par des expanders de détail sur place (voir section dédiée
 ci-dessus).
+Batch du 2026-08-19 (3 nouveaux points) : **GUI traduite en anglais** (scope confirmé par
+l'utilisateur : `app.py` uniquement — texte utilisateur, labels/captions/warnings/badges ;
+CLI (`cli.py`) et commentaires/docstrings restent en français, cf. Conventions ci-dessous) ;
+**roue d'arôme incluse dans le détail par houblon** (`app._hop_detail_expanders`, même
+contenu que `browse` — badge purpose, sources, descripteurs, roue, composition — plutôt
+qu'une simple liste de composés, demande utilisateur "same content than what is on the
+browse page") ; **`hops.purpose` (aromatic/bittering/both)** ajouté depuis BeerMaverick,
+affiché en info principale `browse` + colonne colorée `st.badge` en résultats amplify/
+contrast, et blends structurés pour garantir au moins 1 aromatique + 1 amérisant à la
+taille 2 puis ne recruter que des aromatiques ensuite (voir la section BeerMaverick
+ci-dessus pour le détail complet des trois). En cours de ce même batch, corrigé aussi le
+seul axe non-anglais de la roue d'arôme ("Pomme"→"apple", voir section Yakima Chief).
 Reste :
 1. Jointure FooDB/hop_composition au-delà des ~734 composés Flavornet si le vocabulaire
    s'élargit beaucoup (crawl Yakima déjà réel, plus d'aliments FooDB).
@@ -439,6 +508,12 @@ Reste :
 
 ## Conventions
 - Commentaires/docstrings en français (cohérent avec l'existant).
+- **Exception (2026-08-19, décision utilisateur explicite, scope confirmé) : le texte
+  UTILISATEUR de la GUI (`app.py` — labels, captions, warnings, badges, tout ce qui
+  s'affiche dans Streamlit) est en ANGLAIS**, pas en français. Ne s'applique QU'à `app.py` :
+  `cli.py` (sorties `print`) et les commentaires/docstrings de tout le projet, y compris
+  dans `app.py` lui-même, restent en français comme le reste du projet. Avant cette date,
+  toute la GUI était en français — ne pas revenir en arrière sans redemander.
 - Ne jamais fabriquer de données houblon en dur : passer par un parseur + source tracée.
 - `pytest` doit rester vert. Ajouter un test quand on touche un solveur ou un parseur.
 - Commandes : `pip install -e ".[dev]"` ; `pytest -q` ; `hopmatch build` (démo, 4 houblons,

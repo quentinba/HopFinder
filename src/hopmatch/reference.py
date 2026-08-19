@@ -85,6 +85,18 @@ DESCRIPTOR_ALIASES: dict[str, str] = {
     # que de l'écraser) --
     "resin": "resinous", "cannabis": "dank", "black tea": "tea",
     "slightly spicy": "spicy",
+    # -- Yakima Chief (aroma_values/sensory_values, roue d'arôme T26) : un des
+    # 15 axes fixes de leur taxonomie Contentstack est mal étiqueté "Pomme"
+    # (français) au lieu de "Apple", MÊME sous le filtre de requête Algolia
+    # publish_details.locale:"en-us" -- vérifié en direct (2026-08-19,
+    # signalé par l'utilisateur) : ce n'est PAS un mélange de locale côté
+    # hopmatch (une seule requête, un seul filtre en-us, déjà appliqué), mais
+    # une erreur de saisie dans LEUR CMS -- l'entrée taxonomique porte le même
+    # uid Contentstack (cs95db0a8ac5cfd199) sur toutes les variétés qui
+    # l'utilisent, donc une coquille unique et cohérente, pas un champ
+    # aléatoirement traduit. Les 14 autres axes sont bien en anglais (vérifié
+    # sur l'ensemble des 153 variétés du catalogue).
+    "pomme": "apple",
 }
 
 # Carte d'affinités descripteurs pour le MODE CONTRASTE (cas A).

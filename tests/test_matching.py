@@ -295,6 +295,109 @@ def test_pairing_top_n_excludes_low_ranked_partners(db):
         db.execute("DELETE FROM hop_pairings WHERE variety='saazer'")
         db.commit()
 
+# --------------------------------------------------------------------------- #
+# purpose (aromatic/bittering/both) -- blends structurés (décision utilisateur
+# 2026-08-19 : "at least 1 aromatic and 1 bittering as a first proposal (n=2)
+# and then propose blends picking only aromatic hops that pairs well with the
+# other aromatic hop (not the bittering)").
+# --------------------------------------------------------------------------- #
+
+def _cand(variety, covers):
+    return {"variety": variety, "name": variety.title(), "sources": "test", "covers": set(covers)}
+
+def test_purpose_structured_blend_forces_bittering_complement_at_size_two(db):
+    candidates = [_cand("aroma1", {"a"}), _cand("bitter1", {"b"}), _cand("aroma2", {"c"})]
+    purpose = {"aroma1": "aromatic", "bitter1": "bittering", "aroma2": "aromatic"}
+    r = matching._pairing_grown_blends(db, candidates, {"a", "b", "c"}, max_hops=4,
+                                       base_variety="aroma1", purpose_by_variety=purpose)
+    assert [h["variety"] for h in r[0]["hops"]] == ["aroma1"]
+    assert r[0]["hops"][0]["via"] == "chosen"
+    assert [h["variety"] for h in r[1]["hops"]] == ["aroma1", "bitter1"]
+    assert r[1]["hops"][1]["via"] == "complement"
+
+def test_purpose_structured_blend_size_three_plus_aromatic_only(db):
+    # à partir de la taille 3, seuls des houblons aromatiques -- jamais un
+    # deuxième houblon amérisant, même s'il en restait un dans le pool.
+    candidates = [_cand("aroma1", {"a"}), _cand("bitter1", {"b"}), _cand("bitter2", {"d"}),
+                 _cand("aroma2", {"c"})]
+    purpose = {"aroma1": "aromatic", "bitter1": "bittering", "bitter2": "bittering",
+              "aroma2": "aromatic"}
+    r = matching._pairing_grown_blends(db, candidates, {"a", "b", "c", "d"}, max_hops=4,
+                                       base_variety="aroma1", purpose_by_variety=purpose)
+    assert [h["variety"] for h in r[2]["hops"]] == ["aroma1", "bitter1", "aroma2"]
+    assert r[2]["hops"][2]["via"] != "complement"
+    for b in r:
+        purposes_in_blend = [purpose[h["variety"]] for h in b["hops"]]
+        assert purposes_in_blend.count("bittering") <= 1
+
+def test_purpose_structured_blend_stops_when_aromatic_pool_exhausted(db):
+    # deux houblons amérisants disponibles mais un seul aromatique en dehors
+    # de la base -> le blend s'arrête à taille 2 (pas de 3e houblon
+    # amérisant ajouté juste pour atteindre max_hops).
+    candidates = [_cand("aroma1", {"a"}), _cand("bitter1", {"b"}), _cand("bitter2", {"c"})]
+    purpose = {"aroma1": "aromatic", "bitter1": "bittering", "bitter2": "bittering"}
+    r = matching._pairing_grown_blends(db, candidates, {"a", "b", "c"}, max_hops=5,
+                                       base_variety="aroma1", purpose_by_variety=purpose)
+    assert len(r) == 2  # pas de taille 3 : plus aucun candidat aromatique
+
+def test_purpose_structured_blend_dual_purpose_base_skips_forced_complement(db):
+    # un houblon "both" à la base satisfait déjà les deux rôles -> pas de
+    # complément forcé à la taille 2, croissance aromatique directe.
+    candidates = [_cand("dual1", {"a"}), _cand("aroma1", {"b"}), _cand("bitter1", {"c"})]
+    purpose = {"dual1": "both", "aroma1": "aromatic", "bitter1": "bittering"}
+    r = matching._pairing_grown_blends(db, candidates, {"a", "b", "c"}, max_hops=3,
+                                       base_variety="dual1", purpose_by_variety=purpose)
+    assert r[1]["hops"][1]["variety"] == "aroma1"
+    assert r[1]["hops"][1]["via"] != "complement"
+    # "bitter1" (le seul candidat amérisant restant) n'est jamais recruté
+    assert all(h["variety"] != "bitter1" for b in r for h in b["hops"])
+
+def test_purpose_structured_blend_falls_back_when_no_complement_candidate(db):
+    # base aromatique mais AUCUN candidat amérisant dans le pool -> repli
+    # honnête sur la croissance générique, pas d'erreur, pas de blend
+    # tronqué par manque de donnée purpose.
+    candidates = [_cand("aroma1", {"a"}), _cand("aroma2", {"b"})]
+    purpose = {"aroma1": "aromatic", "aroma2": "aromatic"}
+    r = matching._pairing_grown_blends(db, candidates, {"a", "b"}, max_hops=2,
+                                       base_variety="aroma1", purpose_by_variety=purpose)
+    assert [h["variety"] for h in r[1]["hops"]] == ["aroma1", "aroma2"]
+    assert r[1]["hops"][1]["via"] != "complement"
+
+def test_purpose_structured_blend_falls_back_when_base_purpose_unknown(db):
+    # rôle de base inconnu (pas de donnée BeerMaverick pour ce houblon) ->
+    # comportement générique inchangé, même si un AUTRE candidat a un rôle
+    # connu (on n'ancre jamais la structure sur un houblon qu'on n'a pas
+    # choisi comme base).
+    candidates = [_cand("x1", {"a"}), _cand("x2", {"b"})]
+    purpose = {"x2": "aromatic"}  # x1 (la base) absent -> rôle inconnu
+    r = matching._pairing_grown_blends(db, candidates, {"a", "b"}, max_hops=2,
+                                       base_variety="x1", purpose_by_variety=purpose)
+    assert r[1]["hops"][1]["via"] != "complement"
+
+def test_purpose_structured_blend_without_purpose_data_matches_prior_behavior(db):
+    # purpose_by_variety omis (None) -> strictement le comportement générique
+    # préexistant, jamais de via="complement".
+    r = matching.contrast_blend(db, descriptors=["citrus", "floral"], max_hops=4,
+                                base_variety="saazer")
+    all_via = {h["via"] for b in r["blends"] for h in b["hops"]}
+    assert "complement" not in all_via
+
+def test_contrast_blend_wires_real_purpose_data_end_to_end(db):
+    # vérifie le branchement complet (contrast_blend -> matching.load ->
+    # hops.purpose -> _pairing_grown_blends), pas seulement l'unité isolée.
+    db.execute("UPDATE hops SET purpose='aromatic' WHERE variety='saazer'")
+    db.execute("UPDATE hops SET purpose='bittering' WHERE variety='citra'")
+    db.commit()
+    try:
+        r = matching.contrast_blend(db, descriptors=["citrus", "floral"], max_hops=2,
+                                    base_variety="saazer")
+        assert [h["variety"] for h in r["blends"][1]["hops"]] == ["saazer", "citra"]
+        assert r["blends"][1]["hops"][1]["via"] == "complement"
+        assert r["blends"][1]["hops"][1]["purpose"] == "bittering"
+    finally:
+        db.execute("UPDATE hops SET purpose=NULL WHERE variety IN ('saazer','citra')")
+        db.commit()
+
 def test_amplify_falls_back_to_pure_molecular_score_without_descriptors(db):
     # "_passion" n'a pas de note_descriptors (contrairement à "_citrus") : sans
     # garde-fou, le score par défaut plafonnerait à w_mol*100=50 pour un houblon

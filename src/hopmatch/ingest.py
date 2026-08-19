@@ -56,7 +56,9 @@ def _ingest_variety(con, variety, name, region, comp, descriptors, source, repai
         srcs = sorted(set(row[0].split(",")) | {source})
         con.execute("UPDATE hops SET sources=? WHERE variety=?", (",".join(srcs), variety))
     else:
-        con.execute("INSERT INTO hops VALUES (?,?,?,?)", (variety, name, region, source))
+        # purpose=NULL à la création : seul ingest_beermaverick le renseigne
+        # (via UPDATE, après coup) -- aucune autre source ne l'a.
+        con.execute("INSERT INTO hops VALUES (?,?,?,?,?)", (variety, name, region, source, None))
 
     for compound, (vmin, vmax, unit) in comp.items():
         con.execute("INSERT OR REPLACE INTO hop_composition VALUES (?,?,?,?,?,?,?,?)",
@@ -582,6 +584,24 @@ def _normalize_beermaverick_tag(tag: str) -> str | None:
     return reference.DESCRIPTOR_ALIASES.get(d, d)
 
 
+# Vocabulaire brut BeerMaverick ("Aroma"/"Bittering"/"Dual", voir
+# parsers.parse_beermaverick_purpose) -> notre propre vocabulaire à 3
+# catégories (demande utilisateur explicite : "bittering, aromatic and
+# both"). "Dual" -> "both", pas "dual" : nom choisi côté hopmatch, pas une
+# retranscription du libellé source.
+_BEERMAVERICK_PURPOSE_MAP = {"aroma": "aromatic", "bittering": "bittering", "dual": "both"}
+
+
+def _normalize_beermaverick_purpose(raw: str | None) -> str | None:
+    """None si absent ou si la valeur ne fait pas partie des 3 catégories
+    connues (`_BEERMAVERICK_PURPOSE_MAP`) -- jamais deviné depuis un texte
+    inattendu, plutôt laisser `purpose` NULL (comme les autres champs
+    optionnels BeerMaverick)."""
+    if not raw:
+        return None
+    return _BEERMAVERICK_PURPOSE_MAP.get(raw.strip().lower())
+
+
 def ingest_beermaverick(out_db: str, limit: int | None = None, sleep: float = 1.0,
                         timeout: float = 30.0) -> None:
     """
@@ -620,6 +640,12 @@ def ingest_beermaverick(out_db: str, limit: int | None = None, sleep: float = 1.
     Simcoe n'ont PAS ce tag chez eux non plus — cohérent avec l'usage brassicole
     réel). Filtré (`_BEERMAVERICK_TAG_DROPLIST`) puis normalisé
     (`_normalize_beermaverick_tag`) — voir `parsers.parse_beermaverick_tags`.
+
+    Écrit aussi `hops.purpose` (aromatic/bittering/both) depuis la ligne
+    « Purpose: » du tableau Analyses de chaque page — SEULE source trouvée
+    qui classe explicitement un houblon par usage (ni BarthHaas ni Yakima
+    n'ont ce champ, vérifié en direct). Voir
+    `parsers.parse_beermaverick_purpose`/`_normalize_beermaverick_purpose`.
     """
     import time, requests
     from .schema import connect
@@ -636,7 +662,7 @@ def ingest_beermaverick(out_db: str, limit: int | None = None, sleep: float = 1.
     print(f"BeerMaverick : {len(slugs)} pages houblon (sitemap)")
 
     index = _build_hop_name_index(con)
-    covered = skipped = n_pairings = n_subs = n_tags = 0
+    covered = skipped = n_pairings = n_subs = n_tags = n_purpose = 0
     for i, slug in enumerate(slugs, 1):
         variety = _resolve_hop_variety(index, slug)
         if not variety:
@@ -665,13 +691,18 @@ def ingest_beermaverick(out_db: str, limit: int | None = None, sleep: float = 1.
             con.execute("INSERT OR REPLACE INTO hop_descriptors VALUES (?,?,?)",
                         (variety, d, "beermaverick"))
             n_tags += 1
+        purpose = _normalize_beermaverick_purpose(parsers.parse_beermaverick_purpose(html))
+        if purpose is not None:
+            con.execute("UPDATE hops SET purpose=? WHERE variety=?", (purpose, variety))
+            n_purpose += 1
         covered += 1
         if i % 10 == 0:
             con.commit()
         time.sleep(sleep)
     con.commit(); con.close()
     print(f"  {covered} variétés couvertes ({skipped} pages sans équivalent local), "
-         f"{n_pairings} pairings, {n_subs} substitutions, {n_tags} descripteurs.")
+         f"{n_pairings} pairings, {n_subs} substitutions, {n_tags} descripteurs, "
+         f"{n_purpose} purpose (aromatic/bittering/both).")
 
 
 def _find_csv(folder: str, name: str) -> str:

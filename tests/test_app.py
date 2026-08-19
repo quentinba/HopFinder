@@ -31,8 +31,10 @@ def _build_toy_db(path):
     init_db(con)
     con.executemany("INSERT INTO molecules VALUES (?,?,?,?)",
                     [("molx", "x", None, None), ("moly", "y", None, None)])
+    purpose = {"hopa": "aromatic", "hopb": "bittering"}
     for v, desc in (("hopa", ["citrus", "woody"]), ("hopb", ["floral"])):
-        con.execute("INSERT INTO hops VALUES (?,?,?,?)", (v, v.title(), "test", "toy"))
+        con.execute("INSERT INTO hops VALUES (?,?,?,?,?)",
+                    (v, v.title(), "test", "toy", purpose[v]))
         for d in desc:
             con.execute("INSERT INTO hop_descriptors VALUES (?,?,?)", (v, d, "toy"))
     rows = [
@@ -42,6 +44,9 @@ def _build_toy_db(path):
         ("hopb", "total_oil", 1.0, 1.0, "ml_100g", "toy", "ok", ""),
     ]
     con.executemany("INSERT INTO hop_composition VALUES (?,?,?,?,?,?,?,?)", rows)
+    con.executemany("INSERT INTO hop_aroma_intensity VALUES (?,?,?,?)", [
+        ("hopa", "citrus", 80.0, "toy"), ("hopa", "woody", 20.0, "toy"),
+    ])
     con.executemany("INSERT INTO aroma_notes VALUES (?,?,?,?)", [
         ("mynote", "molx", 1.0, "toy"), ("mynote", "moly", 0.5, "toy"),
         # couverture quasi nulle (~1%) : une grosse molécule orpheline (10.0)
@@ -98,10 +103,10 @@ def test_sidebar_shows_db_stats(toy_cwd):
     at = _app()
     at.run()
     assert not at.exception
-    stats_caption = next(c.value for c in at.sidebar.caption if "houblons" in c.value)
-    assert "2 houblons" in stats_caption
+    stats_caption = next(c.value for c in at.sidebar.caption if "hops" in c.value)
+    assert "2 hops" in stats_caption
     assert "2 notes" in stats_caption
-    assert "3 descripteurs" in stats_caption
+    assert "3 descriptors" in stats_caption
 
 def test_amplify_shows_inline_hop_detail_expander_without_navigating(toy_cwd):
     # Remplace l'ancien bouton "ouvrir dans Browse" par ligne de résultat :
@@ -124,6 +129,31 @@ def test_amplify_mode_renders_ranked_table(toy_cwd):
     assert not at.exception
     assert len(at.dataframe) >= 1
 
+def test_amplify_results_table_includes_purpose_column(toy_cwd):
+    # T-purpose backlog (demande utilisateur 2026-08-19) : colonne Purpose
+    # dans le tableau de résultats amplify/contrast -- rendu ligne par ligne
+    # (st.columns + st.badge, pas st.dataframe : seul st.badge s'adapte aux
+    # deux thèmes, voir _render_hop_rows/_purpose_badge).
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("amplify").run()
+    assert not at.exception
+    assert any(c.value == "Purpose" for c in at.caption)
+    assert any("-badge[" in m.value and "Aromatic" in m.value for m in at.markdown)
+
+def test_hop_detail_expander_includes_purpose_badge_and_aroma_wheel(toy_cwd):
+    # T-purpose backlog : "include the aroma wheel as well, basically the
+    # same content than what is on the browse page" -- badge + roue d'arôme
+    # (Vega-Lite, non structuré par AppTest -> vérifié via UnknownElement,
+    # même approche que la heatmap by-descriptor).
+    from streamlit.testing.v1.element_tree import UnknownElement
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("amplify").run()
+    assert not at.exception
+    assert any("-badge[" in m.value for m in at.markdown)
+    assert any(isinstance(n, UnknownElement) for n in at.main)
+
 def test_amplify_blend_base_hop_selector_appears_with_descriptors(toy_cwd):
     # Décision utilisateur (2026-08-19) : houblon de base du blend choisi par
     # l'utilisateur plutôt qu'imposé (le score est souvent homogène).
@@ -142,7 +172,7 @@ def test_amplify_warns_on_low_molecular_coverage(toy_cwd):
     at.sidebar.radio[0].set_value("amplify").run()
     at.sidebar.selectbox[0].set_value("lownote").run()
     assert not at.exception
-    assert any("Couverture moléculaire faible" in w.value for w in at.warning)
+    assert any("Low molecular coverage" in w.value for w in at.warning)
 
 def test_amplify_no_low_coverage_warning_when_coverage_high(toy_cwd):
     # "lownote" trie avant "mynote" alphabétiquement -> sélection explicite,
@@ -152,7 +182,7 @@ def test_amplify_no_low_coverage_warning_when_coverage_high(toy_cwd):
     at.sidebar.radio[0].set_value("amplify").run()
     at.sidebar.selectbox[0].set_value("mynote").run()
     assert not at.exception
-    assert not any("Couverture moléculaire faible" in w.value for w in at.warning)
+    assert not any("Low molecular coverage" in w.value for w in at.warning)
 
 def test_missing_db_shows_error_not_exception():
     # cwd SANS aromahops.db : doit afficher st.error proprement (st.stop()),
@@ -164,7 +194,7 @@ def test_missing_db_shows_error_not_exception():
         at = _app()
         at.run()
         assert not at.exception
-        assert any("introuvable" in e.value for e in at.error)
+        assert any("not found" in e.value for e in at.error)
     finally:
         os.chdir(old_cwd)
 
@@ -178,7 +208,7 @@ def test_contrast_mode_with_manual_descriptors(toy_cwd):
     # cible d'affinité de "citrus" (CONTRAST_AFFINITY) = resinous/woody/herbal ;
     # "woody" est un vrai descripteur de hopa dans la base jouet -> apparaît
     # dans le tableau de résultats plutôt que dans la légende elle-même.
-    assert any("cible d'affinité" in c.value.lower() for c in at.caption)
+    assert any("affinity target" in c.value.lower() for c in at.caption)
     assert len(at.dataframe) >= 1
     assert any("Hopa" in e.label for e in at.expander)  # détail par houblon, sans navigation
     assert at.selectbox(key="contrast_base_hop") is not None
@@ -207,7 +237,7 @@ def test_by_descriptor_mode_shows_comparison_heatmap_for_multiple_hops(toy_cwd):
     at.sidebar.radio[0].set_value("by-descriptor").run()
     at.multiselect[0].select("citrus").select("floral").run()
     assert not at.exception
-    assert any("Comparaison des profils" in c.value for c in at.caption)
+    assert any("Descriptor profile comparison" in c.value for c in at.caption)
     assert any(isinstance(n, UnknownElement) for n in at.main)
 
 def test_by_descriptor_mode_hides_heatmap_for_single_hop(toy_cwd):
@@ -219,7 +249,7 @@ def test_by_descriptor_mode_hides_heatmap_for_single_hop(toy_cwd):
     at.sidebar.radio[0].set_value("by-descriptor").run()
     at.multiselect[0].select("citrus").run()
     assert not at.exception
-    assert not any("Comparaison des profils" in c.value for c in at.caption)
+    assert not any("Descriptor profile comparison" in c.value for c in at.caption)
     assert not any(isinstance(n, UnknownElement) for n in at.main)
 
 def test_browse_mode_shows_hop_composition_and_descriptors(toy_cwd):
@@ -235,6 +265,17 @@ def test_browse_mode_shows_hop_composition_and_descriptors(toy_cwd):
     assert any("citrus" in m.value and "woody" in m.value for m in at.markdown)
     assert len(at.dataframe) >= 1
 
+def test_browse_shows_purpose_badge_as_top_info(toy_cwd):
+    # T-purpose backlog (demande utilisateur explicite : "should appear in
+    # the browser information as a main/top information") -- badge juste
+    # après le nom du houblon, avant région/sources.
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("browse").run()
+    at.selectbox[0].set_value("hopa").run()
+    assert not at.exception
+    assert any("-badge[" in m.value and "Aromatic" in m.value for m in at.markdown)
+
 def test_browse_mode_search_filters_hop_list(toy_cwd):
     at = _app()
     at.run()
@@ -242,8 +283,8 @@ def test_browse_mode_search_filters_hop_list(toy_cwd):
     assert not at.exception
     at.text_input[0].set_value("hopb").run()
     assert not at.exception
-    caption = next(c.value for c in at.caption if "houblon(s)" in c.value)
-    assert "1 houblon(s)" in caption
+    caption = next(c.value for c in at.caption if "hop(s)" in c.value)
+    assert "1 hop(s)" in caption
     # .options renvoie le libellé affiché (format_func), pas le code brut.
     options = at.selectbox[0].options
     assert options == ["Hopb"]

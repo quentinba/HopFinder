@@ -3,8 +3,13 @@ from __future__ import annotations
 import sqlite3
 
 SCHEMA = """
+-- purpose : "aromatic"|"bittering"|"both"|NULL -- seule BeerMaverick classe
+-- explicitement un houblon par usage (« Purpose: Aroma/Bittering/Dual », voir
+-- parsers.parse_beermaverick_purpose) ; ni BarthHaas ni Yakima n'ont ce champ.
+-- NULL = variété non couverte par BeerMaverick (jamais déduit de l'alpha acide
+-- ou d'un autre proxy -- ce serait fabriquer une donnée, voir CLAUDE.md).
 CREATE TABLE hops (
-    variety TEXT PRIMARY KEY, name TEXT, region TEXT, sources TEXT
+    variety TEXT PRIMARY KEY, name TEXT, region TEXT, sources TEXT, purpose TEXT
 );
 CREATE TABLE hop_composition (
     variety TEXT, compound TEXT, vmin REAL, vmax REAL, unit TEXT, source TEXT,

@@ -66,8 +66,8 @@ def test_fix_barthhaas_trademark_slug_missing_h1_leaves_slug_unchanged():
 def test_resolve_hop_variety_matches_by_variety_or_name(tmp_path):
     con = connect(str(tmp_path / "t.db"))
     init_db(con)
-    con.execute("INSERT INTO hops VALUES (?,?,?,?)",
-               ("mosaic-brand", "Mosaic® Brand", "United States", "yakima"))
+    con.execute("INSERT INTO hops VALUES (?,?,?,?,?)",
+               ("mosaic-brand", "Mosaic® Brand", "United States", "yakima", None))
     con.commit()
     index = ingest._build_hop_name_index(con)
     # via le slug BeerMaverick (proche de variety, pas identique)
@@ -101,6 +101,18 @@ def test_normalize_beermaverick_tag_keeps_subfamily_terms_distinct():
     # vrais renommages ci-dessus) -> voir reference.CONTRAST_AFFINITY.
     assert ingest._normalize_beermaverick_tag("raspberry") == "raspberry"
     assert ingest._normalize_beermaverick_tag("black_pepper") == "black pepper"
+
+def test_normalize_beermaverick_purpose_maps_known_values():
+    assert ingest._normalize_beermaverick_purpose("Aroma") == "aromatic"
+    assert ingest._normalize_beermaverick_purpose("Bittering") == "bittering"
+    assert ingest._normalize_beermaverick_purpose("Dual") == "both"
+    # insensible à la casse (texte brut extrait du HTML, pas normalisé en amont)
+    assert ingest._normalize_beermaverick_purpose("dual") == "both"
+
+def test_normalize_beermaverick_purpose_unknown_or_absent_returns_none():
+    assert ingest._normalize_beermaverick_purpose(None) is None
+    assert ingest._normalize_beermaverick_purpose("") is None
+    assert ingest._normalize_beermaverick_purpose("Noble") is None
 
 def test_build_cas_to_hop_name_from_pubchem_cids_table():
     from hopmatch.schema import connect, init_db

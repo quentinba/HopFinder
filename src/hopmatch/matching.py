@@ -271,7 +271,8 @@ def amplify(con, note: str, w_mol: float = 0.5, w_desc: float = 0.5, use_oav=Fal
         if score > 0:
             ranked.append({"variety": h, "name": hops[h]["name"], "score": round(100 * score, 1),
                            "mol": round(ms, 2), "desc": round(ds, 2),
-                           "why": mol.get(h, (0, []))[1][:4], "sources": hops[h]["sources"]})
+                           "why": mol.get(h, (0, []))[1][:4], "sources": hops[h]["sources"],
+                           "purpose": hops[h].get("purpose")})
     ranked.sort(key=lambda r: -r["score"])
     _, orphan, cov = coverage(profile, comp)
     return {"mode": "amplify", "note": note, "coverage": cov, "orphan": orphan,
@@ -334,7 +335,8 @@ def contrast(con, note: str | None = None, descriptors: list[str] | None = None,
         if hit:
             ranked.append({"variety": h, "name": hops[h]["name"],
                            "score": round(100 * len(hit) / max(len(target), 1), 1),
-                           "contrast_via": sorted(hit), "sources": hops[h]["sources"]})
+                           "contrast_via": sorted(hit), "sources": hops[h]["sources"],
+                           "purpose": hops[h].get("purpose")})
     ranked.sort(key=lambda r: -r["score"])
     return {"mode": "contrast", "note": label, "affinity_target": sorted(target),
            "unmapped": unmapped, "ranked": ranked[:top]}
@@ -371,8 +373,44 @@ def _top_pairing_partners(freq: dict[tuple[str, str], float], variety: str, n: i
     return {b for b, _ in partners[:n]}
 
 
+_AROMATIC_ROLE = {"aromatic", "both"}
+_BITTERING_ROLE = {"bittering", "both"}
+
+
+def _grow_pick(pool: list[dict], partner_source: list[str], blend_varieties: list[str],
+              target: set[str], by_variety: dict, freq: dict[tuple[str, str], float],
+              pairing_top_n: int) -> tuple[dict, str]:
+    """Choisit le prochain houblon à ajouter, en mélangeant pertinence ET
+    pairing (jamais l'un puis l'autre en cascade, cf. `_pairing_grown_blends`) :
+    parmi `pool` (déjà trié par pertinence), ne garde que les candidats
+    figurant dans le top `pairing_top_n` des partenaires BeerMaverick d'AU
+    MOINS UN houblon de `partner_source`, puis prend le plus pertinent de ce
+    sous-ensemble (`via="pairing"`). `partner_source` peut être un
+    sous-ensemble du blend complet (houblons aromatiques uniquement une fois
+    la structure aromatique/amérisante établie — voir T-purpose) ; `covers`/
+    `remaining_target` restent calculés sur `blend_varieties`, le blend
+    complet, quel que soit `partner_source` : le taux de couverture ne doit
+    jamais ignorer un houblon déjà choisi sous prétexte qu'il ne sert pas de
+    source de pairing pour CETTE étape. Repli couverture gloutonne puis
+    pertinence pure si aucun candidat du pool n'est dans ce top-N pairing."""
+    partner_set: set[str] = set()
+    for v in partner_source:
+        partner_set |= _top_pairing_partners(freq, v, pairing_top_n)
+    paired_candidates = [c for c in pool if c["variety"] in partner_set]
+    if paired_candidates:
+        return paired_candidates[0], "pairing"
+    covered_so_far = (set().union(*(by_variety[v]["covers"] for v in blend_varieties))
+                      if blend_varieties else set())
+    remaining_target = target - covered_so_far
+    gain_candidates = [c for c in pool if c["covers"] & remaining_target]
+    if gain_candidates:
+        return max(gain_candidates, key=lambda c: len(c["covers"] & remaining_target)), "coverage"
+    return pool[0], "relevance"
+
+
 def _pairing_grown_blends(con, candidates: list[dict], target: set[str], max_hops: int = 5,
-                          base_variety: str | None = None, pairing_top_n: int = _PAIRING_TOP_N
+                          base_variety: str | None = None, pairing_top_n: int = _PAIRING_TOP_N,
+                          purpose_by_variety: dict[str, str | None] | None = None
                           ) -> list[dict]:
     """
     T33 backlog (décision utilisateur) : propose des blends de TAILLE
@@ -394,35 +432,36 @@ def _pairing_grown_blends(con, candidates: list[dict], target: set[str], max_hop
     sur `candidates[0]` (`via="top"`) si `base_variety` est omis ou absent des
     candidats (usage programmatique/CLI sans sélection).
 
-    Taille k>1 (revirement méthodologique, décision utilisateur 2026-08-19) :
-    **mélange score ET pairing, jamais l'un puis l'autre en cascade.** Version
-    précédente : le houblon de plus haute fréquence de pairing gagnait, quel
-    que soit son score de pertinence — l'utilisateur a signalé qu'à l'usage,
-    ça revenait à choisir par BeerMaverick seul jusqu'à épuisement puis à
-    retomber sur la couverture, pas le mélange voulu. Nouvelle règle : parmi
-    les candidats restants dans l'ordre de pertinence (`pool`, déjà trié),
-    ne garder que ceux qui figurent dans le TOP `pairing_top_n` (dix par
-    défaut, pas "n'importe quelle fréquence positive") des partenaires
-    BeerMaverick d'au moins un houblon déjà dans le blend, puis prendre le
-    PLUS PERTINENT de ce sous-ensemble (`pool` reste trié par score, donc le
-    premier match) — `via="pairing"`. Repli EXPLICITE sur la couverture
-    gloutonne classique (`via="coverage"` : houblon qui ajoute le plus de
-    `target` encore non couvert) si aucun candidat restant n'est dans le top
-    pairing d'un houblon du blend — ne jamais renvoyer un blend plus petit
-    que possible juste par manque de donnée BeerMaverick, mais toujours
-    signaler la provenance de chaque houblon plutôt que de la cacher.
+    Sélection à chaque taille (hors structuration purpose ci-dessous) : voir
+    `_grow_pick` (mélange pertinence+pairing, repli couverture puis
+    pertinence pure).
+
+    `purpose_by_variety` (T-purpose backlog, décision utilisateur 2026-08-19,
+    "aromatic vs bittering hops") : {variety: "aromatic"|"bittering"|"both"|
+    None}, depuis `hops.purpose` (voir CLAUDE.md, section BeerMaverick — SEULE
+    source qui classe un houblon par usage). Quand fourni ET que le houblon de
+    taille 1 a un rôle connu, la croissance devient STRUCTURÉE : taille 2
+    cherche explicitement un houblon du rôle OPPOSÉ (via="complement") pour
+    garantir au moins 1 aromatique + 1 amérisant dès la taille 2 (un houblon
+    "both" à la taille 1 satisfait déjà les deux rôles, pas de complément
+    forcé) ; à partir de là, la croissance se restreint aux houblons
+    AROMATIQUES uniquement (purpose in {"aromatic","both"}), et le pairing
+    BeerMaverick ne regarde que les partenaires des houblons AROMATIQUES déjà
+    dans le blend — jamais de l'amérisant (demande explicite : "picking only
+    aromatic hops that pairs well with the other aromatic hop, not the
+    bittering"). S'arrête si plus aucun candidat aromatique n'est disponible,
+    même avant `max_hops`. Repli SILENCIEUX sur la croissance générique
+    (comportement T33/T42/T44, inchangé) dès que le rôle du houblon de base
+    est inconnu (`purpose_by_variety` absent/vide, ou variété non couverte
+    par BeerMaverick) OU qu'aucun candidat du rôle complémentaire n'existe —
+    jamais d'erreur, jamais un blend plus petit que possible par manque de
+    donnée `purpose`.
 
     Va TOUJOURS jusqu'à `max_hops` (ou épuisement des candidats) — ne s'arrête
     PAS dès couverture complète (décision utilisateur, 2026-08 : voir un blend
     à 5 même quand 1 seul houblon couvre déjà toute la cible reste une info
     utile — l'utilisateur compare lui-même la taille/couverture/authenticité,
-    l'outil ne décide pas à sa place). Quand il ne reste ni pairing top-N ni
-    gain de couverture (cible déjà entièrement couverte, ou plus aucun
-    candidat n'apporte quoi que ce soit de neuf), repli sur le houblon suivant
-    par PERTINENCE globale (`via="relevance"`) plutôt que de s'arrêter — un
-    houblon pertinent de plus reste une proposition valable, signalée comme
-    telle (ni pairing réel, ni gain de couverture). S'arrête seulement quand
-    le pool de candidats est épuisé."""
+    l'outil ne décide pas à sa place)."""
     if not candidates or not target:
         return []
     freq = _hop_pairing_frequencies(con)
@@ -430,32 +469,60 @@ def _pairing_grown_blends(con, candidates: list[dict], target: set[str], max_hop
     pool = list(candidates)
     blend: list[tuple[str, str]] = []  # [(variety, via), ...]
     blends = []
+    purpose_by_variety = purpose_by_variety or {}
+    aromatic_members: set[str] = set()
+    bittering_members: set[str] = set()
+
+    def _assign_role(variety: str) -> None:
+        p = purpose_by_variety.get(variety)
+        if p in _AROMATIC_ROLE:
+            aromatic_members.add(variety)
+        if p in _BITTERING_ROLE:
+            bittering_members.add(variety)
+
     for size in range(1, max_hops + 1):
         if not pool:
             break
+        blend_varieties = [v for v, _ in blend]
         if size == 1:
             if base_variety is not None and base_variety in by_variety:
                 chosen, via = by_variety[base_variety], "chosen"
             else:
                 chosen, via = pool[0], "top"
-        else:
-            partner_set: set[str] = set()
-            for existing_v, _via in blend:
-                partner_set |= _top_pairing_partners(freq, existing_v, pairing_top_n)
-            paired_candidates = [c for c in pool if c["variety"] in partner_set]
-            if paired_candidates:
-                chosen, via = paired_candidates[0], "pairing"  # pool reste trié par pertinence
+            _assign_role(chosen["variety"])
+        elif (aromatic_members or bittering_members) and not (aromatic_members and bittering_members):
+            # rôle établi d'un seul côté (taille 1 aromatique OU amérisant,
+            # jamais "both") -> chercher explicitement le rôle opposé.
+            need_role = _BITTERING_ROLE if not bittering_members else _AROMATIC_ROLE
+            complement_pool = [c for c in pool
+                               if purpose_by_variety.get(c["variety"]) in need_role]
+            if complement_pool:
+                chosen, _ = _grow_pick(complement_pool, blend_varieties, blend_varieties,
+                                       target, by_variety, freq, pairing_top_n)
+                via = "complement"
+                _assign_role(chosen["variety"])
             else:
-                covered_so_far = (set().union(*(by_variety[v]["covers"] for v, _ in blend))
-                                  if blend else set())
-                remaining_target = target - covered_so_far
-                gain_candidates = [c for c in pool if c["covers"] & remaining_target]
-                if gain_candidates:
-                    chosen = max(gain_candidates,
-                                key=lambda c: len(c["covers"] & remaining_target))
-                    via = "coverage"
-                else:
-                    chosen, via = pool[0], "relevance"
+                # aucun houblon du rôle complémentaire parmi les candidats :
+                # repli honnête sur la croissance générique (pas de blend
+                # plus petit que possible par manque de donnée purpose).
+                chosen, via = _grow_pick(pool, blend_varieties, blend_varieties, target,
+                                         by_variety, freq, pairing_top_n)
+        elif aromatic_members and bittering_members:
+            # structure établie des deux côtés -> ne recruter QUE des
+            # houblons aromatiques, pairing scope = houblons AROMATIQUES du
+            # blend uniquement (jamais l'amérisant, demande explicite).
+            restricted_pool = [c for c in pool
+                               if purpose_by_variety.get(c["variety"]) in _AROMATIC_ROLE]
+            if not restricted_pool:
+                break  # plus de houblon aromatique disponible -> on s'arrête ici
+            chosen, via = _grow_pick(restricted_pool, sorted(aromatic_members),
+                                     blend_varieties, target, by_variety, freq, pairing_top_n)
+            _assign_role(chosen["variety"])
+        else:
+            # aucune donnée purpose exploitable (rôle de base inconnu) ->
+            # comportement générique inchangé (T33/T42/T44).
+            chosen, via = _grow_pick(pool, blend_varieties, blend_varieties, target,
+                                     by_variety, freq, pairing_top_n)
         blend.append((chosen["variety"], via))
         pool = [c for c in pool if c["variety"] != chosen["variety"]]
         covered = set().union(*(by_variety[v]["covers"] for v, _ in blend))
@@ -463,6 +530,7 @@ def _pairing_grown_blends(con, candidates: list[dict], target: set[str], max_hop
             "size": size,
             "hops": [{"variety": v, "name": by_variety[v]["name"], "via": via_,
                       "sources": by_variety[v]["sources"],
+                      "purpose": purpose_by_variety.get(v),
                       "covers": sorted(by_variety[v]["covers"])}
                      for v, via_ in blend],
             "covered": sorted(target & covered),
@@ -485,8 +553,11 @@ def contrast_blend(con, note: str | None = None, descriptors: list[str] | None =
     r = contrast(con, note=note, descriptors=descriptors, top=top_candidates)
     target = set(r["affinity_target"])
     candidates = [dict(h, covers=set(h["contrast_via"])) for h in r["ranked"]]
+    hops, _, _, _ = load(con)
+    purpose_by_variety = {v: h.get("purpose") for v, h in hops.items()}
     blends = _pairing_grown_blends(con, candidates, target, max_hops=max_hops,
-                                   base_variety=base_variety)
+                                   base_variety=base_variety,
+                                   purpose_by_variety=purpose_by_variety)
     return {"mode": "contrast_blend", "note": r["note"], "affinity_target": r["affinity_target"],
            "unmapped": r["unmapped"], "blends": blends}
 
@@ -521,7 +592,7 @@ def amplify_blend(con, note: str, w_mol: float = 0.5, w_desc: float = 0.5, use_o
     if not r["has_descriptors"]:
         return {"mode": "amplify_blend", "note": note, "target_descriptors": [],
                "has_descriptors": False, "blends": []}
-    _, _, hop_desc, _ = load(con)
+    hops, _, hop_desc, _ = load(con)
     ndesc = _normalize_descriptors(descriptors) if descriptors else get_note_descriptors(con, note)
     target = set(ndesc)
     candidates = []
@@ -529,8 +600,10 @@ def amplify_blend(con, note: str, w_mol: float = 0.5, w_desc: float = 0.5, use_o
         covers = target & hop_desc.get(h["variety"], set())
         if covers:
             candidates.append(dict(h, covers=covers))
+    purpose_by_variety = {v: h.get("purpose") for v, h in hops.items()}
     blends = _pairing_grown_blends(con, candidates, target, max_hops=max_hops,
-                                   base_variety=base_variety)
+                                   base_variety=base_variety,
+                                   purpose_by_variety=purpose_by_variety)
     return {"mode": "amplify_blend", "note": note, "target_descriptors": sorted(target),
            "has_descriptors": True, "blends": blends}
 
@@ -566,6 +639,7 @@ def by_descriptor(con, selected: list[str], top: int = 10):
         ranked.append({"variety": h, "name": hops[h]["name"],
                        "matched_descriptors": sorted(matched), "all_descriptors": sorted(hd),
                        "compounds": compounds, "sources": hops[h]["sources"],
+                       "purpose": hops[h].get("purpose"),
                        "_rank": (-len(matched), -total_oil, h)})
     ranked.sort(key=lambda r: r["_rank"])
     for r in ranked:

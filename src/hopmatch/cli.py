@@ -53,6 +53,7 @@ def _print_blends(blends):
         print(f"  -- taille {b['size']} --")
         for h in b["hops"]:
             via = {"top": "meilleur candidat", "chosen": "houblon de base (choisi)",
+                  "complement": "rôle opposé (complément aromatique/amérisant)",
                   "pairing": "pertinent + pairing BeerMaverick (top 10)",
                   "coverage": "repli couverture, pas de pairing pertinent",
                   "relevance": "houblon pertinent en plus, rien de neuf à couvrir"}[h["via"]]

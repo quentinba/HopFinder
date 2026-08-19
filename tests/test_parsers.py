@@ -382,6 +382,19 @@ def test_parse_beermaverick_tags():
 def test_parse_beermaverick_tags_absent_returns_empty():
     assert parsers.parse_beermaverick_tags("<p>rien ici</p>") == []
 
+def test_parse_beermaverick_purpose():
+    # gabarit trimmé d'une vraie page beermaverick.com/hop/citra/ (vérifié en
+    # direct, T-purpose backlog).
+    html = """
+    <figure class="wp-block-table"><table>
+    <tr><th>Purpose:</th><td><strong><a href="https://beermaverick.com/types-of-hops-aroma-noble-bittering-dual-purpose/">Dual</a></strong></td></tr>
+    <tr><th>Country:</th><td>United States of America (USA)</td></tr>
+    """
+    assert parsers.parse_beermaverick_purpose(html) == "Dual"
+
+def test_parse_beermaverick_purpose_absent_returns_none():
+    assert parsers.parse_beermaverick_purpose("<p>rien ici</p>") is None
+
 def test_pubchem_name_fallbacks():
     # échantillons réels : CAS non résolus par PubChem, noms Flavornet en cause
     assert parsers.pubchem_name_fallbacks("δ-cadinol") == ["δ-cadinol", "delta-cadinol"]
