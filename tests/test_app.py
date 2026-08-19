@@ -21,6 +21,7 @@ import pytest
 st_testing = pytest.importorskip("streamlit.testing.v1")
 AppTest = st_testing.AppTest
 
+from hopmatch import matching
 from hopmatch.schema import connect, init_db
 
 APP_PATH = os.path.join(os.path.dirname(__file__), "..", "src", "hopmatch", "app.py")
@@ -31,10 +32,24 @@ def _build_toy_db(path):
     init_db(con)
     con.executemany("INSERT INTO molecules VALUES (?,?,?,?)",
                     [("molx", "x", None, None), ("moly", "y", None, None)])
-    purpose = {"hopa": "aromatic", "hopb": "bittering"}
-    for v, desc in (("hopa", ["citrus", "woody"]), ("hopb", ["floral"])):
+    # purpose=None pour hopc (demande utilisateur 2026-08-19 : "AA% mean...
+    # can be used to infer the aromatic/bittering status") : pas de purpose
+    # BeerMaverick réel côté fixture -> repli sur l'acide alpha, voir
+    # matching.resolve_purpose/ALPHA_ACID_BITTERING_THRESHOLD_PCT (7.0%).
+    purpose = {"hopa": "aromatic", "hopb": "bittering", "hopc": None,
+              "twina": None, "twinb": None}
+    # noms/régions custom (pas juste v.title()) pour "twina"/"twinb" : même
+    # nom affiché ("Twins"), région différente -- reproduit le cas réel
+    # Amarillo®/Perle/Saaz (2026-08-19, voir matching._disambiguate_hop_names).
+    custom_name_region = {"twina": ("Twins", "Region A"), "twinb": ("Twins", "Region B")}
+    # descripteur distinct de "citrus"/"woody"/"floral" pour hopc : ne doit
+    # pas interférer avec les tests by-descriptor préexistants qui comptent
+    # sur "citrus" pour ne matcher QUE hopa (single-hop, pas de heatmap).
+    for v, desc in (("hopa", ["citrus", "woody"]), ("hopb", ["floral"]), ("hopc", ["resinous"]),
+                    ("twina", []), ("twinb", [])):
+        name, region = custom_name_region.get(v, (v.title(), "test"))
         con.execute("INSERT INTO hops VALUES (?,?,?,?,?)",
-                    (v, v.title(), "test", "toy", purpose[v]))
+                    (v, name, region, "toy", purpose[v]))
         for d in desc:
             con.execute("INSERT INTO hop_descriptors VALUES (?,?,?)", (v, d, "toy"))
     rows = [
@@ -42,6 +57,12 @@ def _build_toy_db(path):
         ("hopa", "total_oil", 1.0, 1.0, "ml_100g", "toy", "ok", ""),
         ("hopb", "moly", 50, 50, "pct_oil", "toy", "ok", ""),
         ("hopb", "total_oil", 1.0, 1.0, "ml_100g", "toy", "ok", ""),
+        # 14.5% > seuil 7.0% -> inféré "bittering" pour hopc (pas de purpose
+        # BeerMaverick réel dans cette fixture, voir ci-dessus).
+        ("hopc", "alpha_acid", 14.0, 15.0, "pct", "toy", "ok", ""),
+        ("hopc", "beta_acid", 4.0, 5.0, "pct", "toy", "ok", ""),
+        ("hopc", "co_humulone", 20.0, 24.0, "pct", "toy", "ok", ""),
+        ("hopc", "total_oil", 1.5, 1.5, "ml_100g", "toy", "ok", ""),
     ]
     con.executemany("INSERT INTO hop_composition VALUES (?,?,?,?,?,?,?,?)", rows)
     con.executemany("INSERT INTO hop_aroma_intensity VALUES (?,?,?,?)", [
@@ -80,13 +101,14 @@ def _app():
 
 def test_app_loads_with_no_exception_default_home_mode(toy_cwd):
     # "home" (Accueil) est le mode par défaut (premier de la liste du radio) —
-    # front page résumant les 4 outils, avec un bouton "Ouvrir" par outil.
+    # front page résumant les 5 outils (T58 : "Compare Hops" ajouté le
+    # 2026-08-19), avec un bouton "Ouvrir" par outil.
     at = _app()
     at.run()
     assert not at.exception
-    assert at.title[0].value == "hopmatch"
+    assert at.title[0].value == "HopFinder"
     assert at.sidebar.radio[0].value == "home"
-    assert len(at.button) == 4
+    assert len(at.button) == 5
 
 def test_home_open_button_switches_to_target_mode(toy_cwd):
     at = _app()
@@ -99,14 +121,17 @@ def test_home_open_button_switches_to_target_mode(toy_cwd):
 def test_sidebar_shows_db_stats(toy_cwd):
     # T6 backlog : contexte base (nombre de houblons/notes/descripteurs)
     # visible en barre latérale, avec les vrais chiffres de la base jouet
-    # (2 houblons, 2 notes, 2 descripteurs distincts : citrus/woody/floral -> 3).
+    # (5 houblons -- hopa/hopb/hopc + twina/twinb ajoutés pour couvrir
+    # l'inférence de purpose et la désambiguïsation de noms dupliqués,
+    # 2026-08-19 --, 2 notes, 4 descripteurs distincts :
+    # citrus/woody/floral/resinous).
     at = _app()
     at.run()
     assert not at.exception
     stats_caption = next(c.value for c in at.sidebar.caption if "hops" in c.value)
-    assert "2 hops" in stats_caption
+    assert "5 hops" in stats_caption
     assert "2 notes" in stats_caption
-    assert "3 descriptors" in stats_caption
+    assert "4 descriptors" in stats_caption
 
 def test_amplify_shows_inline_hop_detail_expander_without_navigating(toy_cwd):
     # Remplace l'ancien bouton "ouvrir dans Browse" par ligne de résultat :
@@ -165,6 +190,21 @@ def test_amplify_blend_base_hop_selector_appears_with_descriptors(toy_cwd):
     base_select = at.selectbox(key="amplify_base_hop")
     assert "Hopa" in base_select.options
 
+def test_amplify_blend_renders_each_size_in_its_own_container(toy_cwd):
+    # Demande utilisateur (2026-08-19) : "it's visually difficult to
+    # separate blend n1/n2...n5" -- chaque taille de blend rendue dans son
+    # propre st.container(border=True) (voir _render_blends). AppTest
+    # n'expose pas la bordure elle-même (propriété de rendu, pas de donnée
+    # structurée) : on vérifie que le contenu de chaque taille (en-tête +
+    # tableau de houblons) continue de se rendre sans exception après ce
+    # changement de mise en page.
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("amplify").run()
+    at.multiselect[0].select("citrus").run()
+    assert not at.exception
+    assert any("Size 1" in m.value for m in at.markdown)
+
 def test_amplify_warns_on_low_molecular_coverage(toy_cwd):
     # "lownote" (fixture, ~1% de couverture) : voir _build_toy_db.
     at = _app()
@@ -213,6 +253,85 @@ def test_contrast_mode_with_manual_descriptors(toy_cwd):
     assert any("Hopa" in e.label for e in at.expander)  # détail par houblon, sans navigation
     assert at.selectbox(key="contrast_base_hop") is not None
 
+def test_contrast_target_pills_are_preselected_from_affinity_map(toy_cwd):
+    # Demande utilisateur explicite (2026-08-19) : "pre-tick proposed
+    # contrast note but let the user modify them" -- les pills doivent être
+    # pré-cochées avec EXACTEMENT la proposition automatique dès qu'un
+    # descripteur de note est choisi, sans action supplémentaire.
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("contrast").run()
+    at.multiselect[0].select("citrus").run()
+    assert not at.exception
+    # 2 widgets pills désormais : cible d'affinité (T57) + purpose (T61).
+    assert len(at.pills) == 2
+    target_pills = at.pills(key="contrast_target_pills_('citrus',)")
+    assert set(target_pills.options) == set(matching.CONTRAST_CORE_CATEGORIES)
+    assert set(target_pills.value) == {"resinous", "woody", "herbal"}
+
+def test_contrast_purpose_pills_are_preselected_on_both(toy_cwd):
+    # T61, demande utilisateur explicite : "pre-selecting both bittering and
+    # aromatic but... let user add a filter on this purpose".
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("contrast").run()
+    at.multiselect[0].select("citrus").run()
+    assert not at.exception
+    purpose_pills = at.pills(key="contrast_purpose_pills")
+    assert set(purpose_pills.options) == {"aromatic", "bittering"}
+    assert set(purpose_pills.value) == {"aromatic", "bittering"}
+
+def test_contrast_unticking_purpose_pill_excludes_other_role(toy_cwd):
+    # cible "citrus" -> resinous/woody/herbal : hopa (descripteur "woody",
+    # purpose RÉEL "aromatic") ET hopc (descripteur "resinous", pas de
+    # purpose réel mais alpha_acid=14.5% -> INFÉRÉ "bittering", seuil 7.0%)
+    # matchent tous deux avant filtrage. Décocher "bittering" (ne garder que
+    # "aromatic") doit exclure hopc, garder hopa.
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("contrast").run()
+    at.multiselect[0].select("citrus").run()
+    assert not at.exception
+    assert any("Hopa" in e.label for e in at.expander)
+    assert any("Hopc" in e.label for e in at.expander)  # avant filtrage
+    at.pills(key="contrast_purpose_pills").set_value(["aromatic"]).run()
+    assert not at.exception
+    assert any("Hopa" in e.label for e in at.expander)
+    assert not any("Hopc" in e.label for e in at.expander)  # inféré bittering -> exclu
+
+def test_contrast_unticking_a_pill_narrows_results_to_that_note_only(toy_cwd):
+    # Bug signalé par l'utilisateur (Saaz noyé pour "tropical") reproduit
+    # avec la fixture : "citrus" propose resinous/woody/herbal -- hopa
+    # ("woody") ET hopc ("resinous") matchent tous deux au départ. Décocher
+    # "resinous" (ne garder que woody+herbal) doit exclure hopc, ne laissant
+    # que hopa -- exactement le contrôle demandé par l'utilisateur.
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("contrast").run()
+    at.multiselect[0].select("citrus").run()
+    assert not at.exception
+    assert any("Hopc" in e.label for e in at.expander)  # avant : hopc matche via "resinous"
+    at.pills[0].set_value(["woody", "herbal"]).run()
+    assert not at.exception
+    assert any("affinity target: herbal, woody" in c.value.lower() for c in at.caption)
+    assert any("Hopa" in e.label for e in at.expander)
+    assert not any("Hopc" in e.label for e in at.expander)  # exclu : ne matchait que "resinous"
+
+def test_contrast_shows_truncation_caption_when_more_matches_than_shown(toy_cwd):
+    # Signalé par l'utilisateur (2026-08-19) : Saaz introuvable pour
+    # "tropical"/"mango" même en augmentant "Number of results" au max --
+    # la troncature était silencieuse. Cible "citrus" (CONTRAST_AFFINITY)
+    # = resinous/woody/herbal -> hopa ("woody") ET hopc ("resinous")
+    # recoupent tous deux dans la fixture -- avec "Number of results"
+    # ramené à 1, un seul est affiché mais la légende doit signaler les 2.
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("contrast").run()
+    at.multiselect[0].select("citrus").run()
+    at.sidebar.slider[0].set_value(1).run()
+    assert not at.exception
+    assert any("Showing 1 of 2 hops" in c.value for c in at.caption)
+
 def test_by_descriptor_mode_lists_matching_hop(toy_cwd):
     at = _app()
     at.run()
@@ -224,38 +343,75 @@ def test_by_descriptor_mode_lists_matching_hop(toy_cwd):
     assert any("Hopa" in e.label for e in at.expander)
     assert not any("Hopb" in e.label for e in at.expander)
 
-def test_by_descriptor_mode_shows_comparison_heatmap_for_multiple_hops(toy_cwd):
-    # T4 backlog : grille de comparaison (houblon x descripteur) dès que
-    # >=2 houblons recoupent la sélection ; "citrus"+"floral" recoupe hopa
-    # ET hopb dans la base jouet (by_descriptor matche l'union, pas
-    # l'intersection). AppTest ne structure pas les graphiques Vega-Lite
-    # (st.altair_chart) : on vérifie leur présence via UnknownElement, faute
-    # d'accesseur dédié -- au moins 2 désormais (la heatmap ET l'iframe
-    # toujours présente de `app._inject_background`, voir le test suivant).
+def test_by_descriptor_wheel_pills_appear_and_contribute_to_match(toy_cwd):
+    # Demande utilisateur explicite (2026-08-19) : "propose a section here
+    # user can click on the boxes corresponding to aroma wheel flavors" --
+    # st.pills pour le sous-vocabulaire à intensité mesurée (citrus/woody
+    # dans la fixture, voir _build_toy_db). Sélectionner UNIQUEMENT via les
+    # pills (pas le multiselect) doit produire exactement le même filtrage
+    # catégorique qu'avant -- union avec la sélection générale, pas un
+    # mécanisme séparé.
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("by-descriptor").run()
+    assert not at.exception
+    assert len(at.pills) == 1
+    assert set(at.pills[0].options) == {"citrus", "woody"}
+    at.pills[0].set_value(["citrus"]).run()
+    assert not at.exception
+    assert any("Hopa" in e.label for e in at.expander)
+    assert not any("Hopb" in e.label for e in at.expander)
+
+def test_by_descriptor_shows_quantitative_refinement_when_intensity_available(toy_cwd):
+    # hopa a une intensité mesurée pour "citrus" (80.0, voir _build_toy_db) --
+    # la transparence explicite (jamais un réordonnancement silencieux, voir
+    # matching.by_descriptor) doit apparaître dans son expander de détail.
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("by-descriptor").run()
+    at.pills[0].set_value(["citrus"]).run()
+    assert not at.exception
+    assert any("Quantitative refinement: 80/100" in c.value and "citrus" in c.value
+              for c in at.caption)
+
+def test_by_descriptor_heatmap_separates_wheel_and_other_descriptor_sections(toy_cwd):
+    # Addendum 2026-08-19 (retour utilisateur explicite : "separate
+    # descriptors from quantitative aroma wheel values in two section in
+    # the heatmap") -- citrus+floral recoupe hopa (citrus/woody, tous deux
+    # dans hop_aroma_intensity de la fixture -> section roue) ET hopb
+    # (floral, hors du vocabulaire roue de la fixture -> section "other").
+    # Les deux captions/sections doivent apparaître séparément.
     from streamlit.testing.v1.element_tree import UnknownElement
     at = _app()
     at.run()
     at.sidebar.radio[0].set_value("by-descriptor").run()
     at.multiselect[0].select("citrus").select("floral").run()
     assert not at.exception
-    assert any("Descriptor profile comparison" in c.value for c in at.caption)
-    assert len([n for n in at.main if isinstance(n, UnknownElement)]) >= 2
+    assert any("Aroma wheel descriptors" in c.value for c in at.caption)
+    assert any("Other descriptors" in c.value for c in at.caption)
+    # iframe de fond + 2 heatmaps (roue + other) au minimum.
+    assert len([n for n in at.main if isinstance(n, UnknownElement)]) >= 3
 
 def test_by_descriptor_mode_hides_heatmap_for_single_hop(toy_cwd):
     # Un seul houblon recoupé -> rien à comparer, pas de grille (juste
-    # l'expander habituel). Exactement 1 UnknownElement attendu (l'iframe
-    # toujours présente de `app._inject_background`), pas 0 : ce n'est plus
-    # un st.markdown/CSS mais un st.iframe (seul moyen de faire réagir le
-    # fond au sélecteur de thème Streamlit sans dépendre d'un rerun Python,
-    # voir CLAUDE.md) -- présent sur CHAQUE page, indépendamment du mode.
+    # l'expander habituel). Exactement 2 UnknownElement attendus : l'iframe
+    # toujours présente de `app._inject_background` (ce n'est plus un
+    # st.markdown/CSS mais un st.iframe, seul moyen de faire réagir le fond au
+    # sélecteur de thème Streamlit sans dépendre d'un rerun Python, voir
+    # CLAUDE.md) -- présent sur CHAQUE page, indépendamment du mode -- PLUS la
+    # roue d'arôme (st.altair_chart, Vega-Lite non structuré par AppTest) de
+    # hopa dans l'expander de détail, ajoutée au tool by-descriptor le
+    # 2026-08-19 (demande utilisateur : "The aroma wheel is missing from the
+    # from descriptor tool").
     from streamlit.testing.v1.element_tree import UnknownElement
     at = _app()
     at.run()
     at.sidebar.radio[0].set_value("by-descriptor").run()
     at.multiselect[0].select("citrus").run()
     assert not at.exception
-    assert not any("Descriptor profile comparison" in c.value for c in at.caption)
-    assert len([n for n in at.main if isinstance(n, UnknownElement)]) == 1
+    assert not any("Aroma wheel descriptors" in c.value for c in at.caption)
+    assert not any("Other descriptors" in c.value for c in at.caption)
+    assert len([n for n in at.main if isinstance(n, UnknownElement)]) == 2
 
 def test_browse_mode_shows_hop_composition_and_descriptors(toy_cwd):
     # T5 backlog : consulter un houblon (composition + descripteurs) sans
@@ -293,3 +449,110 @@ def test_browse_mode_search_filters_hop_list(toy_cwd):
     # .options renvoie le libellé affiché (format_func), pas le code brut.
     options = at.selectbox[0].options
     assert options == ["Hopb"]
+
+def test_browse_disambiguates_duplicate_hop_names_by_region(toy_cwd):
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("browse").run()
+    assert not at.exception
+    at.text_input[0].set_value("twins").run()  # twina/twinb : même nom, régions différentes
+    assert not at.exception
+    options = at.selectbox[0].options
+    assert set(options) == {"Twins (Region A)", "Twins (Region B)"}
+
+def test_compare_requires_at_least_one_hop(toy_cwd):
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("compare").run()
+    assert not at.exception
+    assert any("Choose at least one hop" in w.value for w in at.markdown)
+
+def test_compare_shows_no_wheel_data_caption_for_hops_without_intensity(toy_cwd):
+    # hopa a une roue d'arôme (citrus/woody, voir _build_toy_db) ; hopc n'en
+    # a aucune -- doit apparaître explicitement dans la légende "no data",
+    # jamais un polygone à 0 fabriqué (T58, 2026-08-19).
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("compare").run()
+    at.multiselect[0].select("Hopa").select("Hopc").run()
+    assert not at.exception
+    caption = next(c.value for c in at.caption if "No quantitative aroma wheel data" in c.value)
+    assert "Hopc" in caption
+    assert "Hopa" not in caption
+
+def test_compare_renders_principal_barplot_when_data_present(toy_cwd):
+    # hopc a alpha_acid/beta_acid/co_humulone/total_oil complets (voir
+    # _build_toy_db) -> le barplot 1 doit se rendre (pas de message "no data").
+    from streamlit.testing.v1.element_tree import UnknownElement
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("compare").run()
+    at.multiselect[0].select("Hopc").run()
+    assert not at.exception
+    assert not any("No principal composition data" in m.value for m in at.markdown)
+    assert len([n for n in at.main if isinstance(n, UnknownElement)]) >= 1
+
+def test_compare_shows_no_detailed_data_message_when_absent(toy_cwd):
+    # hopa/hopc n'ont aucun composé de la liste "détaillée" (myrcène...) dans
+    # la fixture -- message honnête plutôt qu'un graphique vide.
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("compare").run()
+    at.multiselect[0].select("Hopa").select("Hopc").run()
+    assert not at.exception
+    assert any("No detailed composition data" in m.value for m in at.markdown)
+
+def test_browse_shows_key_stats_metrics(toy_cwd):
+    # Demande utilisateur explicite (2026-08-19) : "il manque un élément
+    # principale : les infos les plus importantes de yakima : i) ALPHA ACIDS
+    # % and it's fraction of cohumulone ii) BETA ACIDS % et iii) TOTAL OIL
+    # ml/100g" -- _render_key_stats, hopc porte les 4 valeurs dans la fixture.
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("browse").run()
+    at.selectbox[0].set_value("hopc").run()
+    assert not at.exception
+    metrics = {m.label: m.value for m in at.metric}
+    assert metrics["Alpha acids"] == "14.5%"
+    assert metrics["Beta acids"] == "4.5%"
+    assert metrics["Co-humulone (% of AA)"] == "22%"
+    assert metrics["Total oil (ml/100g)"] == "1.5"
+
+def test_browse_key_stats_show_dash_when_missing(toy_cwd):
+    # hopa n'a aucune composition alpha_acid/beta_acid/co_humulone dans la
+    # fixture -- jamais une valeur inventée, "—" explicite (voir
+    # _render_key_stats).
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("browse").run()
+    at.selectbox[0].set_value("hopa").run()
+    assert not at.exception
+    metrics = {m.label: m.value for m in at.metric}
+    assert metrics["Alpha acids"] == "—"
+    assert metrics["Co-humulone (% of AA)"] == "—"
+
+def test_browse_purpose_badge_shows_inferred_when_no_real_purpose(toy_cwd):
+    # hopc n'a pas de purpose BeerMaverick réel dans la fixture mais un
+    # acide alpha de 14.5% (>> seuil 7.0%) -- doit s'afficher "Inferred:
+    # Bittering", jamais "Unknown" (demande utilisateur explicite : "instead
+    # of unknown for the purpose, use infered:aromatic and infered:bittering").
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("browse").run()
+    at.selectbox[0].set_value("hopc").run()
+    assert not at.exception
+    assert any("-badge[" in m.value and "Inferred: Bittering" in m.value for m in at.markdown)
+
+def test_by_descriptor_expander_shows_inferred_purpose_and_key_stats(toy_cwd):
+    # Même couverture que Browse, mais dans l'expander de détail
+    # by-descriptor (demande utilisateur : "ainsi que dans les détails des
+    # houblons proposés pour les autres outils").
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("by-descriptor").run()
+    at.multiselect[0].select("resinous").run()
+    assert not at.exception
+    assert any("Hopc" in e.label for e in at.expander)
+    assert any("-badge[" in m.value and "Inferred: Bittering" in m.value for m in at.markdown)
+    metrics = {m.label: m.value for m in at.metric}
+    assert metrics["Alpha acids"] == "14.5%"

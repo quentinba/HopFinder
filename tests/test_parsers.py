@@ -193,7 +193,35 @@ def test_parse_yakima_hit_strips_brand_suffix_from_display_name():
         "imported_fields": {"display_name": "Mosaic® Brand", "country_name": "United States"},
     }
     _, name, _, _, _, _ = parsers.parse_yakima_hit(hit)
-    assert name == "Mosaic®"
+    # T59 (2026-08-19) : le ® est aussi retiré désormais (strip_trademark_symbols),
+    # pas seulement "Brand" -- voir tests dédiés ci-dessous.
+    assert name == "Mosaic"
+
+def test_strip_trademark_symbols_removes_registered_and_tm_and_copyright():
+    # T59 (demande utilisateur, 2026-08-19) : "I see some ® or ™ in the name
+    # of some results of hop. Could you remove this from the name..."
+    assert parsers.strip_trademark_symbols("Citra®") == "Citra"
+    assert parsers.strip_trademark_symbols("Ella™") == "Ella"
+    assert parsers.strip_trademark_symbols("Foo©") == "Foo"
+
+def test_strip_trademark_symbols_keeps_real_qualifiers_and_collapses_spaces():
+    # "El Dorado® Hops" -> le symbole disparaît, "Hops" (un vrai qualificatif,
+    # pas un artefact) reste, espaces résultants recollapsés à un seul.
+    assert parsers.strip_trademark_symbols("El Dorado® Hops") == "El Dorado Hops"
+    assert parsers.strip_trademark_symbols("Nectaron® - NZ Hops") == "Nectaron - NZ Hops"
+
+def test_strip_trademark_symbols_leaves_names_without_symbol_untouched():
+    assert parsers.strip_trademark_symbols("Admiral") == "Admiral"
+    assert parsers.strip_trademark_symbols(None) is None
+    assert parsers.strip_trademark_symbols("") == ""
+
+def test_parse_yakima_hit_strips_trademark_symbol_from_display_name():
+    hit = {
+        "url": "/variety/citra",
+        "imported_fields": {"display_name": "Citra®", "country_name": "United States"},
+    }
+    _, name, _, _, _, _ = parsers.parse_yakima_hit(hit)
+    assert name == "Citra"
 
 def test_parse_yakima_hit_prefers_pel02_over_everything():
     # vérifié sur les 152 variétés réelles de l'index Algolia YCH : PEL02

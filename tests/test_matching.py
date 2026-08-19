@@ -1,7 +1,7 @@
 import os, tempfile
 import pytest
 from hopmatch import ingest, matching, reference
-from hopmatch.schema import connect
+from hopmatch.schema import connect, init_db
 
 FIX = os.path.join(os.path.dirname(__file__), "..", "data", "fixtures")
 
@@ -30,6 +30,48 @@ def db():
     con.commit()
     yield con
     con.close()
+
+def test_disambiguate_hop_names_appends_region_only_on_name_collision():
+    # T60 (2026-08-19) : "you either need to remove duplicate or modify the
+    # name base on the provenance" -- la provenance (région) est facile à
+    # retrouver (déjà dans `hops.region`, vérifiée en direct via l'API
+    # Algolia Yakima pour Amarillo/Perle/Saaz/Northern Brewer, T53/T54), donc
+    # modification du nom retenue plutôt que suppression : ces paires sont
+    # deux crops RÉELLEMENT distincts (même cultivar, pays différent), pas
+    # un doublon accidentel -- fusionner perdrait la distinction de terroir.
+    hops = {
+        "amarillo": {"name": "Amarillo®", "region": "United States"},
+        "amarillo-brand-ama04": {"name": "Amarillo®", "region": "Germany"},
+        "citra": {"name": "Citra®", "region": "United States"},  # pas de collision
+    }
+    matching._disambiguate_hop_names(hops)
+    assert hops["amarillo"]["name"] == "Amarillo® (United States)"
+    assert hops["amarillo-brand-ama04"]["name"] == "Amarillo® (Germany)"
+    assert hops["citra"]["name"] == "Citra®"
+
+def test_disambiguate_hop_names_skips_collision_without_region():
+    # Filet de sécurité : si la région manque d'un côté, pas de suffixe
+    # fabriqué -- le nom reste ambigu plutôt qu'un libellé "(None)".
+    hops = {
+        "a": {"name": "Foo", "region": None},
+        "b": {"name": "Foo", "region": "Germany"},
+    }
+    matching._disambiguate_hop_names(hops)
+    assert hops["a"]["name"] == "Foo"
+    assert hops["b"]["name"] == "Foo (Germany)"
+
+def test_load_applies_disambiguation_to_returned_hops(tmp_path):
+    # `load()` doit être la SEULE source de vérité : tout consommateur
+    # (amplify/contrast/by_descriptor/blends/CLI/GUI) voit déjà le nom
+    # désambiguïsé sans code répété ailleurs.
+    con = connect(str(tmp_path / "t.db"))
+    init_db(con)
+    ingest._ingest_variety(con, "nb-us", "Northern Brewer", "United States", {}, [], "yakima")
+    ingest._ingest_variety(con, "nb-de", "Northern Brewer", "Germany", {}, [], "yakima")
+    con.commit()
+    hops, _, _, _ = matching.load(con)
+    assert hops["nb-us"]["name"] == "Northern Brewer (United States)"
+    assert hops["nb-de"]["name"] == "Northern Brewer (Germany)"
 
 def test_merge_multisource(db):
     # Citra doit fusionner β-pinène (yakima) + thiols (barthhaas)
@@ -138,6 +180,97 @@ def test_by_descriptor_normalizes_aliases(db):
 def test_by_descriptor_no_match(db):
     assert matching.by_descriptor(db, ["nonexistent-descriptor"]) == []
 
+def _build_intensity_db(tmp_path):
+    """Base isolée avec `hop_aroma_intensity` (T26, Yakima uniquement) --
+    `build_from_fixtures` n'en peuple pas (seul `crawl_yakima`, réseau réel,
+    l'alimente), donc les tests du tri quantitatif (2026-08-19) ont besoin
+    de leur propre petite base plutôt que du fixture `db` partagé du module."""
+    con = connect(str(tmp_path / "intensity.db"))
+    init_db(con)
+    con.execute("INSERT INTO hops VALUES (?,?,?,?,?)", ("high", "High", "test", "toy", None))
+    con.execute("INSERT INTO hops VALUES (?,?,?,?,?)", ("low", "Low", "test", "toy", None))
+    con.execute("INSERT INTO hops VALUES (?,?,?,?,?)", ("nodata", "NoData", "test", "toy", None))
+    for v in ("high", "low", "nodata"):
+        con.execute("INSERT INTO hop_descriptors VALUES (?,?,?)", (v, "citrus", "toy"))
+    con.executemany("INSERT INTO hop_aroma_intensity VALUES (?,?,?,?)", [
+        ("high", "citrus", 90.0, "yakima"), ("low", "citrus", 10.0, "yakima"),
+        # "nodata" n'a AUCUNE ligne d'intensité (pas de couverture Yakima) --
+        # doit rester classé après "high"/"low" plutôt que traité comme 0.
+    ])
+    con.commit()
+    return con
+
+def test_by_descriptor_quantitative_tier_sorts_by_intensity_within_categorical_tie(tmp_path):
+    # Les 3 houblons recoupent tous "citrus" (même palier catégorique, 1
+    # descripteur) -- le tri quantitatif (roue passée explicitement) départage :
+    # "high" (90) avant "low" (10) avant "nodata" (aucune donnée, jamais
+    # traité comme 0).
+    con = _build_intensity_db(tmp_path)
+    r = matching.by_descriptor(con, ["citrus"], wheel_descriptors=["citrus"])
+    assert [h["variety"] for h in r] == ["high", "low", "nodata"]
+    assert r[0]["quant_score"] == 90.0
+    assert r[1]["quant_score"] == 10.0
+    assert r[2]["quant_score"] is None
+
+def test_by_descriptor_without_wheel_descriptors_has_no_quant_score(tmp_path):
+    # Repli documenté : sans `wheel_descriptors`, aucun raffinement
+    # quantitatif -- comportement catégorique pur (pré-T54), même avec des
+    # houblons ayant des données d'intensité disponibles.
+    con = _build_intensity_db(tmp_path)
+    r = matching.by_descriptor(con, ["citrus"])
+    assert all(h["quant_score"] is None for h in r)
+
+def test_by_descriptor_categorical_match_count_still_takes_priority(tmp_path):
+    # Un houblon avec MOINS de recoupement catégorique ne doit jamais dépasser
+    # un houblon avec plus de descripteurs recoupés, même si son intensité
+    # quantitative est plus haute -- la couche catégorique reste prioritaire.
+    con = _build_intensity_db(tmp_path)
+    con.execute("INSERT INTO hop_descriptors VALUES (?,?,?)", ("low", "woody", "toy"))
+    con.commit()
+    r = matching.by_descriptor(con, ["citrus", "woody"], wheel_descriptors=["citrus"])
+    assert r[0]["variety"] == "low"  # 2 descripteurs recoupés, même avec une intensité plus basse
+    assert set(r[0]["matched_descriptors"]) == {"citrus", "woody"}
+
+def test_by_descriptor_quant_score_only_averages_wheel_descriptors(tmp_path):
+    # Le score quantitatif ne moyenne QUE les descripteurs de la ROUE
+    # (`wheel_descriptors`) présents dans les données du houblon -- jamais
+    # tous les axes de sa roue d'arôme, ni les descripteurs texte.
+    con = _build_intensity_db(tmp_path)
+    con.execute("INSERT INTO hop_descriptors VALUES (?,?,?)", ("high", "woody", "toy"))
+    con.execute("INSERT INTO hop_aroma_intensity VALUES (?,?,?,?)",
+               ("high", "woody", 0.0, "yakima"))
+    con.commit()
+    r = matching.by_descriptor(con, ["citrus"], wheel_descriptors=["citrus"])
+    high = next(h for h in r if h["variety"] == "high")
+    assert high["quant_score"] == 90.0  # pas la moyenne avec "woody"=0
+    assert high["quant_descriptors"] == ["citrus"]
+
+def test_by_descriptor_text_descriptor_is_the_only_categorical_filter(tmp_path):
+    # Bug signalé par l'utilisateur (2026-08-19) en testant en direct roue
+    # [tropical, citrus, floral] + descripteur texte "papaya" : un houblon
+    # recoupant les 3 termes de la roue mais PAS "papaya" ressortait quand
+    # même, mélangé AVANT des houblons "papaya" réels -- "the qualitative
+    # textual descriptor is not a priority over the wheel aroma descriptor
+    # selected". Désormais : `wheel_descriptors` ne filtre JAMAIS quand un
+    # descripteur texte est fourni, seul `selected` (texte) filtre.
+    con = _build_intensity_db(tmp_path)  # high/low/nodata portent tous "citrus"
+    con.execute("INSERT INTO hops VALUES (?,?,?,?,?)", ("papaya-hop", "PapayaHop", "test", "toy", None))
+    con.execute("INSERT INTO hop_descriptors VALUES (?,?,?)", ("papaya-hop", "papaya", "toy"))
+    con.commit()
+    r = matching.by_descriptor(con, ["papaya"], wheel_descriptors=["citrus", "tropical", "floral"])
+    # SEUL "papaya-hop" recoupe le descripteur texte -- "high"/"low"/"nodata"
+    # (qui ne recoupent que la roue, pas "papaya") sont exclus des résultats,
+    # jamais mélangés dedans même avec une intensité "citrus" élevée.
+    assert [h["variety"] for h in r] == ["papaya-hop"]
+
+def test_by_descriptor_falls_back_to_wheel_as_filter_when_no_text_descriptor(tmp_path):
+    # Sans AUCUN descripteur texte (seulement des pills roue cochées),
+    # `wheel_descriptors` sert de repli pour filtrer -- sinon rien ne
+    # filtrerait du tout.
+    con = _build_intensity_db(tmp_path)
+    r = matching.by_descriptor(con, [], wheel_descriptors=["citrus"])
+    assert {h["variety"] for h in r} == {"high", "low", "nodata"}
+
 def test_contrast_requires_note_or_descriptors(db):
     with pytest.raises(ValueError):
         matching.contrast(db)
@@ -162,6 +295,135 @@ def test_contrast_manual_descriptors_generalize_beyond_curated_notes(db):
     # n'importe quel descripteur du vocabulaire réel, note existante ou non.
     r = matching.contrast(db, descriptors=["woody"])
     assert r["affinity_target"] == sorted(set(reference.CONTRAST_AFFINITY["woody"]))
+
+def test_contrast_affinity_target_matches_contrast_default_computation():
+    # Le helper exposé pour la GUI (pré-cocher la proposition, 2026-08-19)
+    # doit calculer EXACTEMENT la même cible que le calcul interne par défaut
+    # de `contrast` -- pas une seconde logique divergente.
+    target, unmapped = matching.contrast_affinity_target(["tropical"])
+    assert target == set(reference.CONTRAST_AFFINITY["tropical"])
+    assert unmapped == []
+
+def test_contrast_affinity_target_reports_unmapped_descriptors():
+    target, unmapped = matching.contrast_affinity_target(["tropical", "not-a-real-descriptor"])
+    assert unmapped == ["not-a-real-descriptor"]
+    assert target == set(reference.CONTRAST_AFFINITY["tropical"])
+
+def test_contrast_target_descriptors_overrides_automatic_affinity(db):
+    # Demande utilisateur explicite (2026-08-19) : "let the user chose which
+    # one he want to keep... rather than imposing the mapping" -- l'exemple
+    # concret donné (Saaz noyé parmi les houblons dank/resinous pour
+    # "tropical") : restreindre la cible à "spicy" seul doit exclure tout
+    # houblon qui ne recoupe QUE dank/resinous, même s'il recoupait la cible
+    # complète auto-calculée.
+    r_auto = matching.contrast(db, descriptors=["citrus"])
+    r_restricted = matching.contrast(db, descriptors=["citrus"], target_descriptors=["woody"])
+    assert r_restricted["affinity_target"] == ["woody"]
+    # cible restreinte : chaque résultat ne peut recouper QUE "woody".
+    for h in r_restricted["ranked"]:
+        assert set(h["contrast_via"]) <= {"woody"}
+    # non-régression : le calcul automatique (sans target_descriptors) reste
+    # inchangé, toujours la cible complète de "citrus".
+    assert r_auto["affinity_target"] == sorted(set(reference.CONTRAST_AFFINITY["citrus"]))
+
+def test_contrast_target_descriptors_empty_list_yields_no_matches(db):
+    # Cas limite explicite : l'utilisateur décoche TOUT -> aucune cible,
+    # aucun résultat (pas une erreur, pas un repli silencieux sur le calcul
+    # automatique -- `[]` est une cible valide, juste vide).
+    r = matching.contrast(db, descriptors=["citrus"], target_descriptors=[])
+    assert r["affinity_target"] == []
+    assert r["ranked"] == []
+
+def test_purpose_matches_filter_both_matches_either_role():
+    # T61 (2026-08-19) : un houblon "both" satisfait le filtre dès qu'AU
+    # MOINS un des deux rôles demandés lui correspond.
+    assert matching._purpose_matches_filter("both", {"aromatic"})
+    assert matching._purpose_matches_filter("both", {"bittering"})
+    assert matching._purpose_matches_filter("both", {"aromatic", "bittering"})
+    assert matching._purpose_matches_filter("aromatic", {"aromatic"})
+    assert not matching._purpose_matches_filter("aromatic", {"bittering"})
+    assert not matching._purpose_matches_filter(None, {"aromatic", "bittering"})
+
+def test_contrast_purposes_filters_by_resolved_purpose(db):
+    # T61, demande utilisateur explicite : "add another menu for purpose...
+    # pre-selecting both bittering and aromatic but... let user add a
+    # filter". Fixture : citra/mosaic/simcoe/saazer matchent tous "citrus,
+    # floral" à score 20.0 (voir test_by_descriptor_categorical_match_count_
+    # still_takes_priority pour les valeurs total_oil) ; aucun n'a de purpose
+    # RÉEL (BeerMaverick) mais tous ont un alpha_acid connu -> purpose
+    # INFÉRÉ (seuil 7.0%) : saazer (4.45%) -> aromatic, citra/mosaic/simcoe
+    # (12-13%) -> bittering. Filtrer sur "aromatic" seul ne doit garder QUE
+    # saazer.
+    r = matching.contrast(db, descriptors=["citrus", "floral"], purposes=["aromatic"])
+    assert [h["variety"] for h in r["ranked"]] == ["saazer"]
+    assert r["total_matches"] == 1
+
+def test_contrast_purposes_none_means_no_filter(db):
+    # Repli documenté : `purposes=None` (par défaut) -- comportement
+    # inchangé, rétrocompatible CLI.
+    r_unfiltered = matching.contrast(db, descriptors=["citrus", "floral"])
+    r_explicit_none = matching.contrast(db, descriptors=["citrus", "floral"], purposes=None)
+    assert ([h["variety"] for h in r_unfiltered["ranked"]] ==
+           [h["variety"] for h in r_explicit_none["ranked"]])
+    assert len(r_unfiltered["ranked"]) == 4
+
+def test_contrast_purposes_excludes_unknown_purpose(db):
+    # Un houblon sans purpose résolvable du tout (ni réel, ni acide alpha
+    # connu pour inférer) doit être EXCLU dès qu'un filtre purpose est actif
+    # -- jamais inclus par défaut sous prétexte d'absence de donnée.
+    db.execute("DELETE FROM hop_composition WHERE variety='saazer' AND compound='alpha_acid'")
+    db.commit()
+    try:
+        r = matching.contrast(db, descriptors=["citrus", "floral"], purposes=["aromatic"])
+        assert r["ranked"] == []
+    finally:
+        db.execute("INSERT INTO hop_composition VALUES (?,?,?,?,?,?,?,?)",
+                  ("saazer", "alpha_acid", 3.9, 5.0, "pct", "barthhaas", "ok", ""))
+        db.commit()
+
+def test_contrast_blend_propagates_purposes_filter(db):
+    # Le pool de candidats du blend doit refléter le même filtre purpose que
+    # le tableau de résultats -- jamais un houblon exclu du tableau mais
+    # présent dans le blend.
+    r = matching.contrast_blend(db, descriptors=["citrus", "floral"], purposes=["aromatic"],
+                                max_hops=1)
+    all_varieties = {h["variety"] for b in r["blends"] for h in b["hops"]}
+    assert all_varieties <= {"saazer"}
+
+def test_contrast_blend_propagates_target_descriptors_override(db):
+    # Le blend doit viser la MÊME cible restreinte que le tableau de
+    # résultats, pas recalculer la cible complète séparément.
+    r = matching.contrast_blend(db, descriptors=["citrus"], target_descriptors=["woody"],
+                                max_hops=1)
+    assert r["affinity_target"] == ["woody"]
+
+def test_contrast_breaks_score_ties_by_total_oil_deterministically(db):
+    # Signalé par l'utilisateur (2026-08-19) : Saaz n'apparaissait jamais
+    # pour "tropical"/"mango" même en augmentant `top` -- root cause : sur
+    # une égalité de score massive (beaucoup de houblons ne recoupant qu'UN
+    # seul descripteur de la cible), l'ordre dépendait de l'itération SQL,
+    # pas d'un critère pertinent. citra/mosaic/simcoe sont tous à score 20.0
+    # sur "citrus,floral" (fixture) -- désormais départagés par total_oil
+    # desc (fixtures : simcoe 1.75 > citra 1.7 > mosaic 1.625 ml/100g),
+    # reproductible d'un appel à l'autre.
+    r = matching.contrast(db, descriptors=["citrus", "floral"])
+    tied = [h["variety"] for h in r["ranked"] if h["score"] == 20.0]
+    assert tied == ["simcoe", "citra", "mosaic"]
+    # déterminisme : deux appels donnent EXACTEMENT le même ordre.
+    r2 = matching.contrast(db, descriptors=["citrus", "floral"])
+    assert [h["variety"] for h in r["ranked"]] == [h["variety"] for h in r2["ranked"]]
+
+def test_contrast_exposes_total_matches_before_truncation(db):
+    # `total_matches` (nouveau, 2026-08-19) permet à la GUI de signaler une
+    # troncature ("showing N of total") au lieu de la laisser silencieuse --
+    # 4 houblons recoupent "citrus,floral" sur la fixture, `top` par défaut
+    # (8) ne tronque rien ici, mais un `top` plus petit doit quand même
+    # rapporter le total réel, pas le nombre tronqué.
+    r_full = matching.contrast(db, descriptors=["citrus", "floral"])
+    assert r_full["total_matches"] == len(r_full["ranked"]) == 4
+    r_truncated = matching.contrast(db, descriptors=["citrus", "floral"], top=2)
+    assert r_truncated["total_matches"] == 4
+    assert len(r_truncated["ranked"]) == 2
 
 def test_contrast_blend_returns_growing_sizes_with_via_provenance(db):
     # T33 backlog : plusieurs tailles de blend (1..max_hops), pas un seul
@@ -232,8 +494,9 @@ def test_contrast_blend_base_variety_overrides_top_pick(db):
     # (plusieurs houblons ex-aequo "meilleur candidat"), donc l'utilisateur
     # choisit lui-même le houblon de base plutôt que `candidates[0]` imposé.
     # Sur "citrus,floral" (fixture), citra/mosaic/simcoe sont tous à 20.0 --
-    # choisir "mosaic" doit être respecté même si citra vient avant en
-    # pertinence pure.
+    # choisir "mosaic" doit être respecté même si un autre houblon (simcoe,
+    # voir le tri secondaire par total_oil dans matching.contrast) vient
+    # avant en pertinence pure.
     r = matching.contrast_blend(db, descriptors=["citrus", "floral"], max_hops=1,
                                 base_variety="mosaic")
     assert r["blends"][0]["hops"][0]["variety"] == "mosaic"
@@ -251,12 +514,15 @@ def test_contrast_blend_mixes_relevance_and_pairing_not_pure_frequency(db):
     # BeerMaverick ne doit plus, seule, décider de l'addition suivante --
     # parmi les candidats dans le TOP-N pairing du houblon de base, il faut
     # prendre le plus PERTINENT, pas celui de plus haute fréquence brute.
-    # simcoe a la fréquence la + haute (99) mais mosaic est plus pertinent
-    # (score 20 vs 20, mais mosaic précède simcoe dans le classement --
-    # cf. test ci-dessus) : mosaic doit gagner malgré sa fréquence + basse.
+    # citra/mosaic/simcoe sont tous à score 20.0 (ex-aequo catégorique) ;
+    # depuis le tri secondaire par total_oil (2026-08-19, voir
+    # matching.contrast), l'ordre de pertinence sur cette cible est
+    # simcoe > citra > mosaic (fixtures : simcoe 1.75 > citra 1.7 > mosaic
+    # 1.625 ml/100g). mosaic a la fréquence la + haute (99) mais simcoe est
+    # plus pertinent : simcoe doit gagner malgré sa fréquence + basse (10).
     db.executemany("INSERT INTO hop_pairings VALUES (?,?,?,?,?)", [
-        ("saazer", "Simcoe", "simcoe", 99.0, "beermaverick"),
-        ("saazer", "Mosaic", "mosaic", 10.0, "beermaverick"),
+        ("saazer", "Mosaic", "mosaic", 99.0, "beermaverick"),
+        ("saazer", "Simcoe", "simcoe", 10.0, "beermaverick"),
     ])
     db.commit()
     try:
@@ -264,7 +530,7 @@ def test_contrast_blend_mixes_relevance_and_pairing_not_pure_frequency(db):
                                     base_variety="saazer")
         assert r["blends"][1]["hops"][0]["variety"] == "saazer"
         second = r["blends"][1]["hops"][1]
-        assert second["variety"] == "mosaic"
+        assert second["variety"] == "simcoe"
         assert second["via"] == "pairing"
     finally:
         db.execute("DELETE FROM hop_pairings WHERE variety='saazer'")
@@ -294,6 +560,40 @@ def test_pairing_top_n_excludes_low_ranked_partners(db):
     finally:
         db.execute("DELETE FROM hop_pairings WHERE variety='saazer'")
         db.commit()
+
+# --------------------------------------------------------------------------- #
+# purpose inféré depuis l'acide alpha (demande utilisateur 2026-08-19 : "AA%
+# mean... can be used to infer the aromatic/bittering status", pour
+# l'affichage GUI uniquement -- jamais pour la structure des blends).
+# --------------------------------------------------------------------------- #
+
+def test_infer_purpose_from_alpha_acid_below_threshold_is_aromatic():
+    assert matching.infer_purpose_from_alpha_acid({"alpha_acid": {"mid": 5.0}}) == "aromatic"
+
+def test_infer_purpose_from_alpha_acid_at_or_above_threshold_is_bittering():
+    assert matching.infer_purpose_from_alpha_acid({"alpha_acid": {"mid": 7.0}}) == "bittering"
+    assert matching.infer_purpose_from_alpha_acid({"alpha_acid": {"mid": 14.0}}) == "bittering"
+
+def test_infer_purpose_from_alpha_acid_none_without_data():
+    assert matching.infer_purpose_from_alpha_acid({}) is None
+    assert matching.infer_purpose_from_alpha_acid({"alpha_acid": {"mid": None}}) is None
+
+def test_resolve_purpose_prefers_real_purpose_over_inference():
+    # même avec un acide alpha qui suggérerait "bittering" (12%), le purpose
+    # RÉEL (BeerMaverick) l'emporte toujours, jamais écrasé par l'inférence.
+    purpose, inferred = matching.resolve_purpose("aromatic", {"alpha_acid": {"mid": 12.0}})
+    assert purpose == "aromatic"
+    assert inferred is False
+
+def test_resolve_purpose_falls_back_to_inference_when_real_purpose_missing():
+    purpose, inferred = matching.resolve_purpose(None, {"alpha_acid": {"mid": 5.0}})
+    assert purpose == "aromatic"
+    assert inferred is True
+
+def test_resolve_purpose_stays_none_without_any_data():
+    purpose, inferred = matching.resolve_purpose(None, {})
+    assert purpose is None
+    assert inferred is False
 
 # --------------------------------------------------------------------------- #
 # purpose (aromatic/bittering/both) -- blends structurés (décision utilisateur

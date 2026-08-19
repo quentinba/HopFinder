@@ -95,6 +95,121 @@ def _ingest_variety(con, variety, name, region, comp, descriptors, source, repai
     return confidence
 
 
+# Alias de région pour la réconciliation cross-source (2026-08-19, demande
+# utilisateur -- signalé sur "Amarillo" en double dans le sélecteur Browse) :
+# BarthHaas et Yakima nomment parfois le même pays différemment ("Great
+# Britain" vs "United Kingdom"). Volontairement TRÈS restreint : ne couvre
+# QUE les libellés vérifiés en direct sur les paires effectivement dupliquées
+# (Challenger/Fuggle/Target) -- ne jamais élargir sans vérifier qu'il s'agit
+# bien du même pays, sous peine de fusionner deux crops RÉELLEMENT distincts
+# (voir _find_variety_by_name_region ci-dessous pour le cas contraire).
+_REGION_ALIASES_FOR_MERGE = {"united kingdom": "great britain"}
+
+
+def _normalize_region_for_merge(region: str | None) -> str | None:
+    if not region:
+        return None
+    r = region.strip().lower()
+    return _REGION_ALIASES_FOR_MERGE.get(r, r)
+
+
+def _find_variety_by_name_region(con, name: str | None, region: str | None) -> str | None:
+    """Résout un doublon cross-source (BarthHaas <-> Yakima) pour la MÊME
+    variété dans la MÊME région, quand les deux sources utilisent des slugs
+    différents pour le même houblon (ex. BarthHaas 'wye-challenger' vs
+    Yakima 'challenger', tous deux "Challenger"/Royaume-Uni) -- root cause
+    vérifiée en direct : aucun mécanisme de réconciliation cross-source
+    n'existait au-delà du slug exact/dépréfixage marque, contrairement à la
+    résolution BeerMaverick (`_resolve_hop_variety`). 5 paires concernées,
+    trouvées en auditant `hops` pour des `name` strictement identiques après
+    ingestion réelle : Challenger, Fuggle, Hallertauer Tradition, Hersbrucker
+    Spät, Target -- toutes MÊME nom ET MÊME région (à l'alias GB/UK près).
+
+    NE fusionne PAS Amarillo/Perle/Saaz/Northern Brewer malgré un nom
+    identique : vérifié en direct sur l'API Algolia Yakima (imported_fields
+    country_code + cultivar) que ce sont deux CROPS RÉELLEMENT distincts du
+    même cultivar, cultivés dans des pays différents (ex. Amarillo VGXP01
+    US **et** Allemagne) -- même famille de cas que Perle US/Allemagne ou
+    Saaz US/Tchéquie, déjà volontairement gardés séparés. La correspondance
+    stricte sur la RÉGION (pas seulement le nom) est donc la garantie
+    explicite de ne jamais fusionner deux régions différentes -- si la
+    région ne correspond pas (ou est absente d'un côté), retourne None."""
+    norm_region = _normalize_region_for_merge(region)
+    if not name or not norm_region:
+        return None
+    target_name = name.strip().lower()
+    for row in con.execute("SELECT variety, name, region FROM hops"):
+        if (row["name"].strip().lower() == target_name
+                and _normalize_region_for_merge(row["region"]) == norm_region):
+            return row["variety"]
+    return None
+
+
+def merge_hop_varieties(con, keep: str, drop: str) -> None:
+    """Fusionne DEUX clés `variety` déjà présentes en base sous une seule
+    (`keep`) -- réparation ponctuelle pour les houblons split AVANT ce
+    correctif (`_find_variety_by_name_region` ne joue qu'à l'ingestion,
+    jamais rétroactivement sur des lignes déjà écrites). Utilisé une seule
+    fois (2026-08-19) pour les 5 paires réelles trouvées sur la base
+    existante : Challenger, Fuggle, Hallertauer Tradition, Hersbrucker Spät,
+    Target -- voir `tools/merge_duplicate_hops.py`.
+
+    Déplace TOUTES les tables référençant `variety` (composition,
+    descripteurs, roue d'arôme, associations houblon<->houblon dans les DEUX
+    sens) vers `keep`, fusionne `sources` (union) et `purpose`
+    (`COALESCE(keep, drop)` -- un seul des deux avait une valeur réelle dans
+    les 5 cas vérifiés, jamais un conflit à trancher), puis supprime la ligne
+    `drop`. `INSERT OR IGNORE` partout où la clé primaire inclut `variety`
+    (évite un conflit si `keep` a par hasard déjà une ligne pour le même
+    (compound/descriptor/source) que `drop` -- ne devrait pas arriver entre
+    deux sources différentes vu le schéma EAV par source, mais reste un
+    filet de sécurité plutôt qu'un crash)."""
+    if keep == drop:
+        return
+    if not con.execute("SELECT 1 FROM hops WHERE variety=?", (drop,)).fetchone():
+        return  # déjà fusionné (idempotent)
+    keep_row = con.execute("SELECT sources, purpose FROM hops WHERE variety=?", (keep,)).fetchone()
+    drop_row = con.execute("SELECT sources, purpose FROM hops WHERE variety=?", (drop,)).fetchone()
+    if keep_row is None or drop_row is None:
+        return
+
+    con.execute(
+        "INSERT OR IGNORE INTO hop_composition SELECT ?, compound, vmin, vmax, unit, "
+        "source, confidence, notes FROM hop_composition WHERE variety=?", (keep, drop))
+    con.execute(
+        "INSERT OR IGNORE INTO hop_descriptors SELECT ?, descriptor, source "
+        "FROM hop_descriptors WHERE variety=?", (keep, drop))
+    con.execute(
+        "INSERT OR IGNORE INTO hop_aroma_intensity SELECT ?, descriptor, intensity, source "
+        "FROM hop_aroma_intensity WHERE variety=?", (keep, drop))
+    con.execute(
+        "INSERT OR IGNORE INTO hop_similar SELECT ?, similar_variety, source "
+        "FROM hop_similar WHERE variety=?", (keep, drop))
+    con.execute(
+        "INSERT OR IGNORE INTO hop_similar SELECT variety, ?, source "
+        "FROM hop_similar WHERE similar_variety=?", (keep, drop))
+    con.execute(
+        "INSERT OR IGNORE INTO hop_pairings SELECT ?, paired_name, paired_variety, "
+        "frequency, source FROM hop_pairings WHERE variety=?", (keep, drop))
+    con.execute("UPDATE hop_pairings SET paired_variety=? WHERE paired_variety=?", (keep, drop))
+    con.execute(
+        "INSERT OR IGNORE INTO hop_substitutions SELECT ?, substitute_name, "
+        "substitute_variety, source FROM hop_substitutions WHERE variety=?", (keep, drop))
+    con.execute("UPDATE hop_substitutions SET substitute_variety=? WHERE substitute_variety=?",
+               (keep, drop))
+
+    srcs = sorted(set(keep_row["sources"].split(",")) | set(drop_row["sources"].split(",")))
+    purpose = keep_row["purpose"] if keep_row["purpose"] is not None else drop_row["purpose"]
+    con.execute("UPDATE hops SET sources=?, purpose=? WHERE variety=?",
+               (",".join(srcs), purpose, keep))
+
+    for table in ("hop_composition", "hop_descriptors", "hop_aroma_intensity",
+                  "hop_similar", "hop_pairings", "hop_substitutions"):
+        con.execute(f"DELETE FROM {table} WHERE variety=?", (drop,))
+    con.execute("DELETE FROM hop_similar WHERE similar_variety=?", (drop,))
+    con.execute("DELETE FROM hops WHERE variety=?", (drop,))
+
+
 def build_from_fixtures(fixture_root: str, out_db: str) -> None:
     from .schema import connect
     con = connect(out_db)
@@ -166,9 +281,22 @@ def crawl_barthhaas(out_db: str, sleep: float = 1.5, limit: int | None = None) -
             comp = parsers.parse_composition(text, parsers.BARTHHAAS_LABELS)
             if comp:
                 variety = _fix_barthhaas_trademark_slug(slug, h1_title)
-                name = h1_title or slug.replace("-", " ").title()
-                _ingest_variety(con, variety, name,
-                                parsers.parse_region(text), comp,
+                # T59 (2026-08-19, demande utilisateur) : ®/™/© retirés du nom
+                # affiché (`parsers.strip_trademark_symbols`), pas seulement du
+                # slug de réconciliation -- voir sa docstring pour le détail.
+                name = parsers.strip_trademark_symbols(h1_title) or slug.replace("-", " ").title()
+                region = parsers.parse_region(text)
+                # Doublon cross-source par nom+région (2026-08-19, voir
+                # _find_variety_by_name_region) : seulement si la clé directe
+                # n'existe pas déjà -- jamais de recherche par nom quand le
+                # slug exact/dépréfixé matche déjà, pour ne jamais dévier
+                # d'une correspondance certaine vers une correspondance
+                # heuristique.
+                if not con.execute("SELECT 1 FROM hops WHERE variety=?", (variety,)).fetchone():
+                    merged = _find_variety_by_name_region(con, name, region)
+                    if merged:
+                        variety = merged
+                _ingest_variety(con, variety, name, region, comp,
                                 parsers.parse_descriptors(text), "barthhaas")
                 print(f"  ok {slug} ({len(comp)})"
                      + (f" -> variety corrigée en {variety!r}" if variety != slug else ""))
@@ -471,14 +599,20 @@ def crawl_yakima(out_db: str, limit: int | None = None, timeout: float = 30.0) -
                 return stripped
         return slug
 
-    # uid -> variety (déprefixée), pour résoudre imported_fields.similar_varieties
-    # (T25 backlog) : Contentstack référence les variétés similaires PAR uid,
-    # pas par slug — nécessite le lot complet avant de pouvoir résoudre quoi
-    # que ce soit (une variété peut référencer une autre plus loin dans la liste).
-    uid_to_variety = {
-        hit["uid"]: _dealias((hit.get("url") or "").rsplit("/", 1)[-1])
-        for hit in hits if hit.get("uid")
-    }
+    # uid -> variety FINALE (après dépréfixage marque ET fusion nom+région,
+    # voir _find_variety_by_name_region), pour résoudre
+    # imported_fields.similar_varieties (T25 backlog) : Contentstack
+    # référence les variétés similaires PAR uid, pas par slug. Construite
+    # progressivement PENDANT la boucle d'ingestion (pas en amont sur le
+    # seul dépréfixage) -- sinon un hit dont la variety fusionne (ex.
+    # "hallertauer-tradition" -> "hallertau-tradition" si BarthHaas a déjà
+    # tourné) laisserait `hop_similar` référencer la clé pré-fusion, jamais
+    # écrite dans `hops` (bug potentiel identifié en écrivant ce correctif,
+    # jamais laissé passer). L'écriture de `hop_similar` elle-même attend la
+    # fin de la boucle (deuxième passe) : une variété peut référencer une
+    # autre variété plus loin dans la liste des hits.
+    uid_to_variety: dict[str, str] = {}
+    similar_by_uid: dict[str, list[str]] = {}
 
     stats = {"ok": 0, "repaired": 0, "suspect": 0}
     skipped = 0
@@ -487,11 +621,25 @@ def crawl_yakima(out_db: str, limit: int | None = None, timeout: float = 30.0) -
         variety = _dealias(variety)
         if not variety or not comp:
             skipped += 1; continue
+        # Doublon cross-source par nom+région (2026-08-19, voir
+        # _find_variety_by_name_region) : même logique que crawl_barthhaas,
+        # seulement en repli quand la clé directe (dépréfixée) n'existe pas
+        # déjà -- symétrique et indépendant de l'ordre des deux crawls.
+        if not con.execute("SELECT 1 FROM hops WHERE variety=?", (variety,)).fetchone():
+            merged = _find_variety_by_name_region(con, name, region)
+            if merged:
+                variety = merged
         conf = _ingest_variety(con, variety, name, region, comp, descriptors, "yakima",
                                aroma_intensity=aroma_intensity)
         stats[conf] += 1
-        for sim in (hit.get("imported_fields") or {}).get("similar_varieties") or []:
-            sim_variety = uid_to_variety.get(sim.get("uid"))
+        if hit.get("uid"):
+            uid_to_variety[hit["uid"]] = variety
+        similar_by_uid[hit.get("uid")] = [
+            sim.get("uid") for sim in (hit.get("imported_fields") or {}).get("similar_varieties") or []]
+
+    for uid, variety in uid_to_variety.items():
+        for sim_uid in similar_by_uid.get(uid, []):
+            sim_variety = uid_to_variety.get(sim_uid)
             if sim_variety and sim_variety != variety:
                 con.execute("INSERT OR REPLACE INTO hop_similar VALUES (?,?,?)",
                             (variety, sim_variety, "yakima"))

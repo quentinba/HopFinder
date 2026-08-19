@@ -82,7 +82,12 @@ CREATE TABLE pubchem_cids (
 );
 """
 
-DROP_COMPOUNDS = {"alpha_acid", "beta_acid", "polyphenols"}  # non aromatiques
+# alpha_acid/beta_acid retirés de ce filtre (2026-08-19, demande utilisateur) :
+# non-aromatiques (jamais utilisés dans le scoring moléculaire, qui n'itère
+# que sur les molécules de la NOTE -- aucune note FooDB ne référence jamais
+# ces clés spécifiques au houblon), mais des stats clé attendues à l'affichage
+# (browse + détail par houblon), voir CLAUDE.md/app._render_key_stats.
+DROP_COMPOUNDS = {"polyphenols"}  # jamais produit par un parseur (dead entry, inoffensif)
 
 
 def connect(path: str) -> sqlite3.Connection:

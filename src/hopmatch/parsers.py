@@ -42,6 +42,12 @@ YAKIMA_API_FIELDS = {
     "farnesene": ("farnesene", "pct_oil"), "humulene": ("humulene", "pct_oil"),
     "geraniol": ("geraniol", "pct_oil"), "silinene": ("selinene", "pct_oil"),
     "oil": ("total_oil", "ml_100g"), "alpha": ("alpha_acid", "pct"), "beta": ("beta_acid", "pct"),
+    # co-humulone (% des acides alpha, convention brassicole standard) --
+    # demande utilisateur (2026-08-19). Yakima UNIQUEMENT : champ `co_h` vu en
+    # direct sur l'API Algolia réelle (ex. Citra : 20-24%, cohérent avec les
+    # valeurs publiques connues), absent du HTML BarthHaas (vérifié en direct,
+    # aucune ligne "CO-HUMULONE" sur leurs fiches).
+    "co_h": ("co_humulone", "pct"),
 }
 
 
@@ -314,6 +320,32 @@ def _select_sensory_items(imp: dict, bv_code: str | None) -> list[dict]:
     return imp.get("aroma_values") or []
 
 
+_TRADEMARK_SYMBOL_RE = re.compile(r"[®™©]")
+
+
+def strip_trademark_symbols(name: str | None) -> str | None:
+    """Retire ®/™/© du nom affiché (T59, demande utilisateur explicite,
+    2026-08-19 : "I see some ® or ™ in the name of some results of hop.
+    Could you remove this... to avoid having them and allow proper merging
+    of multiple sources?"). Appliqué à la SOURCE (ici + `crawl_barthhaas`),
+    pas seulement à l'affichage GUI -- même principe que
+    `_strip_yakima_brand_suffix` (T51) : une seule correction en amont plutôt
+    qu'un correctif répété partout où un nom est affiché. `_normalize_hop_key`
+    (réconciliation BeerMaverick) retirait déjà ces symboles pour la clé de
+    MATCHING interne, mais `hops.name` lui-même (et la comparaison brute de
+    `ingest._find_variety_by_name_region`, T53) les gardait -- un houblon dont
+    le symbole différerait entre BarthHaas et Yakima (présent d'un côté,
+    absent ou différent de l'autre) pouvait donc échapper à la fusion
+    cross-source. Simple suppression des 3 caractères, espaces multiples
+    résultants recollapsés (même post-traitement que `_strip_yakima_brand_
+    suffix`) -- ni "Brand"/"NZ Hops"/qualificatifs réels ne sont touchés,
+    seuls les 3 symboles eux-mêmes."""
+    if not name:
+        return name
+    cleaned = _TRADEMARK_SYMBOL_RE.sub("", name)
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
 _YAKIMA_BRAND_SUFFIX_RE = re.compile(r"\(Brand\)|Brand", re.I)
 
 
@@ -362,7 +394,7 @@ def parse_yakima_hit(hit: dict) -> tuple[str, str, str, dict, list[str], dict[st
     """
     imp = hit.get("imported_fields") or {}
     variety = (hit.get("url") or "").rsplit("/", 1)[-1]
-    name = _strip_yakima_brand_suffix(imp.get("display_name")) or variety
+    name = strip_trademark_symbols(_strip_yakima_brand_suffix(imp.get("display_name"))) or variety
     region = imp.get("country_name") or ""
     descriptors = [d.strip().lower() for d in (imp.get("aromas") or []) if d and d.strip()]
 

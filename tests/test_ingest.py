@@ -116,6 +116,90 @@ def test_ingest_variety_same_source_reingestion_refreshes_name(tmp_path):
     row = con.execute("SELECT name FROM hops WHERE variety='kohatu'").fetchone()
     assert row[0] == "Kohatu® - NZ Hops"
 
+def test_find_variety_by_name_region_merges_same_name_same_region(tmp_path):
+    # bug signalé par l'utilisateur (2026-08-19, "there is two Amarillo
+    # entry... check why and fix it for this hop and other if it exists") :
+    # 5 paires réelles vérifiées en direct sur la base réingérée (Challenger,
+    # Fuggle, Hallertauer Tradition, Hersbrucker Spät, Target) portaient un
+    # `name` STRICTEMENT identique entre BarthHaas et Yakima mais un slug
+    # `variety` différent (ex. "wye-challenger" vs "challenger") -- jamais
+    # fusionnées faute de mécanisme de réconciliation cross-source au-delà du
+    # slug exact/dépréfixage marque (contrairement à `_resolve_hop_variety`
+    # pour BeerMaverick).
+    con = connect(str(tmp_path / "t.db"))
+    init_db(con)
+    ingest._ingest_variety(con, "wye-challenger", "Challenger", "Great Britain", {}, [], "barthhaas")
+    assert ingest._find_variety_by_name_region(con, "Challenger", "United Kingdom") == "wye-challenger"
+
+def test_find_variety_by_name_region_tolerates_gb_uk_alias():
+    # BarthHaas dit "Great Britain", Yakima dit "United Kingdom" pour le même
+    # pays -- vérifié en direct sur les 3 paires concernées (Challenger,
+    # Fuggle, Target). Alias volontairement restreint à ce cas précis.
+    assert ingest._normalize_region_for_merge("Great Britain") == \
+        ingest._normalize_region_for_merge("United Kingdom")
+
+def test_find_variety_by_name_region_none_when_region_differs(tmp_path):
+    # NE fusionne PAS Amarillo US et Amarillo Allemagne : vérifié en direct
+    # sur l'API Algolia Yakima (imported_fields.country_code) que ce sont
+    # deux crops RÉELLEMENT distincts du même cultivar (VGXP01), même
+    # famille de cas que Perle US/Allemagne ou Saaz US/Tchéquie déjà gardés
+    # séparés à raison -- une région différente doit bloquer la fusion.
+    con = connect(str(tmp_path / "t.db"))
+    init_db(con)
+    ingest._ingest_variety(con, "amarillo", "Amarillo®", "United States", {}, [], "barthhaas")
+    assert ingest._find_variety_by_name_region(con, "Amarillo®", "Germany") is None
+
+def test_find_variety_by_name_region_none_without_region(tmp_path):
+    con = connect(str(tmp_path / "t.db"))
+    init_db(con)
+    ingest._ingest_variety(con, "challenger", "Challenger", None, {}, [], "yakima")
+    assert ingest._find_variety_by_name_region(con, "Challenger", None) is None
+
+def test_merge_hop_varieties_moves_composition_descriptors_and_sources(tmp_path):
+    con = connect(str(tmp_path / "t.db"))
+    init_db(con)
+    ingest._ingest_variety(con, "wye-challenger", "Challenger", "Great Britain",
+                           {"myrcene": (40, 50, "pct_oil")}, ["citrus"], "barthhaas")
+    ingest._ingest_variety(con, "challenger", "Challenger", "United Kingdom",
+                           {"caryophyllene": (5, 6, "pct_oil")}, ["woody"], "yakima")
+    con.execute("UPDATE hops SET purpose=? WHERE variety=?", ("both", "challenger"))
+    con.commit()
+    ingest.merge_hop_varieties(con, keep="wye-challenger", drop="challenger")
+    hop = con.execute("SELECT sources, purpose FROM hops WHERE variety='wye-challenger'").fetchone()
+    assert set(hop["sources"].split(",")) == {"barthhaas", "yakima"}
+    assert hop["purpose"] == "both"
+    assert con.execute("SELECT 1 FROM hops WHERE variety='challenger'").fetchone() is None
+    compounds = {r["compound"] for r in
+                con.execute("SELECT compound FROM hop_composition WHERE variety='wye-challenger'")}
+    assert compounds == {"myrcene", "caryophyllene"}
+    descriptors = {r["descriptor"] for r in
+                  con.execute("SELECT descriptor FROM hop_descriptors WHERE variety='wye-challenger'")}
+    assert descriptors == {"citrus", "woody"}
+
+def test_merge_hop_varieties_redirects_relations_pointing_at_dropped_key(tmp_path):
+    # les associations houblon<->houblon (hop_similar/hop_pairings/
+    # hop_substitutions) référençant la variety supprimée DEPUIS un AUTRE
+    # houblon doivent être redirigées vers la survivante, pas laissées en
+    # référence morte.
+    con = connect(str(tmp_path / "t.db"))
+    init_db(con)
+    ingest._ingest_variety(con, "wye-challenger", "Challenger", "Great Britain", {}, [], "barthhaas")
+    ingest._ingest_variety(con, "challenger", "Challenger", "United Kingdom", {}, [], "yakima")
+    ingest._ingest_variety(con, "citra", "Citra®", "United States", {}, [], "barthhaas")
+    con.execute("INSERT INTO hop_similar VALUES (?,?,?)", ("citra", "challenger", "yakima"))
+    con.commit()
+    ingest.merge_hop_varieties(con, keep="wye-challenger", drop="challenger")
+    row = con.execute("SELECT similar_variety FROM hop_similar WHERE variety='citra'").fetchone()
+    assert row["similar_variety"] == "wye-challenger"
+
+def test_merge_hop_varieties_idempotent_when_already_merged(tmp_path):
+    con = connect(str(tmp_path / "t.db"))
+    init_db(con)
+    ingest._ingest_variety(con, "wye-challenger", "Challenger", "Great Britain", {}, [], "barthhaas")
+    con.commit()
+    ingest.merge_hop_varieties(con, keep="wye-challenger", drop="challenger")  # drop absente -> no-op
+    assert con.execute("SELECT 1 FROM hops WHERE variety='wye-challenger'").fetchone() is not None
+
 def test_normalize_beermaverick_tag_drops_non_aroma_quality_words():
     # "mild"/"clean"/"hoppy"... ne sont pas des descripteurs d'arôme (voir
     # _BEERMAVERICK_TAG_DROPLIST) -> None, jamais écrits dans hop_descriptors.

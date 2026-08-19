@@ -53,6 +53,7 @@ MODE_LABELS = {
     "contrast": "HopFinder - Contrast",
     "by-descriptor": "HopFinder from Descriptors",
     "browse": "Browse hop informations",
+    "compare": "Compare Hops",
 }
 
 # Page d'accueil (front page) : résumé des outils, avec accès direct à chacun.
@@ -63,10 +64,14 @@ _TOOL_SUMMARIES = [
         "tagline": "Extend an addition",
         "description": (
             "The addition (yuzu, basil...) is already in the beer — find a hop "
-            "that **extends** its character rather than reproducing it. Combines "
-            "molecular similarity (TF-IDF) with aroma-wheel overlap. Also "
-            "proposes blends of 1 to 5 hops actually used together in recipes "
-            "(BeerMaverick)."
+            "that **extends** its character. Combines molecular similarity "
+            "(TF-IDF — weighs each shared molecule by how distinctive it is "
+            "across hops, so a rare compound counts more than one present in "
+            "almost every hop like myrcene) with aroma-wheel overlap (only "
+            "active if you manually add descriptors matching your addition "
+            "below, e.g. \"citrus\", \"berry\" for strawberry — this turns on a "
+            "second, independent scoring layer). Also proposes blends of 1 to "
+            "5 hops actually used together in recipes (BeerMaverick)."
         ),
     },
     {
@@ -75,9 +80,12 @@ _TOOL_SUMMARIES = [
         "tagline": "Pair by contrast",
         "description": (
             "Looks for a hop with a **complementary** profile (bright citrus "
-            "under a dank/resinous hop), not a similar one — via a descriptor "
-            "affinity map, never molecular. Same multi-size blends as Amplify, "
-            "prioritizing real recipe pairing frequency."
+            "under a dank/resinous hop), not a similar one. Uses a "
+            "hand-curated affinity dictionary (e.g. citrus → resinous/woody/"
+            "herbal) that maps each descriptor of your addition to its "
+            "complementary counterparts — a culinary-pairing heuristic, not "
+            "sourced data, and never molecular. Same multi-size blends as "
+            "Amplify, prioritizing real recipe pairing frequency."
         ),
     },
     {
@@ -85,9 +93,9 @@ _TOOL_SUMMARIES = [
         "icon": ":material/search:",
         "tagline": "Discovery by descriptors",
         "description": (
-            "No note required: pick descriptors directly (citrus, tropical, "
-            "dank...) and see which hops best match the real aroma wheel "
-            "(BarthHaas/Yakima/BeerMaverick)."
+            "Pick descriptors directly (citrus, tropical, dank...) and see "
+            "which hops best match the real aroma wheel (BarthHaas/Yakima/"
+            "BeerMaverick)."
         ),
     },
     {
@@ -98,6 +106,17 @@ _TOOL_SUMMARIES = [
             "Look up a hop directly: measured composition, descriptors, "
             "quantitative aroma wheel (Yakima), purpose (aromatic/bittering), "
             "similar varieties and real recipe pairings (BeerMaverick)."
+        ),
+    },
+    {
+        "mode": "compare",
+        "icon": ":material/compare_arrows:",
+        "tagline": "Side by side",
+        "description": (
+            "Pick up to 5 hops and compare them directly: an overlaid aroma-"
+            "wheel radar (Yakima, where available), and two bar charts — "
+            "alpha/beta acids, co-humulone and total oil, then the detailed "
+            "oil compounds — each colored consistently per hop."
         ),
     },
 ]
@@ -356,12 +375,33 @@ _PURPOSE_ICONS = {"aromatic": ":material/local_florist:", "bittering": ":materia
                   "both": ":material/join_full:"}
 
 
-def _purpose_badge(purpose: str | None) -> None:
+def _purpose_badge(purpose: str | None, inferred: bool = False) -> None:
     if purpose is None:
         st.badge("Unknown", color="gray", icon=":material/help:")
         return
-    st.badge(_PURPOSE_LABELS.get(purpose, purpose), color=_PURPOSE_COLORS.get(purpose, "gray"),
-             icon=_PURPOSE_ICONS.get(purpose))
+    label = _PURPOSE_LABELS.get(purpose, purpose)
+    if inferred:
+        # demande utilisateur explicite (2026-08-19) : "instead of unknown
+        # for the purpose, use infered:aromatic and infered:bittering" --
+        # voir matching.resolve_purpose. Même couleur/icône que le purpose
+        # RÉEL (BeerMaverick) : le préfixe "Inferred:" suffit à distinguer
+        # une estimation (78% d'accord avec BeerMaverick, voir
+        # matching.ALPHA_ACID_BITTERING_THRESHOLD_PCT) d'une donnée mesurée,
+        # sans avoir besoin d'une palette de couleurs séparée.
+        label = f"Inferred: {label}"
+    st.badge(label, color=_PURPOSE_COLORS.get(purpose, "gray"), icon=_PURPOSE_ICONS.get(purpose))
+
+
+def _row_with_purpose(entry: dict, hops: dict, comp: dict) -> dict:
+    """Résout le purpose EFFECTIF (réel BeerMaverick, ou inféré depuis
+    l'acide alpha -- voir `matching.resolve_purpose`) pour une ligne de
+    résultat/blend, sans jamais toucher au `purpose` "brut" stocké côté
+    `hops`/scoring (utilisé lui pour la structure des blends, jamais pour
+    l'affichage inféré). `entry` doit porter "variety" et "purpose" (brut,
+    potentiellement None)."""
+    v = entry["variety"]
+    purpose, inferred = matching.resolve_purpose(entry.get("purpose"), comp.get(v, {}))
+    return dict(entry, purpose=purpose, purpose_inferred=inferred)
 
 
 def _render_hop_rows(rows: list[dict], columns: list[tuple[str, str]]) -> None:
@@ -371,8 +411,20 @@ def _render_hop_rows(rows: list[dict], columns: list[tuple[str, str]]) -> None:
     Réutilisé par les tableaux de résultats amplify/contrast ET les tableaux
     de blend. `rows` : dicts avec une clé "name" + les clés référencées par
     `columns` ([(en-tête, clé)]) ; une colonne dont la clé est "purpose" se
-    rend en badge plutôt qu'en texte."""
-    widths = [3] + [2] * len(columns)
+    rend en badge plutôt qu'en texte (utilise aussi "purpose_inferred" si
+    présent, voir `_row_with_purpose`).
+
+    Colonne Purpose délibérément plus LARGE que les autres (demande
+    utilisateur explicite, 2026-08-19) : le badge "Inferred: Aromatic"/
+    "Inferred: Bittering" est bien plus long que "Aromatic"/"Bittering"
+    seuls et débordait sinon (illisible, signalé en direct)."""
+    # 5, pas 3 : mesuré en direct dans le navigateur que "Inferred: Bittering"/
+    # "Inferred: Aromatic" restait tronqué en "Inferred: Bitt…" à 3 (demande
+    # utilisateur explicite de largeur suffisante pour lire ce texte).
+    _PURPOSE_COL_WIDTH = 5
+    _DEFAULT_COL_WIDTH = 2
+    widths = [3] + [_PURPOSE_COL_WIDTH if field == "purpose" else _DEFAULT_COL_WIDTH
+                    for _, field in columns]
     header_cols = st.columns(widths)
     header_cols[0].caption("Hop")
     for col, (header, _) in zip(header_cols[1:], columns):
@@ -383,9 +435,41 @@ def _render_hop_rows(rows: list[dict], columns: list[tuple[str, str]]) -> None:
         for col, (_, field) in zip(cols[1:], columns):
             if field == "purpose":
                 with col:
-                    _purpose_badge(row.get("purpose"))
+                    _purpose_badge(row.get("purpose"), row.get("purpose_inferred", False))
             else:
                 col.write(row.get(field, ""))
+
+
+def _render_key_stats(hcomp: dict) -> None:
+    """Les 3 stats les plus importantes d'un houblon pour un brasseur --
+    Alpha Acids/Beta Acids/Total Oil --, PLUS Co-humulone (% des acides
+    alpha) quand disponible, demande utilisateur EXPLICITE (2026-08-19) :
+    "il manque un élément principal : les infos les plus importantes de
+    yakima". Mises en avant en `st.metric` plutôt que noyées dans le
+    tableau de composition générique trié par valeur (qui les exclut
+    désormais, voir `_NON_AROMA_DISPLAY`) -- ce ne sont pas juste des
+    composés d'arôme comme les autres, ce sont les stats qu'un brasseur
+    regarde en premier. Ces 3(4) valeurs étaient auparavant absentes de LA
+    BASE ELLE-MÊME (pas juste filtrées à l'affichage) : `alpha_acid`/
+    `beta_acid` étaient dans `schema.DROP_COMPOUNDS` ("non aromatiques",
+    hors du scoring moléculaire) -- retirées de ce filtre au même moment
+    (voir CLAUDE.md), elles sont maintenant réellement stockées.
+    Co-humulone (`co_h` côté API Algolia YCH) : Yakima UNIQUEMENT, absent du
+    HTML BarthHaas (vérifié en direct) -- "—" si non disponible pour cette
+    variété, jamais une valeur inventée."""
+    alpha = hcomp.get("alpha_acid", {}).get("mid")
+    beta = hcomp.get("beta_acid", {}).get("mid")
+    co_h = hcomp.get("co_humulone", {}).get("mid")
+    oil = hcomp.get("total_oil", {}).get("mid")
+    cols = st.columns(4)
+    cols[0].metric("Alpha acids", f"{alpha:.1f}%" if alpha is not None else "—")
+    cols[1].metric("Beta acids", f"{beta:.1f}%" if beta is not None else "—")
+    # unité/qualificatif dans le LABEL (police plus petite, tolère le texte
+    # long) plutôt que dans la valeur -- "1.4 ml/100g"/"41% of AA" en valeur
+    # débordait et se tronquait en "1.4 ml/1…" (constaté en direct dans le
+    # navigateur, largeur de colonne st.metric fixe).
+    cols[2].metric("Co-humulone (% of AA)", f"{co_h:.0f}%" if co_h is not None else "—")
+    cols[3].metric("Total oil (ml/100g)", f"{oil:.1f}" if oil is not None else "—")
 
 
 def _hop_detail_expanders(con, hops: dict, comp: dict, hop_desc: dict, rows: list[dict]) -> None:
@@ -410,14 +494,18 @@ def _hop_detail_expanders(con, hops: dict, comp: dict, hop_desc: dict, rows: lis
     for row in rows:
         v = row["variety"]
         with st.expander(f"{row['name']} — {row['caption']}"):
-            _purpose_badge(hops[v].get("purpose"))
+            purpose, inferred = matching.resolve_purpose(hops[v].get("purpose"), comp.get(v, {}))
+            _purpose_badge(purpose, inferred)
             st.caption(f"Sources: {hops[v]['sources']}")
+            _render_key_stats(comp.get(v, {}))
             descs = sorted(hop_desc.get(v, set()))
             st.write("**Descriptors:** " + (", ".join(descs) if descs else "none recorded"))
             intensity = matching.hop_aroma_intensity(con, v)
             if intensity and any(val > 0 for val in intensity.values()):
                 st.altair_chart(_aroma_wheel(intensity, _intensity_vocabulary(con)),
                                 width="content", theme=None)
+                st.caption(":material/info: Hover a label for its definition "
+                          "(Yakima Chief Hop Sensory Ballot).")
             hcomp = comp.get(v, {})
             crows = sorted(
                 ({"Compound": c, "Value": round(cv["mid"], 3), "Unit": cv["unit"],
@@ -483,12 +571,13 @@ def _amplify(con, note):
     if not r["ranked"]:
         st.write("No hop overlaps with this note.")
         return
+    hops, comp, hop_desc, _ = matching.load(con)
     _render_hop_rows(
-        [dict(h, why_str=", ".join(h["why"]) or "—") for h in r["ranked"]],
+        [dict(_row_with_purpose(h, hops, comp), why_str=", ".join(h["why"]) or "—")
+         for h in r["ranked"]],
         [("Score", "score"), ("Mol.", "mol"), ("Desc.", "desc"), ("Purpose", "purpose"),
         ("Contributes via", "why_str"), ("Sources", "sources")])
 
-    hops, comp, hop_desc, _ = matching.load(con)
     _hop_detail_expanders(con, hops, comp, hop_desc, [
         {"variety": h["variety"], "name": h["name"],
          "caption": f"score {h['score']} — via {', '.join(h['why']) or '(none)'}"}
@@ -506,7 +595,7 @@ def _amplify(con, note):
         blend_r = matching.amplify_blend(con, note, use_oav=use_oav,
                                          descriptors=selected_desc or None, max_hops=5,
                                          base_variety=base)
-        _render_blends(blend_r["blends"])
+        _render_blends(blend_r["blends"], hops, comp)
 
 
 _VIA_LABELS = {"top": "top candidate", "chosen": "base hop (chosen)",
@@ -516,7 +605,7 @@ _VIA_LABELS = {"top": "top candidate", "chosen": "base hop (chosen)",
               "relevance": "relevant extra hop (nothing new to cover)"}
 
 
-def _render_blends(blends: list[dict]) -> None:
+def _render_blends(blends: list[dict], hops: dict, comp: dict) -> None:
     """Rendu partagé amplify_blend/contrast_blend (T33 backlog) : plusieurs
     tailles de blend affichées côte à côte plutôt qu'un seul "meilleur" blend
     — chaque houblon signale sa provenance (fréquence RÉELLE de pairing
@@ -525,19 +614,35 @@ def _render_blends(blends: list[dict]) -> None:
     2, le mécanisme garantit au moins 1 aromatique + 1 amérisant puis ne
     recrute plus que des aromatiques (voir `matching._pairing_grown_blends`)
     — la colonne rend cette structure visible plutôt que de la laisser
-    implicite."""
+    implicite. `hops`/`comp` : nécessaires pour résoudre "Inferred: ..." sur
+    les houblons du blend sans purpose BeerMaverick réel (voir
+    `matching.resolve_purpose`) -- la STRUCTURE du blend, elle, continue de
+    n'utiliser QUE le purpose réel (`purpose_by_variety` côté
+    `_pairing_grown_blends`), jamais l'inférence : ceci est un affichage
+    a posteriori, pas une entrée du mécanisme de sélection."""
     if not blends:
         st.write("No combination found.")
         return
+    # Un st.container(border=True) par taille de blend (demande utilisateur,
+    # "it's visually difficult to separate blend n1/n2...n5" -- pas de
+    # séparation visuelle entre les tailles avant, juste des blocs
+    # st.write/_render_hop_rows qui s'enchaînaient). Pas un st.dataframe/
+    # st.table : `_render_hop_rows` rend le Purpose en st.badge par cellule
+    # (seul widget qui s'adapte aux deux thèmes clair/sombre, voir plus
+    # haut) -- un vrai tableau perdrait cette coloration. Le conteneur
+    # bordé délimite chaque blend au moins aussi clairement que des lignes
+    # horizontales, sans ce compromis.
     for b in blends:
-        st.write(f"**Size {b['size']}**")
-        rows = [dict(h, covers_str=", ".join(h["covers"]) or "(nothing new)",
-                    via_label=_VIA_LABELS[h["via"]])
-               for h in b["hops"]]
-        _render_hop_rows(rows, [("Covers", "covers_str"), ("Purpose", "purpose"),
-                                ("Origin", "via_label"), ("Sources", "sources")])
-        if b["residual"]:
-            st.caption("Not covered: " + ", ".join(b["residual"]))
+        with st.container(border=True):
+            st.write(f"**Size {b['size']}**")
+            rows = [dict(_row_with_purpose(h, hops, comp),
+                        covers_str=", ".join(h["covers"]) or "(nothing new)",
+                        via_label=_VIA_LABELS[h["via"]])
+                   for h in b["hops"]]
+            _render_hop_rows(rows, [("Covers", "covers_str"), ("Purpose", "purpose"),
+                                    ("Origin", "via_label"), ("Sources", "sources")])
+            if b["residual"]:
+                st.caption("Not covered: " + ", ".join(b["residual"]))
 
 
 def _contrast(con):
@@ -547,24 +652,94 @@ def _contrast(con):
     # la roue d'arôme (même source que by-descriptor), ce qui fonctionne pour
     # n'importe quelle note sans rien inventer.
     selected = st.multiselect("Descriptors of the note to contrast", _descriptors(con))
-    top = st.sidebar.slider("Number of results", 1, 30, 8)
+
+    # Cible d'affinité MODIFIABLE (2026-08-19, demande utilisateur explicite :
+    # "we should orient the complementary aroma by pre-selecting them but let
+    # the user chose which one he want to keep... rather than imposing the
+    # mapping" -- exemple donné : pour "tropical"/"mango", ne garder que
+    # "spicy" pour retrouver un houblon noble comme Saaz, autrement noyé sous
+    # les houblons dank/resinous plus nombreux). `contrast_affinity_target`
+    # calcule la proposition (identique à ce que `contrast()` calculerait
+    # seul) ; st.pills pré-coche cette proposition mais reste librement
+    # modifiable -- untick pour exclure, ou coche un des 10 catégories cœur
+    # non proposées pour élargir. Options = les 10 catégories cœur
+    # (`CONTRAST_AFFINITY`, valeurs jamais en dehors de ce jeu fermé, voir
+    # reference.py) : "there is not much" (même raisonnement que les pills de
+    # la roue d'arôme en by-descriptor), toutes tiennent sur une ligne.
+    # `key` dépend de `selected` : changer les descripteurs de la note doit
+    # RECALCULER la proposition (nouvelle pré-sélection), alors qu'une
+    # modification manuelle par l'utilisateur doit survivre aux reruns tant
+    # que les descripteurs de la note ne changent pas eux-mêmes -- Streamlit
+    # ne réinitialise un widget à son `default` que si sa `key` change.
+    proposed_target, _ = matching.contrast_affinity_target(selected)
+    target_selected = sorted(proposed_target)
+    purposes_selected = ["aromatic", "bittering"]
+    if selected:
+        st.caption("Complementary notes to target (pre-selected from the affinity map — "
+                  "untick to exclude, or add more)")
+        target_selected = st.pills(
+            "Complementary notes to target", matching.CONTRAST_CORE_CATEGORIES,
+            selection_mode="multi",
+            default=sorted(proposed_target), label_visibility="collapsed",
+            key=f"contrast_target_pills_{tuple(sorted(selected))}") or []
+
+        # Filtre par purpose (T61, 2026-08-19, demande utilisateur explicite :
+        # "add another menu for purpose, it would be pre-selecting both
+        # bittering and aromatic but we should let user add a filter on this
+        # purpose"). Pré-coché sur les deux (aucun filtrage par défaut,
+        # comportement identique à avant ce ticket) ; untick un rôle pour ne
+        # garder que l'autre. "both" (aromatique ET amérisant réels)
+        # satisfait le filtre dès qu'AU MOINS un des deux est coché --
+        # jamais une 3e case séparée (voir `matching._purpose_matches_filter`).
+        # Un purpose totalement inconnu (ni réel ni inférable depuis l'acide
+        # alpha) est exclu dès qu'un filtre est actif, quel qu'il soit --
+        # jamais inclus par défaut faute de donnée.
+        st.caption("Purpose (pre-selected on both — untick to keep only one)")
+        purposes_selected = st.pills(
+            "Purpose", ["aromatic", "bittering"], selection_mode="multi",
+            default=["aromatic", "bittering"], label_visibility="collapsed",
+            key="contrast_purpose_pills") or []
+
+    # Plafond relevé de 30 à 100 (2026-08-19, signalé par l'utilisateur :
+    # Saaz introuvable pour "tropical"/"mango" même au plafond précédent) --
+    # la cible d'affinité n'a souvent que 3-4 descripteurs (voir
+    # reference.CONTRAST_AFFINITY), donc le score (`100 * recoupés / cible`)
+    # ne prend que 3-4 valeurs distinctes : des égalités massives (des
+    # dizaines de houblons ne recoupant qu'UN descripteur de la cible) sont
+    # la norme, pas l'exception -- 30 ne suffisait pas à sortir un houblon
+    # "un seul recoupement" comme Saaz d'une égalité de ~84 houblons sur une
+    # base réelle. Voir aussi le tri secondaire par total_oil dans
+    # `matching.contrast` (rend l'égalité déterministe, pas seulement le
+    # plafond relevé).
+    top = st.sidebar.slider("Number of results", 1, 100, 8)
     if not selected:
         st.write("Choose at least one descriptor."); return
-    r = matching.contrast(con, descriptors=selected, top=top)
+    r = matching.contrast(con, descriptors=selected, target_descriptors=target_selected,
+                         purposes=purposes_selected, top=top)
 
-    st.caption("Affinity target: " + ", ".join(r["affinity_target"]))
+    st.caption("Affinity target: " + (", ".join(r["affinity_target"]) or "(none selected)"))
     if r["unmapped"]:
         st.caption(":material/info: No affinity mapping for: "
                   + ", ".join(r["unmapped"]) + " (ignored, no effect on the target).")
     if not r["ranked"]:
         st.write("No hop overlaps with this target.")
         return
+    if r["total_matches"] > len(r["ranked"]):
+        # Transparence sur la troncature (2026-08-19, demande utilisateur) :
+        # jamais laisser croire que `top` couvre tout le recoupement réel --
+        # même principe que la couverture moléculaire faible ou les
+        # molécules orphelines ailleurs dans la GUI.
+        st.caption(f"Showing {len(r['ranked'])} of {r['total_matches']} hops overlapping "
+                  "this target — raise \"Number of results\" in the sidebar to see more "
+                  "(many hops often tie on score; see Contrasts via below for what each "
+                  "one actually matches).")
+    hops, comp, hop_desc, _ = matching.load(con)
     _render_hop_rows(
-        [dict(h, contrast_via_str=", ".join(h["contrast_via"])) for h in r["ranked"]],
+        [dict(_row_with_purpose(h, hops, comp), contrast_via_str=", ".join(h["contrast_via"]))
+         for h in r["ranked"]],
         [("Score", "score"), ("Purpose", "purpose"), ("Contrasts via", "contrast_via_str"),
         ("Sources", "sources")])
 
-    hops, comp, hop_desc, _ = matching.load(con)
     _hop_detail_expanders(con, hops, comp, hop_desc, [
         {"variety": h["variety"], "name": h["name"],
          "caption": f"score {h['score']} — contrasts via {', '.join(h['contrast_via'])}"}
@@ -572,12 +747,15 @@ def _contrast(con):
 
     st.subheader("Propose a blend")
     base = _select_base_hop(r["ranked"], key="contrast_base_hop")
-    # Toujours 5 (décision utilisateur) : pas de curseur.
-    blend_r = matching.contrast_blend(con, descriptors=selected, max_hops=5, base_variety=base)
-    _render_blends(blend_r["blends"])
+    # Toujours 5 (décision utilisateur) : pas de curseur. `target_descriptors`/
+    # `purposes` propagés (2026-08-19) : le blend doit viser la même cible et
+    # respecter le même filtre purpose que le tableau de résultats ci-dessus.
+    blend_r = matching.contrast_blend(con, descriptors=selected, target_descriptors=target_selected,
+                                      purposes=purposes_selected, max_hops=5, base_variety=base)
+    _render_blends(blend_r["blends"], hops, comp)
 
 
-_NON_AROMA_DISPLAY = {"total_oil", "alpha_acid", "beta_acid"}
+_NON_AROMA_DISPLAY = {"total_oil", "alpha_acid", "beta_acid", "co_humulone"}
 
 
 def _aroma_wheel(intensity: dict[str, float], vocabulary: list[str]):
@@ -650,7 +828,8 @@ def _aroma_wheel(intensity: dict[str, float], vocabulary: list[str]):
         ex, ey = r_max * math.cos(angle), r_max * math.sin(angle)
         spokes.append({"x": 0.0, "y": 0.0, "x2": ex, "y2": ey})
         lx, ly = label_radius * math.cos(angle), label_radius * math.sin(angle)
-        labels.append({"x": lx, "y": ly, "Descriptor": d})
+        labels.append({"x": lx, "y": ly, "Descriptor": d,
+                       "Definition": matching.AROMA_WHEEL_DEFINITIONS.get(d, "")})
 
     poly = []
     for i, d in enumerate(vocabulary):
@@ -682,7 +861,8 @@ def _aroma_wheel(intensity: dict[str, float], vocabulary: list[str]):
     text = (
         alt.Chart(alt.Data(values=labels))
         .mark_text(fontSize=14, color=text_color)
-        .encode(x=x_enc, y=y_enc, text="Descriptor:N")
+        .encode(x=x_enc, y=y_enc, text="Descriptor:N",
+               tooltip=["Descriptor:N", "Definition:N"])
     )
     return (
         (grid + polygon_line + points + text)
@@ -697,7 +877,12 @@ def _browse(con):
     amplify/contrast/by-descriptor (T5 backlog). Affiche aussi la roue
     d'arôme quantitative (T26), le purpose (T-purpose, EN INFO PRINCIPALE
     demandé par l'utilisateur) et les associations houblon<->houblon
-    (T25, voir `_hop_associations`)."""
+    (T25, voir `_hop_associations`).
+
+    `hops[v]["name"]` est déjà désambiguïsé par région en cas de collision
+    (`matching._disambiguate_hop_names`, appliqué dans `load()` -- T60,
+    2026-08-19) : plus besoin d'un mécanisme séparé ici, ni ailleurs dans la
+    GUI (amplify/contrast/by-descriptor en profitent aussi automatiquement)."""
     hops, comp, hop_desc, _ = matching.load(con)
     query = st.text_input("Search (name or variety)", key="browse_search")
     varieties = sorted(hops, key=lambda v: hops[v]["name"].lower())
@@ -712,11 +897,17 @@ def _browse(con):
     selected = st.selectbox("Hop", varieties, format_func=lambda v: hops[v]["name"],
                             key="browse_hop")
     h = hops[selected]
+    hcomp = comp.get(selected, {})
     st.subheader(h["name"])
     # purpose EN PREMIER, avant région/sources (demande utilisateur explicite :
     # "should appear in the browser information as a main/top information").
-    _purpose_badge(h.get("purpose"))
+    purpose, inferred = matching.resolve_purpose(h.get("purpose"), hcomp)
+    _purpose_badge(purpose, inferred)
     st.caption(f"Region: {h['region'] or 'unknown'} · Sources: {h['sources']}")
+    # Alpha/beta acids, co-humulone, total oil : demande utilisateur explicite
+    # (2026-08-19), "il manque un élément principal : les infos les plus
+    # importantes de yakima" -- voir `_render_key_stats`.
+    _render_key_stats(hcomp)
 
     descs = sorted(hop_desc.get(selected, set()))
     st.write("**Descriptors:** " + (", ".join(descs) if descs else "none recorded"))
@@ -735,6 +926,8 @@ def _browse(con):
         # sur les couleurs de mark, pas un mauvais choix de couleur.
         st.altair_chart(_aroma_wheel(intensity, _intensity_vocabulary(con)),
                         width="content", theme=None)
+        st.caption(":material/info: Hover a label for its definition "
+                  "(Yakima Chief Hop Sensory Ballot).")
     else:
         st.caption("No quantitative aroma wheel for this variety "
                    "(Yakima data unavailable or unusable here — BarthHaas "
@@ -792,32 +985,48 @@ def _hop_associations(con, hops: dict, selected: str) -> None:
 
 _MAX_HEATMAP_HOPS = 12
 
+# Buckets de teinte pour la heatmap (2026-08-19, demande utilisateur :
+# "propose a ordered result in a quantitative heatmap based on the aroma
+# wheel descriptors"). "absent" = pas dans hop_descriptors (fond neutre,
+# comme l'ancienne teinte "no") ; "present" = présent côté hop_descriptors
+# MAIS sans intensité mesurée pour CE houblon (BarthHaas seul, ou variété
+# Yakima non couverte -- voir `matching.hop_aroma_intensity` -- ou, dans la
+# section "Other descriptors", un descripteur hors du vocabulaire à 15
+# catégories de la roue, qui n'aura JAMAIS de donnée quantitative). NOIR
+# (pas gris, cf. addendum 2026-08-19 -- retour utilisateur : le gris se
+# lisait comme un NaN/valeur manquante plutôt que comme "présent") ; 5
+# paliers de bleu croissant (0-100 réel, `hop_aroma_intensity`) pour les
+# cellules avec donnée -- discrétisé plutôt qu'un dégradé continu Vega, pour
+# rester lisible sur une petite cellule de grille (mêmes tons que
+# `_aroma_wheel`/l'accent existant #2a78d6, palier le plus saturé = ce bleu).
+_INTENSITY_BUCKET_ORDER = ["absent", "present", "0-20", "20-40", "40-60", "60-80", "80-100"]
+_INTENSITY_BUCKET_COLORS = ["#f2f1ee", "#000000", "#dbe9fb", "#aecdf2", "#7fb0e8", "#4d92dd", "#2a78d6"]
 
-def _descriptor_heatmap(ranked):
-    """Grille houblon x descripteur (présence), pour comparer visuellement
-    plusieurs candidats d'un coup (T4 backlog). Une teinte, présence/absence —
-    pas un radar : les descripteurs sont un ensemble binaire par houblon (pas
-    une quantité), un radar déformerait par l'aire pour un gain de lisibilité
-    nul ; une grille compare exactement les mêmes données sans cette
-    distorsion (voir la table forme/usage du skill dataviz : « grille ->
-    heatmap, une teinte »). Champs Vega en anglais ("Hop"/"Descriptor"/
-    "Present") : visibles au survol (tooltip), cohérent avec le passage de la
-    GUI à l'anglais (2026-08-19)."""
-    if len(ranked) < 2:
-        return None
-    shown = ranked[:_MAX_HEATMAP_HOPS]
-    hop_order = [h["name"] for h in shown]
-    freq = {}
+
+def _intensity_bucket(value: float) -> str:
+    for hi in (20, 40, 60, 80):
+        if value < hi:
+            return f"{hi - 20}-{hi}"
+    return "80-100"
+
+
+def _heatmap_chart(shown, hop_order, descriptor_order):
+    """Une grille houblon x descripteur pour LE SOUS-ENSEMBLE de
+    descripteurs donné -- factorisé pour être appelé une fois par section
+    (roue quantitative / autres descripteurs, voir `_descriptor_heatmap`)."""
+    rows = []
     for h in shown:
-        for d in h["all_descriptors"]:
-            freq[d] = freq.get(d, 0) + 1
-    descriptor_order = sorted(freq, key=lambda d: (-freq[d], d))
-    rows = [
-        {"Hop": h["name"], "Descriptor": d,
-         "Present": "yes" if d in h["all_descriptors"] else "no"}
-        for h in shown for d in descriptor_order
-    ]
-    chart = (
+        for d in descriptor_order:
+            present = d in h["all_descriptors"]
+            val = h["intensity"].get(d) if present else None
+            if not present:
+                bucket, detail = "absent", "not present"
+            elif val is None:
+                bucket, detail = "present", "present (no quantitative data)"
+            else:
+                bucket, detail = _intensity_bucket(val), f"{val:.0f}/100"
+            rows.append({"Hop": h["name"], "Descriptor": d, "Bucket": bucket, "Detail": detail})
+    return (
         alt.Chart(alt.Data(values=rows))
         .mark_rect(stroke="white", strokeWidth=2)
         .encode(
@@ -826,10 +1035,10 @@ def _descriptor_heatmap(ranked):
             y=alt.Y("Descriptor:N", sort=descriptor_order, title=None,
                     axis=alt.Axis(labelOverlap=False)),
             color=alt.Color(
-                "Present:N",
-                scale=alt.Scale(domain=["yes", "no"], range=["#2a78d6", "#f2f1ee"]),
-                legend=alt.Legend(title="Descriptor present")),
-            tooltip=["Hop:N", "Descriptor:N", "Present:N"],
+                "Bucket:N",
+                scale=alt.Scale(domain=_INTENSITY_BUCKET_ORDER, range=_INTENSITY_BUCKET_COLORS),
+                legend=alt.Legend(title="Intensity")),
+            tooltip=["Hop:N", "Descriptor:N", "Detail:N"],
         )
         # largeur/hauteur au pas (pas "container") : le nombre de lignes/colonnes
         # varie avec la sélection, une largeur fixe tronque les libellés en
@@ -837,34 +1046,146 @@ def _descriptor_heatmap(ranked):
         # en direct avec 10 houblons).
         .properties(width=alt.Step(45), height=alt.Step(18))
     )
-    return chart, len(ranked) - len(shown)
+
+
+def _descriptor_heatmap(ranked, intensity_vocab):
+    """Grille houblon x descripteur, pour comparer visuellement plusieurs
+    candidats d'un coup (T4 backlog). Grille plutôt qu'un radar : les
+    descripteurs restent un ensemble par houblon, un radar déformerait par
+    l'aire pour un gain de lisibilité nul (voir la table forme/usage du
+    skill dataviz : « grille -> heatmap »).
+
+    Teinte À DEUX NIVEAUX (2026-08-19, demande utilisateur explicite --
+    "propose a ordered result in a quantitative heatmap based on the aroma
+    wheel descriptors") : shadée par l'intensité MESURÉE
+    (`hop_aroma_intensity`, T26, Yakima uniquement, 0-100 réel) quand elle
+    existe pour ce houblon/descripteur -- sinon repli sur les DEUX états
+    catégoriques d'origine (présent sans donnée / absent), jamais une
+    valeur inventée. `h["intensity"]` vient directement de
+    `matching.by_descriptor` (déjà chargé pour le tri quantitatif, voir
+    `_by_descriptor`) -- pas de requête supplémentaire ici.
+
+    DEUX SECTIONS SÉPARÉES (2026-08-19, addendum -- retour utilisateur
+    explicite : "separate descriptors from quantitative aroma wheel values
+    in two section in the heatmap") : les descripteurs qui PEUVENT avoir une
+    donnée quantitative (`intensity_vocab`, les 15 catégories de la roue)
+    forment une première grille ; tous les autres descripteurs catégoriques
+    (BarthHaas/Yakima/BeerMaverick, ex. "pine"/"grapefruit"/"dank" --
+    JAMAIS de donnée quantitative possible pour eux, quel que soit le
+    houblon) forment une seconde grille distincte -- mélanger les deux
+    laissait croire que l'absence de nuance bleue pour un descripteur
+    catégorique-only était un trou de données Yakima plutôt qu'une
+    impossibilité structurelle. Chaque section retourne `None` si vide
+    (ex. aucun descripteur roue parmi les houblons affichés).
+
+    Champs Vega en anglais ("Hop"/"Descriptor"/"Detail") : visibles au
+    survol (tooltip), cohérent avec le passage de la GUI à l'anglais
+    (2026-08-19)."""
+    if len(ranked) < 2:
+        return None
+    shown = ranked[:_MAX_HEATMAP_HOPS]
+    hop_order = [h["name"] for h in shown]
+    freq = {}
+    for h in shown:
+        for d in h["all_descriptors"]:
+            freq[d] = freq.get(d, 0) + 1
+    wheel_set = set(intensity_vocab)
+    wheel_order = sorted((d for d in freq if d in wheel_set), key=lambda d: (-freq[d], d))
+    other_order = sorted((d for d in freq if d not in wheel_set), key=lambda d: (-freq[d], d))
+    wheel_chart = _heatmap_chart(shown, hop_order, wheel_order) if wheel_order else None
+    other_chart = _heatmap_chart(shown, hop_order, other_order) if other_order else None
+    return wheel_chart, other_chart, len(ranked) - len(shown)
 
 
 def _by_descriptor(con):
+    # Descripteurs TEXTE (vocabulaire complet à 104 termes) : SEUL filtre
+    # catégorique (2026-08-19, revirement -- décision utilisateur après
+    # avoir testé en direct roue [tropical, citrus, floral] + texte "papaya" :
+    # un houblon ne recoupant que la roue ressortait quand même mélangé
+    # AVANT des houblons "papaya" réels, jugé moins précis que voulu --
+    # "the qualitative textual descriptor is not a priority over the wheel
+    # aroma descriptor selected"). Un houblon DOIT recouper au moins un
+    # descripteur texte pour apparaître, dès qu'il y en a un de choisi.
     descriptors = _descriptors(con)
-    selected = st.multiselect("Descriptors", descriptors)
+    text_selected = st.multiselect("Descriptors", descriptors)
+
+    # Roue d'arôme QUANTITATIVE : ne FILTRE plus, sert uniquement à NOTER
+    # (moyenne d'intensité mesurée) les houblons déjà retenus par les
+    # descripteurs texte ci-dessus -- "pre-select all hops having this
+    # descriptor and then score the hops that match this based on the
+    # average score of the wheel descriptor inputed" (demande utilisateur).
+    # st.pills (pas un multiselect) : "small number of options that fit on
+    # one line" (15 catégories fixes, voir `_aroma_wheel`) -- plus
+    # visible/cliquable que de les chercher dans le multiselect texte.
+    intensity_vocab = _intensity_vocabulary(con)
+    wheel_selected = []
+    if intensity_vocab:
+        st.caption("Aroma wheel flavors (optional — scores the results above by measured "
+                  "intensity; does not filter them, except as a fallback when no text "
+                  "descriptor is chosen)")
+        wheel_selected = st.pills("Aroma wheel flavors", intensity_vocab,
+                                  selection_mode="multi", label_visibility="collapsed",
+                                  key="by_descriptor_wheel_pills") or []
     top = st.sidebar.slider("Number of hops shown", 1, 30, 10)
-    if not selected:
+    if not text_selected and not wheel_selected:
         st.write("Choose at least one descriptor.")
         return
-    ranked = matching.by_descriptor(con, selected, top=top)
+    ranked = matching.by_descriptor(con, text_selected, wheel_descriptors=wheel_selected, top=top)
     if not ranked:
         st.write("No hop overlaps with these descriptors.")
         return
 
-    heatmap = _descriptor_heatmap(ranked)
+    _, comp, _, _ = matching.load(con)
+
+    heatmap = _descriptor_heatmap(ranked, intensity_vocab)
     if heatmap is not None:
-        chart, hidden = heatmap
-        st.caption("Descriptor profile comparison" +
-                   (f" (first 12 of {len(ranked)})" if hidden else ""))
-        st.altair_chart(chart, width="stretch")
+        wheel_chart, other_chart, hidden = heatmap
+        suffix = f" (first 12 of {len(ranked)})" if hidden else ""
+        if wheel_chart is not None:
+            st.caption("Aroma wheel descriptors — shaded by measured intensity (Yakima), "
+                      "black where a hop carries the descriptor but has no quantitative "
+                      "reading for it" + suffix)
+            st.altair_chart(wheel_chart, width="stretch")
+        if other_chart is not None:
+            st.caption("Other descriptors — categorical only, no quantitative intensity "
+                      "data exists for these (black = present)" + suffix)
+            st.altair_chart(other_chart, width="stretch")
 
     for h in ranked:
+        hcomp = comp.get(h["variety"], {})
         with st.expander(
                 f"{h['name']} — matches {', '.join(h['matched_descriptors'])} "
                 f"[{h['sources']}]"):
-            _purpose_badge(h.get("purpose"))
+            purpose, inferred = matching.resolve_purpose(h.get("purpose"), hcomp)
+            _purpose_badge(purpose, inferred)
+            _render_key_stats(hcomp)
             st.caption("All descriptors: " + ", ".join(h["all_descriptors"]))
+            # Transparence sur le tri quantitatif (2026-08-19, "propose a 2
+            # layer results ordering... inside this selection, propose a
+            # ordered result... based on the aroma wheel descriptors") --
+            # jamais un réordonnancement silencieux : dit explicitement CE
+            # QUI a été moyenné, ou l'absence de donnée exploitable, pour que
+            # l'utilisateur puisse vérifier pourquoi ce houblon est classé où
+            # il est parmi ceux à même nombre de descripteurs recoupés.
+            if h["quant_score"] is not None:
+                st.caption(f"Quantitative refinement: {h['quant_score']:.0f}/100 avg. "
+                          f"intensity on {', '.join(h['quant_descriptors'])} (Yakima)")
+            elif wheel_selected:
+                st.caption("Quantitative refinement: no aroma-wheel intensity data for "
+                          "this hop (BarthHaas only, or variety not covered by Yakima).")
+            # Roue d'arôme quantitative (demande utilisateur 2026-08-19 : "The
+            # aroma wheel is missing from the from descriptor tool") -- même
+            # rendu que `_browse`/`_hop_detail_expanders` (theme=None, voir
+            # leur commentaire pour la raison), absente si Yakima ne couvre
+            # pas la variété ou si l'entrée est corrompue (ex. Admiral).
+            # `h["intensity"]` réutilise directement ce que `by_descriptor` a
+            # déjà chargé pour le score quantitatif -- pas une deuxième requête.
+            intensity = h["intensity"]
+            if intensity and any(val > 0 for val in intensity.values()):
+                st.altair_chart(_aroma_wheel(intensity, _intensity_vocabulary(con)),
+                                width="content", theme=None)
+                st.caption(":material/info: Hover a label for its definition "
+                          "(Yakima Chief Hop Sensory Ballot).")
             if h["compounds"]:
                 st.dataframe(
                     [{"Compound": c["compound"], "Value": round(c["mid"], 2),
@@ -873,8 +1194,374 @@ def _by_descriptor(con):
                     width="stretch", hide_index=True)
 
 
+# T58 (2026-08-19, demande utilisateur, inspiré de
+# https://beermaverick.com/hops/hop-comparison-tool/) : palette CATÉGORIELLE
+# (pas divergente -- "Spectral" suggéré par l'utilisateur est une palette
+# ColorBrewer pensée pour un gradient autour d'un centre neutre, pas adaptée
+# à des houblons sans ordre naturel entre eux) -- Vega/Altair "tableau10",
+# moderne et conçue pour du nominal, 5 premières teintes (max 5 houblons).
+_COMPARE_PALETTE = ["#4c78a8", "#f58518", "#e45756", "#72b7b2", "#54a24b"]
+_COMPARE_MAX_HOPS = 5
+
+# Largeur PARTAGÉE, littérale (pas de Step ni de "stretch") des 3 graphiques
+# de Compare Hops (2026-08-19, retour utilisateur en direct : "I would like
+# all 3 plots to be the same width... ensure the spider plot is properly
+# scaled (not narrow)"). Root cause du désalignement initial : les 3
+# graphiques utilisaient 3 stratégies de largeur DIFFÉRENTES --
+# `width="content"` figé à 480px pour le radar (petit, carré) vs
+# `width="stretch"` (rempli le conteneur, beaucoup plus large) pour les
+# barplots avec une largeur interne `alt.Step(70)` (dépend du nombre de
+# catégories, pas de la largeur du conteneur). Résultat : trois largeurs
+# incohérentes. Corrigé en fixant une largeur numérique EXPLICITE, IDENTIQUE
+# sur les 3 (`properties(width=_COMPARE_CHART_WIDTH)`), rendue avec
+# `width="content"` partout (jamais "stretch", qui écraserait cette largeur
+# explicite) -- seul moyen de garantir un alignement pixel-perfect entre un
+# radar carré à domaine quantitatif fixe et deux barplots à échelle de bande
+# catégorielle (nombre de catégories différent entre les deux : 4 vs jusqu'à
+# 11 -- un `width` numérique fixe, pas un `Step` par catégorie, est
+# nécessaire pour que Vega-Lite recalcule lui-même la largeur de bande en
+# fonction du nombre de catégories tout en gardant le total identique).
+_COMPARE_CHART_WIDTH = 700
+
+# Composés "détaillés" du barplot 2 = tout hop_composition SAUF les 4 champs
+# "principaux" du barplot 1 (_NON_AROMA_DISPLAY) -- ordre fixe pour rester
+# stable d'une sélection de houblons à l'autre plutôt qu'un tri alphabétique
+# qui changerait selon quels composés sont présents.
+_COMPARE_DETAIL_OIL_COMPOUNDS = ["myrcene", "humulene", "caryophyllene", "farnesene",
+                                "linalool", "geraniol", "beta-pinene", "selinene",
+                                "isobutyrate", "ketones"]
+# thiols : SEUL composé de la liste "détaillée" en µg/kg (tous les autres
+# sont en % d'huile, pct_oil) -- piège d'unité découvert en écrivant ce
+# ticket (l'utilisateur n'avait signalé le mélange % / % de % / ml-100g que
+# pour le barplot 1) : mélanger thiols (~0.06 µg/kg) avec myrcène (~40%
+# d'huile) sur le même axe écraserait sa barre. Même traitement à double
+# axe que le barplot 1, jamais fusionné sur le même axe que le reste.
+_COMPARE_THIOLS_COMPOUND = "thiols"
+
+
+def _compare_principal_values(hcomp: dict) -> dict[str, float | None]:
+    """Les 4 infos "principales" pour UN houblon, prêtes pour le barplot 1.
+    `co_humulone` est stocké en base comme "% DES acides alpha" (`pct`, mais
+    une fraction DE `alpha_acid`, pas du houblon total) -- converti ici en %
+    ABSOLU du houblon (`alpha_acid_pct * co_humulone_pct_of_AA / 100`) pour
+    partager une seule échelle "%" avec alpha/beta (demande utilisateur
+    explicite, T58 : "you will need to convert the % of % into %"). `None`
+    si un des deux termes manque -- jamais une conversion approximative sur
+    une donnée absente."""
+    alpha = hcomp.get("alpha_acid", {}).get("mid")
+    beta = hcomp.get("beta_acid", {}).get("mid")
+    co_h_of_aa = hcomp.get("co_humulone", {}).get("mid")
+    co_h_abs = alpha * co_h_of_aa / 100 if alpha is not None and co_h_of_aa is not None else None
+    oil = hcomp.get("total_oil", {}).get("mid")
+    # "\n" dans les deux libellés longs (pas juste une longue chaîne) :
+    # signalé en direct par l'utilisateur -- ces labels étaient tronqués/
+    # illisibles sur l'axe X du barplot 1. Vega-Lite ne scinde PAS
+    # nativement un "\n" littéral dans un label d'axe (vérifié en direct :
+    # présent dans le JSON de la spec, mais rendu sur une seule ligne quand
+    # même) -- `axis.labelExpr: split(...)` côté `_compare_dual_axis_barplot`
+    # convertit la chaîne en tableau de lignes au moment du rendu, seul
+    # mécanisme qui fonctionne. "Total oil (ml/100g)" scindé pour la même
+    # raison de lisibilité que "Co-humulone", pas juste ce dernier (retour
+    # utilisateur explicite : "similarly for the co-humulone").
+    return {"Alpha acids": alpha, "Beta acids": beta,
+           "Co-humulone\n(% of hop)": co_h_abs, "Total oil\n(ml/100g)": oil}
+
+
+_COMPARE_LABEL_ANGLE = -45
+
+
+def _compare_dual_axis_barplot(rows: list[dict], primary_fields: list[str], primary_title: str,
+                               secondary_fields: list[str], secondary_title: str,
+                               colors: dict[str, str]):
+    """Barplot groupé par houblon (`xOffset`) sur un axe "Field" catégoriel
+    partagé, à DOUBLE ÉCHELLE Y : `primary_fields` sur l'axe gauche,
+    `secondary_fields` sur l'axe droit (2026-08-19, T58 -- demande
+    utilisateur explicite : "we will mix %, % of % and ml/100g... use double
+    scale for this one"). `rows` : liste de {"Hop", "Field", "Value"} --
+    `Value` déjà en unité finale (co-humulone déjà converti en % absolu par
+    l'appelant), AUCUNE valeur `None` (filtrée par l'appelant, jamais une
+    barre à 0 fabriquée pour une donnée absente).
+
+    Deux couches (`alt.layer(...).resolve_scale(y="independent")`) --
+    Vega-Lite ne fait pas de double axe nativement sur une seule couche. Les
+    DEUX couches partagent le même `scale.domain` explicite sur `x` (tous
+    les champs, primaires ET secondaires) : sans ça, chaque couche
+    recalculerait son propre domaine `x` depuis son SOUS-ENSEMBLE de
+    données seulement, désalignant les groupes de barres entre les deux
+    couches.
+
+    Angle FIXE (`_COMPARE_LABEL_ANGLE`, -45°) partagé par les DEUX barplots
+    (2026-08-19, retour utilisateur en direct -- "the angle of the X axis of
+    the 2 barplot is not the same"). Un premier correctif avait laissé le
+    barplot 1 à -20° (4 catégories courtes) et forcé -45° seulement sur le
+    barplot 2 (jusqu'à 11 catégories) -- incohérent visuellement d'un
+    graphique à l'autre alors que rien n'empêche -45° de convenir aux deux.
+    `labelOverlap=False` (2026-08-19, retour utilisateur -- "the last
+    barplot is still missing 1/2 labels, FORCE THE DISPLAY OF ALL LABELS") :
+    par défaut Vega-Lite MASQUE silencieusement un label qu'il calcule comme
+    se chevauchant avec son voisin plutôt que de les superposer -- exactement
+    la cause du "1 label sur 2" constaté. `labelOverlap=False` désactive ce
+    calcul et force l'affichage de TOUS les labels, quitte à ce qu'ils se
+    chevauchent légèrement à forte densité de catégories (préférable à un
+    label silencieusement absent, même principe d'honnêteté que le reste de
+    la GUI -- jamais rien de caché sans le signaler). `labelAlign="right"`/
+    `labelBaseline="middle"` : sans ça, un label pivoté reste ancré en son
+    CENTRE plutôt qu'en son extrémité proche du tick, donc visuellement
+    désaligné de la graduation qu'il annote (piège Vega-Lite connu sur les
+    labels pivotés)."""
+    if not rows:
+        return None
+    field_order = primary_fields + secondary_fields
+    axis_kwargs = {
+        "labelAngle": _COMPARE_LABEL_ANGLE,
+        "labelLimit": 300,
+        "labelLineHeight": 12,
+        "labelOverlap": False,
+        "labelAlign": "right",
+        "labelBaseline": "middle",
+        # Vega-Lite ne coupe pas automatiquement un label sur un "\n" littéral
+        # (constaté en direct : le JSON contient bien le vrai caractère, mais le
+        # rendu restait tronqué sur une seule ligne) -- `labelExpr` doit renvoyer
+        # un TABLEAU de chaînes pour que le mark texte sous-jacent bascule en
+        # rendu multi-lignes ; `split()` fait exactement ça.
+        "labelExpr": "split(datum.label, '\\n')",
+    }
+    x_enc = alt.X("Field:N", scale=alt.Scale(domain=field_order), title=None,
+                  axis=alt.Axis(**axis_kwargs))
+    offset_enc = alt.XOffset("Hop:N", scale=alt.Scale(domain=list(colors.keys())))
+    color_enc = alt.Color("Hop:N", scale=alt.Scale(domain=list(colors.keys()),
+                                                   range=list(colors.values())))
+    tooltip = ["Hop:N", "Field:N", alt.Tooltip("Value:Q", format=".2f")]
+
+    primary_rows = [r for r in rows if r["Field"] in primary_fields]
+    secondary_rows = [r for r in rows if r["Field"] in secondary_fields]
+    layers = []
+    if primary_rows:
+        layers.append(
+            alt.Chart(alt.Data(values=primary_rows)).mark_bar()
+            .encode(x=x_enc, xOffset=offset_enc, color=color_enc, tooltip=tooltip,
+                   y=alt.Y("Value:Q", title=primary_title)))
+    if secondary_rows:
+        layers.append(
+            alt.Chart(alt.Data(values=secondary_rows)).mark_bar()
+            .encode(x=x_enc, xOffset=offset_enc, color=color_enc, tooltip=tooltip,
+                   y=alt.Y("Value:Q", title=secondary_title)))
+    if not layers:
+        return None
+    chart = layers[0] if len(layers) == 1 else alt.layer(*layers).resolve_scale(y="independent")
+    return chart.properties(width=_COMPARE_CHART_WIDTH, height=320)
+
+
+def _aroma_wheel_compare(intensities: dict[str, dict[str, float]], vocabulary: list[str],
+                         colors: dict[str, str]):
+    """Version multi-houblons de `_aroma_wheel` (T58, 2026-08-19) : plusieurs
+    polygones superposés (jusqu'à 5, un par houblon, couleur cohérente avec
+    les barplots) sur les mêmes 15 axes/mêmes coordonnées calculées à la
+    main (voir `_aroma_wheel` pour le détail de la géométrie et pourquoi
+    `mark_arc` a été abandonné). `intensities` : {Hop (nom affiché déjà
+    désambiguïsé) -> {descriptor: intensité}}, UNIQUEMENT les houblons ayant
+    une donnée exploitable -- l'appelant filtre les houblons sans couverture
+    Yakima et le signale explicitement (honnêteté d'abord), jamais un
+    polygone à 0 fabriqué ici.
+
+    Ne contredit PAS le rejet du radar en T4 (`by-descriptor`, comparaison
+    de descripteurs BINAIRES où l'aire déforme sans info) : ici les axes
+    sont des intensités QUANTITATIVES réelles sur un vocabulaire fixe, le
+    cas d'usage pour lequel un radar overlay est justifié -- c'est aussi ce
+    que fait BeerMaverick sur son propre outil de comparaison."""
+    if not vocabulary or not intensities:
+        return None
+    dark = st.context.theme.type == "dark"
+    text_color = "#f2f2f0" if dark else "#1a1a18"
+    grid_color = "#5a5a56" if dark else "#3a3a38"
+
+    n = len(vocabulary)
+    r_max = 170.0
+    label_radius = r_max + 30
+    half_extent = label_radius + 40
+
+    def _xy(i: int, value: float) -> tuple[float, float]:
+        angle = (i / n) * 2 * math.pi - math.pi / 2
+        r = (max(0.0, min(value, 100.0)) / 100.0) * r_max
+        return r * math.cos(angle), r * math.sin(angle)
+
+    spokes, labels = [], []
+    for i, d in enumerate(vocabulary):
+        angle = (i / n) * 2 * math.pi - math.pi / 2
+        ex, ey = r_max * math.cos(angle), r_max * math.sin(angle)
+        spokes.append({"x": 0.0, "y": 0.0, "x2": ex, "y2": ey})
+        lx, ly = label_radius * math.cos(angle), label_radius * math.sin(angle)
+        labels.append({"x": lx, "y": ly, "Descriptor": d,
+                       "Definition": matching.AROMA_WHEEL_DEFINITIONS.get(d, "")})
+
+    poly_rows = []
+    for hop_name, intensity in intensities.items():
+        pts = []
+        for i, d in enumerate(vocabulary):
+            val = intensity.get(d, 0.0)
+            x, y = _xy(i, val)
+            pts.append({"x": x, "y": y, "Hop": hop_name, "Descriptor": d,
+                       "Intensity": val, "Order": i})
+        pts.append(dict(pts[0], Order=n))
+        poly_rows.extend(pts)
+
+    domain = [-half_extent, half_extent]
+    x_enc = alt.X("x:Q", axis=None, scale=alt.Scale(domain=domain))
+    y_enc = alt.Y("y:Q", axis=None, scale=alt.Scale(domain=domain))
+    color_enc = alt.Color("Hop:N", scale=alt.Scale(domain=list(colors.keys()),
+                                                   range=list(colors.values())),
+                          legend=alt.Legend(title="Hop"))
+
+    # Surlignage au survol (demande utilisateur, 2026-08-19) : `hover`, un
+    # selection_point Vega-Lite standard (`on="mouseover"`, `nearest=True`),
+    # attaché à `points` (cible d'accroche -- cercles pleins de taille 50,
+    # bien plus faciles à survoler avec précision qu'un simple trait de
+    # ligne) et référencé en CONDITION dans `polygon_line`, layer SŒUR de la
+    # même composition `layer` -- pattern standard Vega-Lite (cf. exemple
+    # officiel "interactive multi-line tooltip") : un paramètre de sélection
+    # déclaré sur une couche reste visible aux couches sœurs, pas besoin de
+    # le redéclarer. `empty=True` (comportement par défaut) : tant qu'aucun
+    # survol n'a eu lieu, la condition est vraie pour TOUS les houblons
+    # (opacité pleine par défaut, rien de grisé avant interaction).
+    #
+    # Opacité des houblons NON survolés remontée de 0.15 à 0.55 (retour
+    # utilisateur en direct : "all the non mouseover lines are not
+    # visible" -- 0.15 les rendait quasi invisibles, contraire à l'objectif
+    # qui est de FAIRE RESSORTIR le houblon survolé, pas de masquer les
+    # autres). Pas de contrôle de z-index (mettre le trait survolé
+    # visuellement AU-DESSUS des autres) : Vega-Lite compile un
+    # `mark_line` multi-séries (`detail="Hop:N"`) en UN SEUL mark, dont
+    # l'ordre d'empilement des sous-tracés est figé à la compilation par
+    # l'ordre du domaine `color` -- il n'existe pas de canal d'encodage
+    # Vega-Lite pour un z-index RÉACTIF au survol (le canal `order` ne
+    # contrôle que l'ordre des points LE LONG d'un même tracé, pas
+    # l'empilement entre tracés). Compensé par un contraste fort
+    # (opacité pleine + trait 2.5x plus épais) plutôt qu'un vrai passage
+    # au premier plan.
+    # `clear="mouseout"` explicite : par défaut Vega-Lite ne réinitialise
+    # PAS la sélection quand le curseur quitte le graphique (constaté en
+    # direct -- le dernier houblon survolé restait en surbrillance figée
+    # après être sorti de la zone du radar), seul le prochain survol la
+    # met à jour. `mouseout` (déclenché quand le pointeur quitte tout
+    # l'élément SVG du graphique, pas juste un point) rétablit l'état par
+    # défaut (tout à opacité pleine) dès qu'on quitte le radar.
+    hover = alt.selection_point(fields=["Hop"], on="mouseover", nearest=True, empty=True,
+                                clear="mouseout")
+    line_opacity = alt.condition(hover, alt.value(1.0), alt.value(0.55))
+    line_width = alt.condition(hover, alt.value(5), alt.value(2))
+    point_opacity = alt.condition(hover, alt.value(1.0), alt.value(0.55))
+    point_size = alt.condition(hover, alt.value(110), alt.value(50))
+
+    grid = (
+        alt.Chart(alt.Data(values=spokes))
+        .mark_rule(strokeWidth=1, stroke=grid_color)
+        .encode(x=x_enc, y=y_enc, x2="x2:Q", y2="y2:Q")
+    )
+    polygon_line = (
+        alt.Chart(alt.Data(values=poly_rows))
+        .mark_line(order=True)
+        .encode(x=x_enc, y=y_enc, order="Order:Q", color=color_enc, detail="Hop:N",
+               opacity=line_opacity, strokeWidth=line_width)
+    )
+    points = (
+        alt.Chart(alt.Data(values=[r for r in poly_rows if r["Order"] < n]))
+        .mark_point(filled=True)
+        .encode(x=x_enc, y=y_enc, color=color_enc, opacity=point_opacity, size=point_size,
+               tooltip=["Hop:N", "Descriptor:N", alt.Tooltip("Intensity:Q", format=".0f")])
+        .add_params(hover)
+    )
+    text = (
+        alt.Chart(alt.Data(values=labels))
+        .mark_text(fontSize=14, color=text_color)
+        .encode(x=x_enc, y=y_enc, text="Descriptor:N",
+               tooltip=["Descriptor:N", "Definition:N"])
+    )
+    return (
+        (grid + polygon_line + points + text)
+        .properties(width=_COMPARE_CHART_WIDTH, height=_COMPARE_CHART_WIDTH)
+        .configure_view(strokeWidth=0)
+    )
+
+
+def _compare(con):
+    """Nouvel outil GUI "Compare Hops" (T58, 2026-08-19, demande utilisateur
+    explicite, inspiré de https://beermaverick.com/hops/hop-comparison-tool/
+    -- fonctionnalité de référence, pas le design). Jusqu'à 5 houblons, une
+    couleur cohérente par houblon sur les 3 graphiques (radar + 2 barplots),
+    voir `_COMPARE_PALETTE`."""
+    hops, comp, hop_desc, _ = matching.load(con)
+    options = sorted(hops, key=lambda v: hops[v]["name"].lower())
+    selected = st.multiselect(
+        f"Hops to compare (up to {_COMPARE_MAX_HOPS})", options,
+        format_func=lambda v: hops[v]["name"], max_selections=_COMPARE_MAX_HOPS)
+    if not selected:
+        st.write("Choose at least one hop.")
+        return
+    colors = {hops[v]["name"]: _COMPARE_PALETTE[i] for i, v in enumerate(selected)}
+
+    st.subheader("Aroma wheel")
+    vocabulary = _intensity_vocabulary(con)
+    intensities = {}
+    no_wheel_data = []
+    for v in selected:
+        intensity = matching.hop_aroma_intensity(con, v)
+        if intensity and any(val > 0 for val in intensity.values()):
+            intensities[hops[v]["name"]] = intensity
+        else:
+            no_wheel_data.append(hops[v]["name"])
+    chart = _aroma_wheel_compare(intensities, vocabulary, colors)
+    if chart is not None:
+        st.altair_chart(chart, width="content", theme=None)
+        st.caption(":material/info: Hover a label for its definition "
+                  "(Yakima Chief Hop Sensory Ballot).")
+    if no_wheel_data:
+        st.caption(":material/info: No quantitative aroma wheel data for: "
+                  + ", ".join(no_wheel_data) +
+                  " (BarthHaas only, or variety not covered by Yakima).")
+
+    st.subheader("Principal info")
+    principal_rows = []
+    for v in selected:
+        name = hops[v]["name"]
+        for field, value in _compare_principal_values(comp.get(v, {})).items():
+            if value is not None:
+                principal_rows.append({"Hop": name, "Field": field, "Value": value})
+    principal_chart = _compare_dual_axis_barplot(
+        principal_rows, ["Alpha acids", "Beta acids", "Co-humulone\n(% of hop)"], "Percent (%)",
+        ["Total oil\n(ml/100g)"], "Total oil (ml/100g)", colors)
+    if principal_chart is not None:
+        st.altair_chart(principal_chart, width="content")
+    else:
+        st.write("No principal composition data for the selected hops.")
+
+    st.subheader("Detailed composition")
+    present_oil_compounds = [c for c in _COMPARE_DETAIL_OIL_COMPOUNDS
+                             if any(comp.get(v, {}).get(c, {}).get("mid") is not None
+                                    for v in selected)]
+    detail_rows = []
+    for v in selected:
+        name = hops[v]["name"]
+        hcomp = comp.get(v, {})
+        for c in present_oil_compounds + [_COMPARE_THIOLS_COMPOUND]:
+            val = hcomp.get(c, {}).get("mid")
+            if val is not None:
+                detail_rows.append({"Hop": name, "Field": c, "Value": val})
+    thiols_fields = [_COMPARE_THIOLS_COMPOUND] if any(
+        r["Field"] == _COMPARE_THIOLS_COMPOUND for r in detail_rows) else []
+    detail_chart = _compare_dual_axis_barplot(
+        detail_rows, present_oil_compounds, "Percent of oil (%)",
+        thiols_fields, "Thiols (µg/kg)", colors)
+    if detail_chart is not None:
+        st.altair_chart(detail_chart, width="content")
+    else:
+        st.write("No detailed composition data for the selected hops.")
+
+
 def main():
-    st.set_page_config(page_title="hopmatch", page_icon="🌿")
+    # Nom d'affichage GUI = "HopFinder" (demande utilisateur 2026-08-19,
+    # renommage d'affichage seulement -- le paquet/CLI restent "hopmatch",
+    # voir CLAUDE.md et le sous-titre de README.md).
+    st.set_page_config(page_title="HopFinder", page_icon="🌿")
     _inject_background()
     if "_next_mode" in st.session_state:
         # Relais utilisé par la page d'accueil (_home) : Streamlit interdit
@@ -886,7 +1573,7 @@ def main():
         # par des expanders de détail affichés directement sur place — voir
         # `_hop_detail_expanders`.)
         st.session_state["mode"] = st.session_state.pop("_next_mode")
-    st.title("hopmatch")
+    st.title("HopFinder")
     st.caption("Aroma note → molecules → hops")
 
     db_path = _db_path()
@@ -907,7 +1594,7 @@ def main():
         f"{stats['descriptors']} descriptors · modified {modified}")
 
     mode = st.sidebar.radio(
-        "Mode", ["home", "amplify", "contrast", "by-descriptor", "browse"],
+        "Mode", ["home", "amplify", "contrast", "by-descriptor", "browse", "compare"],
         format_func=lambda m: MODE_LABELS[m], key="mode")
 
     if mode == "home":
@@ -928,6 +1615,11 @@ def main():
     if mode == "browse":
         st.header(MODE_LABELS[mode])
         _browse(con)
+        return
+
+    if mode == "compare":
+        st.header(MODE_LABELS[mode])
+        _compare(con)
         return
 
     notes = _notes(con)

@@ -86,17 +86,59 @@ DESCRIPTOR_ALIASES: dict[str, str] = {
     "resin": "resinous", "cannabis": "dank", "black tea": "tea",
     "slightly spicy": "spicy",
     # -- Yakima Chief (aroma_values/sensory_values, roue d'arôme T26) : un des
-    # 15 axes fixes de leur taxonomie Contentstack est mal étiqueté "Pomme"
-    # (français) au lieu de "Apple", MÊME sous le filtre de requête Algolia
-    # publish_details.locale:"en-us" -- vérifié en direct (2026-08-19,
-    # signalé par l'utilisateur) : ce n'est PAS un mélange de locale côté
-    # hopmatch (une seule requête, un seul filtre en-us, déjà appliqué), mais
-    # une erreur de saisie dans LEUR CMS -- l'entrée taxonomique porte le même
-    # uid Contentstack (cs95db0a8ac5cfd199) sur toutes les variétés qui
-    # l'utilisent, donc une coquille unique et cohérente, pas un champ
-    # aléatoirement traduit. Les 14 autres axes sont bien en anglais (vérifié
-    # sur l'ensemble des 153 variétés du catalogue).
+    # 15 axes fixes de leur taxonomie Contentstack est étiqueté "Pomme" au
+    # lieu de "Apple" -- pris pour une coquille de saisie française (2026-08-19,
+    # signalé par l'utilisateur, "Pomme" détecté comme seul terme non-anglais
+    # de la roue). **Correction (2026-08-19, en creusant AROMA_WHEEL_DEFINITIONS
+    # ci-dessous) : PAS une coquille.** Le "Hop Sensory Ballot" officiel de
+    # Yakima Chief (`Hop_Sensory_Ballot_V2.pdf`, révisé juin 2021, télécharge
+    # depuis leur propre site) utilise LITTÉRALEMENT "POMME" comme intitulé de
+    # catégorie officiel (à côté de DRIED FRUIT, BERRY, STONE FRUIT...) --
+    # terme professionnel standard en dégustation (vin/cidre/bière) pour la
+    # famille "fruits à pépins" (pomme/poire), pas du français mal placé. Alias
+    # conservé tel quel : "apple" reste plus clair pour un public GUI non
+    # spécialiste que "pomme", mais ce n'est plus documenté comme la
+    # correction d'un bug source -- juste un choix d'affichage.
     "pomme": "apple",
+}
+
+# Définitions des 15 catégories de la roue d'arôme quantitative Yakima
+# (`hop_aroma_intensity`, T26) -- demande utilisateur explicite (2026-08-19) :
+# "grassy, herbal and vegetal mean the same thing... can you help me
+# understand them". Vérifié : elles ne sont PAS synonymes (corrélation
+# grassy/vegetal mesurée sur les données réelles : Pearson r=0.16 sur 81
+# houblons à vegetal>0, écart moyen 13.8 points -- Saaz par exemple a
+# grassy=75/vegetal=8, à l'opposé l'un de l'autre). Sourcé au mot près sur le
+# "Hop Sensory Ballot" officiel Yakima Chief (`Hop_Sensory_Ballot_V2.pdf`,
+# révisé juin 2021, colonne "Specific Aromas" par catégorie -- télécharge
+# depuis leur propre site, archive Wayback Machine du 2024-06-27 utilisée
+# faute d'URL directe encore valide après leur migration de site) : la
+# distinction est claire une fois les exemples posés -- grassy = herbe
+# fraîchement coupée/foin (végétal SEC), herbal = thé/menthe/romarin (herbe
+# AROMATIQUE culinaire), vegetal = chou/céleri/poivron/plant de tomate
+# (légume, souvent proche d'un défaut en brassage) -- trois notions
+# olfactives réellement distinctes, pas une seule "goût d'herbe fraîche"
+# comme perçu au premier abord. Clés = exactement le vocabulaire
+# `hop_aroma_intensity` (15 termes, voir `matching._intensity_vocabulary`) ;
+# "apple" correspond à leur catégorie "Pomme" (voir alias ci-dessus).
+AROMA_WHEEL_DEFINITIONS: dict[str, str] = {
+    "dried fruit": "Date, dried apricot, dried fig, raisin",
+    "berry": "Black currant, blueberry, grape, raspberry, strawberry",
+    "stone fruit": "Apricot, cherry, peach, plum",
+    "apple": "Apple, pear (Yakima's “Pomme” category)",
+    "melon": "Cantaloupe, cucumber, honeydew, watermelon",
+    "tropical": "Banana, coconut, guava, lychee, mango, passion fruit, pineapple",
+    "citrus": "Grapefruit, lemon, lemongrass, lime, orange",
+    "floral": "Cherry blossom, geranium, jasmine, rose, soapy",
+    "herbal": "Black tea, dill, green tea, mint, rosemary, thyme "
+             "— aromatic culinary herbs/tea",
+    "vegetal": "Cabbage, celery, green pepper, tomato plant "
+              "— savory vegetable notes, often a caution flag in brewing",
+    "grassy": "Green grass, hay — freshly cut grass, not aromatic herbs",
+    "earthy": "Barnyard, compost, geosmin, leather, mushroom, soil",
+    "woody": "Cedar, pine, resinous, sawdust, tea tree, tobacco",
+    "spicy": "Anise, black pepper, cinnamon, clove, ginger",
+    "sweet aromatic": "Bubblegum, caramel, chocolate, creamy, honey, vanilla",
 }
 
 # Carte d'affinités descripteurs pour le MODE CONTRASTE (cas A).

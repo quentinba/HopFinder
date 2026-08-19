@@ -46,8 +46,39 @@ def _mid(lo, hi):
     return sum(xs) / len(xs) if xs else None
 
 
+def _disambiguate_hop_names(hops: dict) -> None:
+    """Désambiguïse EN PLACE `hops[v]["name"]` par région, uniquement en cas
+    de collision de nom réelle (2026-08-19, T60 -- demande utilisateur :
+    "you either need to remove duplicate or modify the name base on the
+    provenance... modify the name" puisque la provenance -- région -- est
+    facile à retrouver, déjà stockée dans `hops.region` et vérifiée en
+    direct via l'API Algolia Yakima pour Amarillo/Perle/Saaz/Northern
+    Brewer, T53/T54). Ex. deux entrées "Northern Brewer" (US vs Allemagne,
+    deux `variety_code` Yakima RÉELS pour la même variété cultivée dans deux
+    pays différents, pas un doublon accidentel -- les VRAIS doublons de slug
+    pour la MÊME région, ex. Challenger/Fuggle, sont déjà fusionnés à
+    l'ingestion, voir `ingest.merge_hop_varieties`/`_find_variety_by_name_region`,
+    T53) deviennent "Northern Brewer (United States)"/"Northern Brewer
+    (Germany)" -- jamais fusionnées (perdrait la distinction de terroir
+    réelle), jamais laissées ambiguës.
+
+    Appliqué UNE FOIS ici, dans `load()` -- la seule source de `hops` pour
+    TOUT le reste (amplify/contrast/by_descriptor/blends/CLI/GUI) : chaque
+    consommateur voit déjà le nom désambiguïsé sans code répété ailleurs.
+    Ancien code équivalent (`app._disambiguated_hop_labels`, calculait une
+    table de libellés séparée seulement pour le sélecteur Browse) retiré :
+    plus nécessaire une fois la désambiguïsation faite à la source."""
+    by_name: dict[str, list[str]] = {}
+    for v, h in hops.items():
+        by_name.setdefault(h["name"], []).append(v)
+    for v, h in hops.items():
+        if len(by_name[h["name"]]) > 1 and h.get("region"):
+            h["name"] = f"{h['name']} ({h['region']})"
+
+
 def load(con: sqlite3.Connection):
     hops = {r["variety"]: dict(r) for r in con.execute("SELECT * FROM hops")}
+    _disambiguate_hop_names(hops)
     raw: dict = {}
     for r in con.execute("SELECT * FROM hop_composition WHERE confidence != 'suspect'"):
         raw.setdefault(r["variety"], {}).setdefault(r["compound"], []).append(
@@ -67,6 +98,64 @@ def load(con: sqlite3.Connection):
         hop_desc.setdefault(r["variety"], set()).add(r["descriptor"])
     mols = {r["compound"]: dict(r) for r in con.execute("SELECT * FROM molecules")}
     return hops, comp, hop_desc, mols
+
+
+# Seuil d'acide alpha (%) séparant aromatic de bittering/both, demande
+# utilisateur (2026-08-19) : "AA% mean... can be used to infer the
+# aromatic/bittering status". PAS un seuil deviné/manuel -- mesuré sur les
+# 142 houblons ayant À LA FOIS un `purpose` RÉEL (BeerMaverick) et un acide
+# alpha connu (scan du seuil qui maximise l'accord aromatic vs
+# bittering+both) : 7.0% est le meilleur séparateur trouvé, 78% d'accord
+# avec le classement BeerMaverick réel (79 vrais positifs, 32 vrais
+# négatifs, 20 faux positifs, 11 faux négatifs) — imparfait (chevauchement
+# réel important : des houblons "aromatic" mesurés vont jusqu'à 17,5%
+# d'alpha, des "bittering" descendent à 5%), mais cohérent avec la
+# convention brassicole usuelle (~7-8%). D'où le label "Inferred:" en GUI,
+# jamais présenté comme une donnée mesurée au même titre que BeerMaverick.
+ALPHA_ACID_BITTERING_THRESHOLD_PCT = 7.0
+
+
+def infer_purpose_from_alpha_acid(comp_for_variety: dict) -> str | None:
+    """Devine aromatic/bittering depuis l'acide alpha moyen (mid, déjà
+    réconcilié multi-sources par `load`) quand aucun `purpose` RÉEL
+    (BeerMaverick) n'existe. Toujours binaire (jamais "both" — le seuil
+    empirique ne sépare que 2 classes, voir `ALPHA_ACID_BITTERING_
+    THRESHOLD_PCT`). None si l'acide alpha lui-même est absent (rien pour
+    deviner)."""
+    rec = comp_for_variety.get("alpha_acid")
+    if not rec or rec.get("mid") is None:
+        return None
+    return "bittering" if rec["mid"] >= ALPHA_ACID_BITTERING_THRESHOLD_PCT else "aromatic"
+
+
+def resolve_purpose(purpose: str | None, comp_for_variety: dict) -> tuple[str | None, bool]:
+    """(purpose_effectif, est_inféré) pour L'AFFICHAGE uniquement. Le
+    `purpose` RÉEL (BeerMaverick) l'emporte toujours ; repli sur l'acide
+    alpha SEULEMENT s'il est absent. Jamais utilisé pour piloter la
+    STRUCTURE des blends (aromatic+bittering garantis, voir
+    `_pairing_grown_blends`/`purpose_by_variety`) — une estimation
+    imparfaite (78% d'accord, pas une mesure) reste utile à l'affichage
+    plutôt qu'un "Unknown" sans aucune piste, du moment qu'elle reste
+    étiquetée comme telle (`est_inféré=True`), mais ne doit jamais devenir
+    silencieusement une garantie de structure de blend."""
+    if purpose is not None:
+        return purpose, False
+    inferred = infer_purpose_from_alpha_acid(comp_for_variety)
+    return inferred, inferred is not None
+
+
+def _purpose_matches_filter(resolved_purpose: str | None, purposes: set[str]) -> bool:
+    """Un houblon "both" satisfait le filtre dès que L'UN des deux rôles est
+    demandé (il EST aromatique ET amérisant, pas un troisième état à part) --
+    jamais de correspondance pour un purpose totalement inconnu (`None`, ni
+    réel ni inférable faute d'acide alpha connu) : un filtre actif exclut ce
+    qu'il ne peut pas classer, plutôt que de l'inclure par défaut (T61,
+    2026-08-19)."""
+    if resolved_purpose is None:
+        return False
+    if resolved_purpose == "both":
+        return bool(purposes & {"aromatic", "bittering"})
+    return resolved_purpose in purposes
 
 
 def hop_compound(m: str) -> str:
@@ -283,7 +372,38 @@ def amplify(con, note: str, w_mol: float = 0.5, w_desc: float = 0.5, use_oav=Fal
 # --------------------------------------------------------------------------- #
 # CAS A — contrast (piloté par les affinités descripteurs, pas les molécules)
 # --------------------------------------------------------------------------- #
-def contrast(con, note: str | None = None, descriptors: list[str] | None = None, top=8):
+# Les 10 catégories "cœur" : le seul jeu de valeurs possibles dans
+# CONTRAST_AFFINITY (maillage fermé, voir reference.py) -- calculé une fois
+# ici plutôt que de laisser app.py importer `reference` directement (app.py
+# n'importe que `matching`/`schema`, jamais les modules de données bruts).
+CONTRAST_CORE_CATEGORIES: list[str] = sorted(set().union(*reference.CONTRAST_AFFINITY.values()))
+
+# Définitions des 15 catégories de la roue d'arôme (voir reference.py pour le
+# détail/sourçage) -- même raison de ré-export que ci-dessus, app.py n'importe
+# jamais `reference` directement.
+AROMA_WHEEL_DEFINITIONS: dict[str, str] = reference.AROMA_WHEEL_DEFINITIONS
+
+
+def contrast_affinity_target(descriptors: list[str]) -> tuple[set[str], list[str]]:
+    """Calcule la cible d'affinité PROPOSÉE (`reference.CONTRAST_AFFINITY`)
+    pour une sélection de descripteurs de note, sans toucher à la base --
+    factorisé hors de `contrast()` (2026-08-19, demande utilisateur : "we
+    should orient the complementary aroma by pre-selecting them but let the
+    user chose which one he want to keep") pour que la GUI puisse afficher
+    cette proposition AVANT de lancer la recherche, comme pré-cochée d'une
+    case à cocher modifiable plutôt qu'imposée. Retourne (target, unmapped) --
+    `unmapped` : les descripteurs saisis sans aucune entrée dans
+    `CONTRAST_AFFINITY` (signalé explicitement, jamais silencieux)."""
+    ndesc = _normalize_descriptors(descriptors)
+    target: set[str] = set()
+    for d in ndesc:
+        target.update(reference.CONTRAST_AFFINITY.get(d, []))
+    unmapped = sorted(d for d in ndesc if d not in reference.CONTRAST_AFFINITY)
+    return target, unmapped
+
+
+def contrast(con, note: str | None = None, descriptors: list[str] | None = None,
+            target_descriptors: list[str] | None = None, purposes: list[str] | None = None, top=8):
     """
     `note` : nécessite que `note_descriptors` contienne déjà des descripteurs
     pour cette note — lève ValueError sinon. Aucune note n'en a par défaut
@@ -299,14 +419,68 @@ def contrast(con, note: str | None = None, descriptors: list[str] | None = None,
     `by_descriptor`, grounded sur `hop_descriptors`, pas inventé). Prioritaire
     sur `note` si les deux sont fournis.
 
+    `target_descriptors` (2026-08-19, demande utilisateur explicite --
+    "let the user choose which one he wants to keep... rather than imposing
+    the mapping") : REMPLACE la cible normalement calculée automatiquement
+    depuis `CONTRAST_AFFINITY` par cet ensemble choisi à la main. Cas d'usage
+    typique : `tropical` propose ["dank", "resinous", "spicy"], mais
+    l'utilisateur ne veut que "spicy" (ex. pour retrouver un houblon noble
+    comme Saaz, noyé sous des houblons dank/resinous plus nombreux) -- la
+    GUI pré-coche la proposition (`contrast_affinity_target`) dans une case
+    à cocher modifiable, PUIS passe la sélection (potentiellement réduite)
+    ici. `None` (par défaut) = comportement inchangé, calcul automatique
+    complet -- rétrocompatible pour le CLI et tout appel direct de l'API qui
+    ne connaît pas ce raffinement.
+
     Retourne aussi `unmapped` : les descripteurs choisis qui n'ont AUCUNE
     entrée dans `reference.CONTRAST_AFFINITY` (couvre les 38 descripteurs
     réels de la base construite au moment de l'écriture, mais un futur crawl
     peut en révéler un nouveau) — signalés explicitement plutôt que de
     disparaître en silence dans une cible d'affinité vide, pour ne pas laisser
     croire à tort qu'aucun houblon ne contraste avec un descripteur donné.
+
+    **Tri à trois niveaux** (2026-08-19, signalé par l'utilisateur : Saaz
+    n'apparaissait pas pour "tropical"/"mango" même en augmentant `top` au
+    maximum de la GUI). Root cause vérifiée en direct : Saaz recoupe bien la
+    cible (`spicy`, un des 3 descripteurs cœur de "tropical"), mais SEULEMENT
+    1/3 -- score 33.3, la même valeur que 83 AUTRES houblons sur une base
+    réelle (`target` n'a que 3-4 valeurs de score possibles, `100 * |hit| /
+    |target|`, donc des égalités massives sont la norme, pas l'exception).
+    Sans second critère, l'ordre à l'intérieur d'une égalité dépendait de
+    l'ordre d'itération SQL de `hops` (ni alphabétique, ni pertinent) --
+    Saaz tombait à la position ~74 par pur hasard d'ordonnancement, hors de
+    portée du plafond GUI (30). Ajout d'un tri secondaire par `total_oil`
+    réconcilié desc (même proxy d'intensité aromatique qu'`by_descriptor`),
+    puis `variety` asc en dernier recours (déterminisme total) -- rend le
+    classement REPRODUCTIBLE et explicable au lieu d'arbitraire, mais NE
+    garantit pas qu'un houblon donné dans une égalité massive apparaisse
+    dans les `top` premiers : c'est `total_matches` (ci-dessous) qui rend
+    cette limite visible plutôt que silencieuse.
+
+    `total_matches` (nouveau) : nombre TOTAL de houblons recoupant la cible
+    AVANT troncature à `top` -- la GUI l'utilise pour signaler explicitement
+    une troncature (« showing 8 of 91 matches ») plutôt que de laisser
+    croire que `top` couvre tout.
+
+    `purposes` (2026-08-19, T61, demande utilisateur explicite -- "we should
+    add another menu for purpose, it would be pre-selecting both bittering
+    and aromatic but we should let user add a filter on this purpose") :
+    filtre les résultats sur le purpose EFFECTIF (`resolve_purpose` -- réel
+    BeerMaverick, ou inféré depuis l'acide alpha en son absence, EXACTEMENT
+    la même résolution que ce que la GUI affiche déjà par ligne, jamais un
+    filtre sur une valeur différente de ce qui est montré). `None` (par
+    défaut) = aucun filtre, comportement inchangé, rétrocompatible CLI. Un
+    houblon "both" satisfait le filtre dès qu'AU MOINS un des deux rôles
+    demandés lui correspond (voir `_purpose_matches_filter`) ; un purpose
+    totalement inconnu (ni réel ni inférable) est exclu dès qu'un filtre est
+    actif. Appliqué ICI (dans `matching.contrast`, pas après coup côté GUI)
+    pour que `total_matches`/le tri/la troncature à `top` restent cohérents
+    avec ce que l'utilisateur voit réellement -- un filtrage GUI a posteriori
+    aurait faussé le message de troncature (T56) et pu cacher des résultats
+    qui auraient dû compter dans `total_matches`.
     """
     hops, comp, hop_desc, _ = load(con)
+    purposes_set = set(purposes) if purposes is not None else None
     if descriptors:
         ndesc = _normalize_descriptors(descriptors)
         label = ", ".join(sorted(ndesc)) if ndesc else "(vide)"
@@ -323,23 +497,41 @@ def contrast(con, note: str | None = None, descriptors: list[str] | None = None,
     else:
         raise ValueError("contrast nécessite soit `note` (avec note_descriptors "
                          "peuplé), soit `descriptors` (sélection manuelle).")
-    # descripteurs qui contrastent bien avec ceux de la note
-    target = set()
+    # descripteurs qui contrastent bien avec ceux de la note -- `target_descriptors`
+    # (choisi à la main par l'utilisateur en GUI, voir docstring) REMPLACE le
+    # calcul automatique s'il est fourni ; `unmapped` reste calculé sur `ndesc`
+    # (les descripteurs de LA NOTE, pas la cible) dans les deux cas, c'est une
+    # info sur la note saisie, indépendante de la façon dont la cible a été
+    # obtenue ensuite.
     unmapped = sorted(d for d in ndesc if d not in reference.CONTRAST_AFFINITY)
-    for d in ndesc:
-        target.update(reference.CONTRAST_AFFINITY.get(d, []))
+    if target_descriptors is not None:
+        target = _normalize_descriptors(target_descriptors)
+    else:
+        target = set()
+        for d in ndesc:
+            target.update(reference.CONTRAST_AFFINITY.get(d, []))
     ranked = []
     for h in hops:
         hd = hop_desc.get(h, set())
         hit = hd & target
-        if hit:
-            ranked.append({"variety": h, "name": hops[h]["name"],
-                           "score": round(100 * len(hit) / max(len(target), 1), 1),
-                           "contrast_via": sorted(hit), "sources": hops[h]["sources"],
-                           "purpose": hops[h].get("purpose")})
-    ranked.sort(key=lambda r: -r["score"])
+        if not hit:
+            continue
+        hcomp = comp.get(h, {})
+        if purposes_set is not None:
+            resolved_purpose, _ = resolve_purpose(hops[h].get("purpose"), hcomp)
+            if not _purpose_matches_filter(resolved_purpose, purposes_set):
+                continue
+        total_oil = (hcomp.get("total_oil") or {}).get("mid") or 0.0
+        ranked.append({"variety": h, "name": hops[h]["name"],
+                       "score": round(100 * len(hit) / max(len(target), 1), 1),
+                       "contrast_via": sorted(hit), "sources": hops[h]["sources"],
+                       "purpose": hops[h].get("purpose"),
+                       "_rank": (-len(hit), -total_oil, h)})
+    ranked.sort(key=lambda r: r["_rank"])
+    for r in ranked:
+        del r["_rank"]
     return {"mode": "contrast", "note": label, "affinity_target": sorted(target),
-           "unmapped": unmapped, "ranked": ranked[:top]}
+           "unmapped": unmapped, "total_matches": len(ranked), "ranked": ranked[:top]}
 
 
 def _hop_pairing_frequencies(con) -> dict[tuple[str, str], float]:
@@ -540,6 +732,7 @@ def _pairing_grown_blends(con, candidates: list[dict], target: set[str], max_hop
 
 
 def contrast_blend(con, note: str | None = None, descriptors: list[str] | None = None,
+                   target_descriptors: list[str] | None = None, purposes: list[str] | None = None,
                    max_hops: int = 5, top_candidates: int = 30, base_variety: str | None = None):
     """
     Propose des blends de taille croissante (1..max_hops) plutôt qu'un seul
@@ -549,8 +742,25 @@ def contrast_blend(con, note: str | None = None, descriptors: list[str] | None =
     couverture explicite). `contrast` reste non-moléculaire par design (cf.
     ARCHITECTURE.md) : la cible et la pertinence des candidats viennent
     toujours de `CONTRAST_AFFINITY`/`hop_descriptors`, jamais des molécules.
+
+    `target_descriptors` (2026-08-19, voir `contrast`) : propagé tel quel --
+    le blend proposé doit viser la MÊME cible (potentiellement réduite à la
+    main par l'utilisateur) que le tableau de résultats, jamais une cible
+    différente calculée séparément.
+
+    `purposes` (2026-08-19, T61, voir `contrast`) : propagé au POOL de
+    candidats (filtré avant `_pairing_grown_blends`), pour que le blend soit
+    composé des mêmes houblons que ceux affichés dans le tableau de
+    résultats. N'affecte PAS la garantie structurelle aromatic+bittering à
+    la taille 2 (`_pairing_grown_blends`, qui continue d'utiliser
+    exclusivement le purpose RÉEL BeerMaverick, jamais ce filtre ni
+    l'inférence) -- si le filtre exclut un rôle entier (ex. "aromatic"
+    seul), le pool n'a simplement plus de candidat du rôle complémentaire,
+    et le mécanisme retombe sur son repli générique déjà existant (documenté
+    dans `_pairing_grown_blends`), pas une erreur.
     """
-    r = contrast(con, note=note, descriptors=descriptors, top=top_candidates)
+    r = contrast(con, note=note, descriptors=descriptors,
+                target_descriptors=target_descriptors, purposes=purposes, top=top_candidates)
     target = set(r["affinity_target"])
     candidates = [dict(h, covers=set(h["contrast_via"])) for h in r["ranked"]]
     hops, _, _, _ = load(con)
@@ -611,23 +821,67 @@ def amplify_blend(con, note: str, w_mol: float = 0.5, w_desc: float = 0.5, use_o
 # --------------------------------------------------------------------------- #
 # DÉCOUVERTE — by_descriptor (pas un cas A/B : pas de note requise)
 # --------------------------------------------------------------------------- #
-_NON_AROMA_DISPLAY = {"total_oil", "alpha_acid", "beta_acid"}
+_NON_AROMA_DISPLAY = {"total_oil", "alpha_acid", "beta_acid", "co_humulone"}
 
 
-def by_descriptor(con, selected: list[str], top: int = 10):
+def by_descriptor(con, selected: list[str], wheel_descriptors: list[str] | None = None,
+                  top: int = 10):
     """
     Houblons dont la roue d'arôme (`hop_descriptors`, BarthHaas/Yakima réelles)
     recoupe une sélection de descripteurs. Grounded sur les données houblon
     directement — ne dépend ni de CONTRAST_AFFINITY (prior curé) ni de FooDB.
-    Tri : (1) nb de descripteurs recoupés desc, (2) total_oil réconcilié desc
-    (proxy d'intensité aromatique), (3) variety asc (déterminisme).
+
+    Tri à DEUX RÔLES SÉPARÉS (2026-08-19, revirement de méthodologie --
+    décision utilisateur après un premier passage T33/T54 jugé imprécis en
+    testant en direct "papaya" + roue [tropical, citrus, floral] : un
+    houblon qui recoupait les 3 termes de la roue mais PAS "papaya" (le
+    signal le plus précis demandé) ressortait quand même mélangé dans les
+    résultats, avant les houblons "papaya" réels -- signalé explicitement
+    comme moins précis que voulu, "the qualitative textual descriptor is
+    not a priority over the wheel aroma descriptor selected"). `selected`
+    (texte, vocabulaire complet à 104 termes -- ex. "papaya", plus précis
+    que les 15 catégories de la roue) est désormais le SEUL filtre
+    catégorique : un houblon DOIT recouper au moins un descripteur texte
+    pour apparaître. `wheel_descriptors` (roue quantitative, ex. les pills
+    GUI) ne sert plus qu'à NOTER (jamais filtrer) les houblons déjà
+    retenus, par intensité moyenne mesurée -- jamais un critère de
+    présence/absence.
+    1. **Catégorique** (`selected`, PRIORITAIRE, inchangé dans son
+       mécanisme) : nb de descripteurs TEXTE recoupés desc -- reste le
+       filtre ET le tri principal.
+    2. **Quantitatif** (`wheel_descriptors`, départage SEULEMENT à
+       l'intérieur d'un même palier catégorique, ne filtre JAMAIS) :
+       intensité moyenne (`hop_aroma_intensity`, T26 backlog, Yakima
+       uniquement, 0-100 réel) sur l'intersection entre `wheel_descriptors`
+       et ce que CE houblon a réellement en données quantitatives --
+       jamais une moyenne comptant un descripteur manquant comme 0 (ce
+       serait fabriquer une donnée). Houblons sans intensité exploitable
+       classés après ceux qui en ont une, dans le MÊME palier catégorique
+       -- honnêteté d'abord, même principe que les molécules orphelines.
+    3. `total_oil` réconcilié desc (repli) puis `variety` asc
+       (déterminisme total).
+
+    **Repli** : si `selected` est VIDE (rien tapé dans le multiselect texte,
+    seulement des pills roue cochées), `wheel_descriptors` sert AUSSI de
+    filtre catégorique -- sinon rien ne filtrerait du tout. Dès que
+    `selected` est non-vide, `wheel_descriptors` redevient purement une
+    note, jamais un filtre, quel que soit son contenu.
+
+    `intensity`/`quant_score`/`quant_descriptors` exposés dans chaque entrée
+    retournée pour que la GUI affiche explicitement CE QUI a été utilisé
+    (transparence -- jamais un réordonnancement silencieux).
     """
     hops, comp, hop_desc, _ = load(con)
     selected = {reference.DESCRIPTOR_ALIASES.get(d, d) for d in selected}
+    wheel = {reference.DESCRIPTOR_ALIASES.get(d, d) for d in (wheel_descriptors or [])}
+    categorical = selected or wheel
+    intensity_by_variety: dict[str, dict[str, float]] = {}
+    for r in con.execute("SELECT variety, descriptor, intensity FROM hop_aroma_intensity"):
+        intensity_by_variety.setdefault(r["variety"], {})[r["descriptor"]] = r["intensity"]
     ranked = []
     for h in hops:
         hd = hop_desc.get(h, set())
-        matched = selected & hd
+        matched = categorical & hd
         if not matched:
             continue
         hcomp = comp.get(h, {})
@@ -636,11 +890,17 @@ def by_descriptor(con, selected: list[str], top: int = 10):
             ({"compound": c, "mid": v["mid"], "unit": v["unit"], "sources": v["sources"]}
              for c, v in hcomp.items() if c not in _NON_AROMA_DISPLAY and v["mid"] is not None),
             key=lambda r: -r["mid"])
+        intensity = intensity_by_variety.get(h, {})
+        quant_descriptors = sorted(d for d in wheel if d in intensity)
+        quant_score = (sum(intensity[d] for d in quant_descriptors) / len(quant_descriptors)
+                      if quant_descriptors else None)
         ranked.append({"variety": h, "name": hops[h]["name"],
                        "matched_descriptors": sorted(matched), "all_descriptors": sorted(hd),
                        "compounds": compounds, "sources": hops[h]["sources"],
-                       "purpose": hops[h].get("purpose"),
-                       "_rank": (-len(matched), -total_oil, h)})
+                       "purpose": hops[h].get("purpose"), "intensity": intensity,
+                       "quant_score": quant_score, "quant_descriptors": quant_descriptors,
+                       "_rank": (-len(matched), 0 if quant_score is not None else 1,
+                                -(quant_score or 0.0), -total_oil, h)})
     ranked.sort(key=lambda r: r["_rank"])
     for r in ranked:
         del r["_rank"]

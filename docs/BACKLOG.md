@@ -419,6 +419,853 @@ l'implémentation ([ ] à faire, [x] fait — voir le commit associé).
   nom. Réingestion réelle (`crawl-barthhaas` + `crawl-yakima`) : 43 → 0
   houblons avec "Brand" dans le nom affiché.
 
+- [x] **T52 — Alpha/beta acides, co-humulone, huile totale en avant + purpose
+  inféré depuis l'acide alpha (demande utilisateur, 2026-08-19)**
+  Signalé : "il manque un élément principal : les infos les plus importantes
+  de yakima : i) ALPHA ACIDS % and it's fraction of cohumulone ii) BETA ACIDS
+  % et iii) TOTAL OIL ml/100g" — puis "the AA% mean... can be used to infer
+  the aromatic/bittering status", "instead of unknown for the purpose, use
+  infered:aromatic and infered:bittering", "make this column a bit more wide".
+
+  **Bug racine découvert en creusant** : `alpha_acid`/`beta_acid` étaient
+  dans `schema.DROP_COMPOUNDS` ("non aromatiques") — jamais stockées en base
+  du tout (pas juste filtrées à l'affichage), vérifié via
+  `SELECT DISTINCT compound FROM hop_composition` ne retournant aucune ligne
+  `alpha_acid`/`beta_acid`. Retirées de ce filtre (`polyphenols` seul y
+  reste, entrée morte jamais produite par aucun parseur).
+
+  **Co-humulone** (fraction des acides alpha) : nouveau, Yakima UNIQUEMENT
+  (`co_h` côté API Algolia — Citra 20-24%, cohérent avec les valeurs
+  publiques connues) — vérifié en direct qu'il est absent du HTML BarthHaas
+  (aucune ligne "CO-HUMULONE" sur leurs fiches). `parsers.YAKIMA_API_FIELDS`
+  mappe `co_h` -> `co_humulone`. Réingestion réelle (`crawl-barthhaas` +
+  `crawl-yakima`) : 249 lignes alpha_acid, 248 beta_acid, 150 co_humulone
+  (Yakima seul), 249 total_oil dans `hop_composition`.
+
+  **Purpose inféré** (`matching.infer_purpose_from_alpha_acid`/
+  `resolve_purpose`) : seuil `ALPHA_ACID_BITTERING_THRESHOLD_PCT = 7.0`
+  **mesuré**, pas deviné — scan de seuils (0 à 25%, pas 0,25) sur les 142
+  houblons ayant À LA FOIS un `purpose` BeerMaverick réel et un acide alpha
+  connu, cherchant le seuil maximisant l'accord aromatic vs bittering+both :
+  7,0% est le meilleur séparateur trouvé, 78,2% d'accord (79 vrais positifs,
+  32 vrais négatifs, 20 faux positifs, 11 faux négatifs) — imparfait
+  (chevauchement réel : des houblons "aromatic" mesurés montent jusqu'à
+  17,5% d'alpha, des "bittering" descendent à 5%), d'où le préfixe
+  "Inferred: " systématique en GUI, jamais présenté au même niveau qu'une
+  donnée BeerMaverick réelle. **Portée strictement limitée à l'affichage** :
+  `resolve_purpose` ne touche jamais `_pairing_grown_blends`/
+  `purpose_by_variety` (structure des blends aromatic+bittering, T-purpose),
+  qui continue d'utiliser EXCLUSIVEMENT le purpose BeerMaverick réel — une
+  estimation à 78% ne doit jamais contaminer une garantie de structure
+  fondée sur de la donnée réelle. Le vrai purpose l'emporte toujours quand
+  il existe ; repli sur l'inférence seulement s'il est `None` et que
+  l'acide alpha est connu ; sinon `None` (jamais de "Unknown" fabriqué).
+
+  **GUI** (`app._render_key_stats`, `app._row_with_purpose`) : 4
+  `st.metric` (Alpha/Beta/Co-humulone/Total oil, "—" si absent, jamais une
+  valeur inventée) ajoutés en tête de Browse ET des expanders de détail
+  d'Amplify/Contrast/By-descriptor (même contenu partout, demande
+  utilisateur explicite "ainsi que dans les détails des houblons proposés
+  pour les autres outils"). Unité/qualificatif déplacé dans le LABEL du
+  metric ("Total oil (ml/100g)", "Co-humulone (% of AA)") plutôt que dans
+  la valeur : "1.4 ml/100g" tronquait en "1.4 ml/1…" dans la largeur de
+  colonne fixe de `st.metric` (constaté en direct au navigateur). Colonne
+  Purpose des tableaux de résultats (`_render_hop_rows`) élargie de 3 à 5
+  (sur une grille `st.columns` totalisant 16 parts) : "Inferred: Bittering"
+  tronquait encore en "Inferred: Bitt…" à 3, plein texte lisible à 5
+  (vérifié en direct au navigateur, capture avant/après). `_NON_AROMA_DISPLAY`
+  (deux définitions, `app.py` et `matching.py`) étendu avec `co_humulone`
+  pour ne pas le dupliquer dans le tableau de composition générique
+  maintenant qu'il est réellement stocké et affiché via `_render_key_stats`.
+
+  Effet de bord noté en vérifiant (hors scope de ce ticket, pas corrigé) :
+  la base contient un doublon "Amarillo®" (`amarillo`, fusion
+  BarthHaas+Yakima, purpose=None -> inféré) et `amarillo-brand-ama04`
+  (Yakima seul, purpose BeerMaverick réel="aromatic") — même nom affiché,
+  variety keys différentes non fusionnées, indiscernables dans le
+  sélecteur Browse. Pas un artefact de ce ticket (préexistant), à investiguer
+  séparément si signalé par l'utilisateur.
+
+- [x] **T53 — Renommage d'affichage "HopFinder", copie de la page d'accueil
+  clarifiée, roue d'arôme ajoutée à `by-descriptor`, doublons de houblons
+  audités et corrigés (demande utilisateur, 2026-08-19)**
+
+  **Renommage d'affichage.** Demande : "Make the name of the App HopFinder
+  instead of hopmatch (everywhere on Github and the GUI)". Clarifié par
+  question explicite à l'utilisateur : affichage seulement (GUI
+  `st.set_page_config`/`st.title`, titre + prose conversationnelle de
+  README.md), le paquet Python, la commande CLI (`hopmatch build`/...) et
+  `pyproject.toml` restent `hopmatch` — pas de renommage mécanique du code.
+  Les mentions LITTÉRALES de commandes CLI dans README.md (blocs de code,
+  ex. `hopmatch amplify mango`) restent inchangées : ce sont de vraies
+  commandes, pas du texte de marque.
+
+  **Copie de la page d'accueil (`app._TOOL_SUMMARIES`).** 4 demandes
+  explicites : (1) Amplify : retiré "rather than reproducing it" (redondant
+  avec "extends") ; (2) expliqué TF-IDF en une phrase (pondère chaque
+  molécule partagée par sa spécificité entre houblons, pour qu'une molécule
+  rare comme un thiol compte plus qu'une molécule ubiquitaire comme le
+  myrcène) ; (3) précisé que la couche descripteurs (aroma-wheel overlap)
+  ne s'active QUE si l'utilisateur ajoute manuellement des descripteurs
+  correspondant à son ajout ; (4) Contrast : précisé qu'un dictionnaire
+  codé en dur (`reference.CONTRAST_AFFINITY`) associe chaque descripteur à
+  ses contrastes complémentaires — un prior heuristique de pairing
+  culinaire, pas une donnée sourcée, jamais moléculaire (cohérent avec la
+  mise en garde déjà présente dans README.md#ce-qui-est-un-prior-pas-une-donnée).
+  (5) Retiré le préfixe "No note required: " de la carte `by-descriptor`
+  (déjà clair par le nom de l'outil).
+
+  **Roue d'arôme ajoutée à `by-descriptor`.** Signalé : "The aroma wheel is
+  missing from the from descriptor tool". L'expander de détail par houblon
+  de `_by_descriptor` (badge purpose + stats clés + descripteurs + tableau
+  de composition, ajoutés en T52) n'avait jamais la roue d'arôme
+  quantitative contrairement à `_browse`/`_hop_detail_expanders`
+  (Amplify/Contrast) — même bloc `st.altair_chart(_aroma_wheel(...),
+  theme=None)` désormais ajouté aux trois, contenu réellement identique
+  partout où un houblon est détaillé.
+
+  **Doublons de houblons audités (demande : "There is two Amarillo entry,
+  check why and fix it for this hop and other if it exists").** Audit
+  complet de `hops` par `name` strictement identique : **7 paires** trouvées,
+  de DEUX natures différentes, distinguées en vérifiant en direct sur l'API
+  Algolia Yakima (`imported_fields.country_code`/`cultivar`/`variety_code`) :
+
+  1. **5 VRAIS doublons** (Challenger, Fuggle, Hallertauer Tradition,
+     Hersbrucker Spät, Target) : même variété, MÊME région, juste un slug
+     différent entre BarthHaas (ex. `wye-challenger`, préfixe historique du
+     Wye College) et Yakima (`challenger`) — jamais fusionnés faute de
+     mécanisme de réconciliation cross-source au-delà du slug exact/
+     dépréfixage marque (contrairement à `_resolve_hop_variety` pour
+     BeerMaverick). Root cause confirmée : `name` strictement identique
+     entre les deux sources dans les 5 cas (pas de souci d'accents/
+     translittération à gérer), seule la `region` différait de libellé sans
+     changer de pays (BarthHaas "Great Britain" vs Yakima "United Kingdom").
+     **Corrigé à la racine** : `ingest._find_variety_by_name_region`
+     (nouveau, alias GB/UK volontairement restreint à ce cas vérifié) tente
+     une résolution par nom+région AVANT de créer une nouvelle ligne, dans
+     `crawl_barthhaas` ET `crawl_yakima` (symétrique, indépendant de l'ordre
+     des deux crawls) — seulement en repli quand la clé slug directe
+     n'existe pas déjà, pour ne jamais dévier d'une correspondance certaine.
+     `crawl_yakima` restructuré en deux passes pour que `hop_similar`
+     référence toujours la clé FINALE (post-fusion), jamais une clé
+     pré-fusion jamais écrite dans `hops` (bug identifié en écrivant le
+     correctif, jamais laissé passer). Les 5 paires DÉJÀ en base (créées
+     avant ce correctif) réparées via `ingest.merge_hop_varieties(con, keep,
+     drop)` (nouveau, réutilisable) : déplace composition/descripteurs/roue
+     d'arôme/associations houblon<->houblon (dans les deux sens) vers la
+     clé survivante, fusionne `sources` (union) et `purpose`
+     (`COALESCE(keep, drop)` — un seul des deux avait une valeur réelle dans
+     les 5 cas, jamais de conflit à trancher), supprime la ligne fusionnée.
+     Appliqué en direct sur la base réelle : 194 → 189 houblons, 0 référence
+     morte vérifiée après coup (hop_similar/hop_pairings/hop_substitutions/
+     hop_composition/hop_descriptors, tous varieties existent bien dans
+     `hops`).
+  2. **4 crops RÉELLEMENT distincts** (Amarillo®, Perle, Saaz, Northern
+     Brewer) : même nom affiché ET même cultivar (ex. Amarillo VGXP01) mais
+     cultivés dans des pays DIFFÉRENTS (Amarillo US vs Allemagne, Perle
+     US vs Allemagne, Saaz US vs Tchéquie, Northern Brewer US vs Allemagne)
+     — vérifié en direct sur `imported_fields.country_code` pour chaque
+     paire, jamais un artefact de données. `_find_variety_by_name_region`
+     ne les fusionne PAS grâce à la correspondance stricte sur la région
+     (garantie explicite, testée). **Fusionner ces 4 paires aurait été une
+     RÉGRESSION** (perte d'une vraie distinction de terroir) : la correction
+     est donc côté AFFICHAGE — `app._disambiguated_hop_labels` (nouveau)
+     ajoute `(région)` au libellé UNIQUEMENT en cas de collision de nom
+     réelle dans le sélecteur `browse` (ex. "Amarillo® (United States)" /
+     "Amarillo® (Germany)"), jamais sur un nom déjà unique.
+
+- [x] **T54 — `by-descriptor` : tri à deux couches (catégorique + quantitatif
+  roue d'arôme), sélection rapide par pills, heatmap shadée par intensité
+  (demande utilisateur, 2026-08-19)**
+
+  Demande explicite : "Currently in the from descriptor tool... we are
+  relying on descriptors... that is categorical, however we could rely on
+  the small amount of wheel aroma descriptor as quantitative value...
+  propose a 2 layer results ordering the hops that have the textual
+  descriptor but inside this selection, propose a ordered result... based
+  on the aroma wheel descriptors" — confirmé après une recommandation
+  explicite (tradeoffs : couverture 94/151 variétés Yakima uniquement,
+  vocabulaire 15 termes vs 104 pour `hop_descriptors`) — puis "propose a
+  section here user can click on the boxes corresponding to aroma wheel
+  flavors (since there is not much it will be more visible)".
+
+  **`matching.by_descriptor` — tri à deux couches.** Couche 1 (inchangée,
+  PRIORITAIRE) : nb de descripteurs `hop_descriptors` recoupés desc — reste
+  le filtre/tri principal, jamais remplacé. Couche 2 (NOUVELLE, départage
+  À L'INTÉRIEUR de chaque palier catégorique) : intensité moyenne
+  (`hop_aroma_intensity`, T26, Yakima uniquement, 0-100 réel) sur
+  l'INTERSECTION entre les descripteurs sélectionnés et ceux que CE houblon
+  a réellement en données quantitatives — jamais une moyenne comptant les
+  descripteurs manquants comme 0 (fabriquerait une donnée). Les houblons
+  sans intensité exploitable pour la sélection (pas de couverture Yakima,
+  ou descripteurs hors des 15 catégories de la roue) passent APRÈS ceux qui
+  en ont une dans le MÊME palier catégorique — jamais mélangés à un score
+  de 0 inventé, même principe que les molécules orphelines. Repli inchangé
+  sur `total_oil` puis `variety` en dernier recours. Chaque entrée retournée
+  expose désormais `quant_score`/`quant_descriptors`/`intensity` (transparence
+  — la GUI affiche explicitement ce qui a été moyenné, jamais un
+  réordonnancement silencieux).
+
+  **GUI — sélection rapide par `st.pills`.** Nouveau widget "Aroma wheel
+  flavors" (`st.pills`, `selection_mode="multi"`) au-dessus du multiselect
+  général à 104 termes, listant les 15 catégories à donnée quantitative —
+  "small number of options that fit on one line" (skill Streamlit),
+  nettement plus visible/cliquable que de les chercher dans le multiselect.
+  Union simple avec la sélection générale (pas de mécanisme séparé) : un
+  descripteur choisi via les pills a exactement le même effet catégorique
+  qu'un choix dans le multiselect — la différence est uniquement que les 15
+  termes de la roue ont AUSSI des données quantitatives exploitables pour le
+  tri secondaire.
+
+  **GUI — transparence par houblon.** Caption explicite dans chaque
+  expander de détail : "Quantitative refinement: X/100 avg. intensity on
+  [descripteurs] (Yakima)" quand une donnée existe, ou une explication
+  honnête de son absence (BarthHaas seul / variété non couverte) quand le
+  houblon matche catégoriquement un descripteur de la roue sans avoir de
+  donnée quantitative pour lui — jamais silencieux sur ce qui pilote
+  l'ordre.
+
+  **GUI — heatmap shadée par intensité.** `_descriptor_heatmap` passait
+  d'une teinte binaire (présent/absent) à 7 états : `absent` (fond neutre,
+  inchangé) / `no data` (gris neutre, présent côté `hop_descriptors` mais
+  sans intensité mesurée pour ce houblon précis — jamais confondu avec une
+  vraie valeur basse) / 5 paliers de bleu croissant (0-20 à 80-100,
+  discrétisé plutôt qu'un dégradé continu Vega, pour rester lisible sur une
+  petite cellule de grille). Réutilise `h["intensity"]` déjà chargé par
+  `matching.by_descriptor` pour le tri — aucune requête supplémentaire.
+  Vérifié en direct : sur une base réelle, les descripteurs hors des 15
+  catégories de la roue (ex. "pine"/"grapefruit", vocabulaire BeerMaverick)
+  s'affichent bien en gris "no data" sur toute la ligne plutôt qu'en bleu
+  inventé.
+
+  **Addendum (même jour, retour utilisateur immédiat après usage réel) —
+  revirement de méthodologie : le filtre catégorique et le score
+  quantitatif étaient UNIONNÉS dans un seul ensemble `selected`, donc un
+  houblon ne recoupant QUE des termes de la roue (ex. tropical/citrus/
+  floral) pouvait ressortir mélangé PARMI des houblons recoupant un
+  descripteur texte plus précis (ex. "papaya") choisi explicitement par
+  l'utilisateur.** Signalé en direct : "the qualitative textual descriptor
+  is not a priority over the wheel aroma descriptor selected... I think we
+  should separate the textual descriptor above, pre-select all hops having
+  this descriptor and then score the hops that match this based on the
+  average score of the wheel descriptor inputed". `matching.by_descriptor`
+  restructuré avec un DEUXIÈME paramètre `wheel_descriptors` (optionnel,
+  distinct du premier `selected`) : `selected` (texte, multiselect à 104
+  termes) est désormais le SEUL filtre catégorique dès qu'il est non-vide —
+  un houblon DOIT recouper au moins un descripteur texte pour apparaître ;
+  `wheel_descriptors` (pills) ne filtre plus RIEN, il sert uniquement à
+  NOTER (moyenne d'intensité) les houblons déjà retenus par le texte.
+  Repli explicite conservé : si AUCUN descripteur texte n'est choisi
+  (seulement des pills roue cochées), `wheel_descriptors` sert alors AUSSI
+  de filtre catégorique — sinon rien ne filtrerait du tout. GUI : la
+  caption de la section pills reformulée ("scores the results above by
+  measured intensity; does not filter them, except as a fallback when no
+  text descriptor is chosen") pour rendre ce rôle explicite. Vérifié en
+  direct sur données réelles : descripteur texte "papaya" + pills
+  [tropical, citrus, floral] → exactement les 4 houblons portant
+  réellement "papaya" (Idaho 7®, Ekuanot®, Azacca™, Mosaic®), chacun noté
+  par son intensité moyenne sur les 3 axes de la roue (ex. Idaho 7® :
+  81/100) — plus aucun houblon "roue seule" mélangé dans les résultats.
+
+  **Second addendum (même jour) — heatmap scindée en deux sections +
+  couleur "présent" corrigée.** Retour utilisateur immédiat après usage
+  réel : "could you however separate descriptors from quantitative aroma
+  wheel values in two section in the heatmap? Also replace the grey for
+  the presence of the descriptor by a black color because it look like
+  NaNs". `_descriptor_heatmap` (renommé en interne, factorisé via
+  `_heatmap_chart`) construit désormais DEUX grilles distinctes à partir du
+  même `ranked`/`shown` : une pour les descripteurs du vocabulaire roue à
+  15 catégories (`intensity_vocab`, nouveau paramètre), une pour tous les
+  autres (BarthHaas/Yakima/BeerMaverick, ex. "pine"/"grapefruit" —
+  structurellement JAMAIS de donnée quantitative, quel que soit le
+  houblon) — mélanger les deux laissait croire qu'un descripteur
+  catégorique-only était juste un houblon hors couverture Yakima plutôt
+  qu'une impossibilité de principe. Chaque section ne s'affiche que si
+  elle contient au moins un descripteur (`None` sinon). Palier "présent
+  sans donnée quantitative" recoloré de gris (`#b0aca5`) à noir plein
+  (`#000000`) — le gris se lisait comme un NaN/valeur manquante, pas comme
+  "présent" ; même palette/légende réutilisée dans les deux sections pour
+  rester cohérente. Vérifié en direct : sur une sélection réelle, la
+  section "Aroma wheel descriptors" montre citrus/tropical/floral/etc. en
+  dégradé de bleu, la section "Other descriptors" (fruity/pine/grapefruit/
+  mandarin...) entièrement en noir plein ou fond neutre, jamais de bleu
+  (cohérent : ces descripteurs n'ont structurellement aucune intensité
+  mesurée possible).
+
+- [x] **T56 — `contrast` : houblon attendu introuvable même au plafond de
+  résultats (demande utilisateur, 2026-08-19)**
+
+  Signalé : "If I put mango as descriptor or Tropical, I should have spicy as
+  complementary note. Hence I should find the Saaz hop amongst results, why
+  it's not the case even if I increase the number of results?"
+
+  **Investigation.** `reference.CONTRAST_AFFINITY["tropical"]` (et `["mango"]`)
+  = `["resinous", "dank", "spicy"]` — la cible d'affinité INCLUT bien "spicy".
+  Requête directe sur la base réelle : Saaz recoupe bien "spicy"
+  (`contrast_via: ["spicy"]`, score 33.3 = 1 descripteur recoupé sur 3) — donc
+  `matching.contrast` identifiait déjà correctement Saaz comme un match
+  valide. Le problème n'était PAS la logique de matching, mais le CLASSEMENT :
+  sur "tropical", 91 houblons recoupent la cible sur la base réelle, dont 84
+  à égalité au score minimal (33.3, un seul des 3 descripteurs recoupé) — le
+  score n'a que 3-4 valeurs discrètes possibles (`100 * |recoupés| /
+  |cible|`), donc des égalités massives sont la norme, pas l'exception. Sans
+  second critère de tri, l'ordre à l'intérieur d'une égalité dépendait de
+  l'itération SQL de `hops` (aucun `ORDER BY`, donc ni alphabétique ni
+  pertinent) — Saaz tombait à la position ~74 par pur hasard d'ordonnancement,
+  hors de portée du plafond GUI (30, avant ce correctif).
+
+  **Corrigé.** `matching.contrast` trie désormais à trois niveaux : (1) score
+  (nb de descripteurs cible recoupés, inchangé, PRIORITAIRE), (2) `total_oil`
+  réconcilié desc (même proxy d'intensité aromatique qu'`by_descriptor`, pas
+  une valeur inventée), (3) `variety` asc (déterminisme total en cas
+  d'égalité complète). Ceci rend le classement REPRODUCTIBLE et EXPLICABLE
+  au lieu d'arbitraire, mais ne garantit PAS qu'un houblon donné dans une
+  égalité massive de score apparaisse dans les `top` premiers — c'est un
+  vrai classement par pertinence relative (score d'abord), pas une garantie
+  d'exhaustivité. D'où un second correctif, complémentaire :
+  `matching.contrast` retourne désormais aussi `total_matches` (nombre TOTAL
+  de houblons recoupant la cible AVANT troncature à `top`) ; la GUI
+  (`app._contrast`) affiche une légende explicite ("Showing 8 of 91 hops
+  overlapping this target — raise 'Number of results'...") dès que
+  `total_matches > len(ranked)`, plutôt que de laisser la troncature
+  silencieuse — honnêteté d'abord, même principe que la couverture
+  moléculaire faible ou les molécules orphelines ailleurs dans le projet.
+  Plafond du curseur "Number of results" relevé de 30 à 100 (la cible
+  n'ayant souvent que 3-4 descripteurs, un plafond bas ne suffit pas à sortir
+  un match "un seul recoupement" d'une égalité de plusieurs dizaines de
+  houblons sur une base réelle).
+
+  **Effet de bord sur les tests existants.** Le nouveau tri secondaire par
+  `total_oil` a inversé l'ordre relatif de `mosaic`/`simcoe` (ex-aequo à
+  score 20.0 sur "citrus,floral" dans les fixtures : simcoe 1.75 >
+  citra 1.7 > mosaic 1.625 ml/100g) — un test de `contrast_blend`
+  (`test_contrast_blend_mixes_relevance_and_pairing_not_pure_frequency`)
+  dépendait de cet ordre implicite pour démontrer que la pertinence l'emporte
+  sur la fréquence BeerMaverick brute ; mis à jour pour utiliser le NOUVEL
+  ordre de pertinence (simcoe > citra > mosaic) sans changer l'intention du
+  test (toujours : le plus pertinent gagne, malgré une fréquence de pairing
+  plus basse).
+
+  Vérifié en direct sur données réelles : "tropical" → 91 houblons au total,
+  Saaz visible dès que le curseur "Number of results" est relevé (position
+  ~74 sur 91, dans le nouveau tri déterministe par total_oil).
+
+- [x] **T57 — `contrast` : cible d'affinité modifiable par l'utilisateur
+  (demande utilisateur, 2026-08-19, suite directe de T56)**
+
+  Signalé : "I think we should orient the complementary aroma by
+  pre-selecting them but let the user chose which one he want to keep. In
+  the saaz example, user could only want to find spicy as complementary
+  note, we should make possible to untick dank and woody(sic, resinous),
+  rather than imposing the mapping. So please make a menu below the
+  Descriptor of note to contrast where we will pre-tick proposed contrast
+  note but let the user modify them to obtain another result."
+
+  **Contexte.** T56 (même jour) avait déjà résolu la DÉCOUVRABILITÉ de Saaz
+  (tri déterministe + plafond de résultats relevé + transparence de
+  troncature), mais la cible d'affinité elle-même restait entièrement
+  imposée par `reference.CONTRAST_AFFINITY` — pour "tropical", toujours les
+  3 descripteurs dank+resinous+spicy, sans moyen de restreindre à un seul.
+  Ce ticket donne à l'utilisateur le contrôle direct sur CETTE cible.
+
+  **`matching.py`.** Nouveau `contrast_affinity_target(descriptors) ->
+  (target, unmapped)` : factorise le calcul auto (déjà présent dans
+  `contrast()`) hors de la fonction, pour que la GUI puisse l'appeler AVANT
+  de lancer la recherche et afficher la proposition. `contrast()` et
+  `contrast_blend()` gagnent un paramètre `target_descriptors: list[str] |
+  None = None` : quand fourni, REMPLACE entièrement le calcul automatique
+  (`unmapped` reste calculé sur les descripteurs de la NOTE, indépendamment
+  de la cible retenue ensuite — c'est une info sur la note, pas sur la
+  cible). `None` (par défaut) = comportement inchangé, rétrocompatible pour
+  le CLI et tout appel direct qui ignore ce raffinement. Nouvelle constante
+  `CONTRAST_CORE_CATEGORIES` (calculée depuis `CONTRAST_AFFINITY.values()`,
+  jamais d'autres valeurs possibles dans la carte — maillage fermé à 10
+  catégories) exposée pour que `app.py` n'ait pas besoin d'importer
+  `reference` directement (respect de la frontière architecturale existante
+  : app.py n'importe que `matching`/`schema`).
+
+  **GUI (`app._contrast`).** Nouvelle section `st.pills` (sélection
+  multiple) sous "Descriptors of the note to contrast", listant les 10
+  catégories cœur, pré-cochées avec la proposition automatique
+  (`contrast_affinity_target`) mais librement modifiables — untick pour
+  exclure une catégorie proposée, coche pour en ajouter une non proposée.
+  `key` du widget dérivée des descripteurs de note actuellement sélectionnés
+  (`contrast_target_pills_{tuple(sorted(selected))}`) : Streamlit ne
+  réinitialise un widget à son `default` que si sa `key` change, donc
+  changer les descripteurs de note RECALCULE la proposition (nouvelle
+  pré-sélection fraîche), tandis qu'une modification manuelle de
+  l'utilisateur survit aux reruns tant que les descripteurs de note ne
+  changent pas eux-mêmes. La sélection résultante (`target_selected`) est
+  propagée à la fois à `matching.contrast` (tableau de résultats) ET
+  `matching.contrast_blend` (proposition de blend) — les deux visent
+  toujours exactement la même cible, jamais recalculée séparément.
+
+  **Vérifié en direct sur données réelles.** "tropical" propose
+  dank/resinous/spicy (91 houblons recoupés au total, score max 100 pour
+  qui recoupe les 3). Décocher dank+resinous (ne garder que "spicy")
+  ramène la cible à 78 houblons recoupés — mais TOUS à score 100 désormais
+  (un seul terme cible possible à recouper), au lieu d'un mélange dilué
+  33.3/66.7/100 sur la cible à 3 termes. Saaz devient alors trouvable en
+  relevant simplement le curseur "Number of results" (T56, plafond 100) —
+  plus besoin de deviner sa position dans une égalité massive à 3 termes,
+  et le choix de cible reflète directement l'intention réelle de
+  l'utilisateur plutôt qu'une carte d'affinités imposée.
+
+- [x] **T58 — Nouvel outil GUI "Compare Hops" (demande utilisateur, 2026-08-19)**
+
+  Inspiré de https://beermaverick.com/hops/hop-comparison-tool/ (mentionné par
+  l'utilisateur comme référence de fonctionnalité, PAS de design à copier
+  telle quelle). Cinquième mode GUI (aux côtés d'amplify/contrast/
+  by-descriptor/browse).
+
+  **Sélection.** Multiselect jusqu'à 5 houblons (`st.multiselect(...,
+  max_selections=5)`). Chaque houblon sélectionné reçoit une couleur fixe et
+  cohérente sur TOUS les graphiques de la page (même couleur sur le radar
+  et les deux barplots) — palette CATÉGORIELLE, pas divergente : "Spectral"
+  (suggéré par l'utilisateur) est une palette ColorBrewer DIVERGENTE (pensée
+  pour un gradient autour d'un centre neutre), pas adaptée à 5 houblons sans
+  ordre naturel entre eux. Recommandation : `alt.Scale(scheme="tableau10")`
+  (intégré à Vega-Lite/Altair, pas de dépendance supplémentaire), 5 premières
+  teintes — moderne, distinctif, conçu pour du nominal/catégoriel. À
+  confirmer/ajuster visuellement à l'implémentation (vérifier lisibilité
+  dans les deux thèmes clair/sombre, même contrainte que le reste de la GUI).
+
+  **Radar/spider chart (roue d'arôme).** Superposition de jusqu'à 5 polygones
+  (un par houblon sélectionné, couleur cohérente avec le reste de la page) sur
+  les mêmes 15 axes que `_aroma_wheel` (`hop_aroma_intensity`, T26, Yakima
+  uniquement, 0-100 réel). **Ne contredit PAS la décision T4 (radar écarté
+  pour `by-descriptor`)** : T4 comparait des descripteurs BINAIRES
+  (présence/absence, où l'aire déforme sans apporter d'info) — ici les axes
+  sont des intensités QUANTITATIVES réelles sur un vocabulaire fixe, exactement
+  le cas d'usage pour lequel un radar overlay est justifié (et ce que fait
+  BeerMaverick lui-même sur cette page). Honnêteté d'abord : un houblon
+  sélectionné sans couverture Yakima (pas de `hop_aroma_intensity`) doit être
+  signalé explicitement (pas de polygone silencieusement absent, ni de valeurs
+  à 0 fabriquées) — légende ou caption dédiée.
+
+  **Barplot 1 — infos principales.** %AA, %BA, co-humulone, huile totale
+  (ml/100g) — les 4 champs déjà mis en avant par `_render_key_stats`
+  (`alpha_acid`, `beta_acid`, `co_humulone`, `total_oil`). **Piège d'unités
+  signalé explicitement par l'utilisateur** : `co_humulone` est stocké en
+  "% des acides alpha" (`pct`, mais une fraction DE `alpha_acid`, pas une
+  fraction du houblon total) — pas directement comparable en barres à côté de
+  %AA/%BA (qui SONT des fractions du houblon total) ni de `total_oil` (ml/100g,
+  unité physique différente). Conversion nécessaire AVANT affichage :
+  `co_humulone_abs_pct = alpha_acid_pct * (co_humulone_pct_of_AA / 100)` — ainsi
+  %AA/%BA/co-humulone-absolu partagent une seule échelle "%", `total_oil`
+  (ml/100g) reste sur un second axe. Implémentation Altair : chart en couches
+  (`alt.layer(...).resolve_scale(y="independent")`), pas un simple
+  `mark_bar` — Vega-Lite ne fait pas de double axe nativement sur une seule
+  couche.
+
+  **Barplot 2 — infos détaillées.** Tous les autres composés de
+  `hop_composition` (hors les 4 "principaux" ci-dessus, cf.
+  `app._NON_AROMA_DISPLAY`) : myrcene, humulene, caryophyllene, farnesene,
+  linalool, geraniol, beta-pinene, selinene, thiols, isobutyrate, ketones.
+  **Piège d'unités supplémentaire découvert en vérifiant la base réelle
+  (l'utilisateur n'avait signalé le problème que pour le barplot 1)** :
+  `thiols` est stocké en `ug_kg` (µg/kg), TOUS les autres composés de cette
+  liste sont en `pct_oil` (% de l'huile totale) — mélanger thiols dans le
+  même axe que les autres écraserait visuellement sa barre (ordres de
+  grandeur incompatibles, ex. thiols ~0.06 µg/kg vs myrcène ~40% d'huile).
+  Même traitement à prévoir : soit un second axe dédié pour `thiols`
+  (comme le barplot 1), soit l'exclure de ce barplot et l'afficher à part
+  (à trancher à l'implémentation — vérifier d'abord combien des 5 houblons
+  sélectionnés ont réellement une mesure de thiols avant de décider si ça
+  vaut la complexité d'un second axe ici aussi).
+
+  **Reste à trancher à l'implémentation (pas bloquant pour le ticket)** :
+  emplacement exact dans le layout (page dédiée vs section), tri des barres
+  (alphabétique vs par valeur), affichage des houblons sans donnée pour un
+  compound donné (barre à 0 vs absente vs "no data" — cohérent avec le
+  traitement déjà établi ailleurs dans la GUI, jamais une valeur inventée).
+
+  **Implémenté et vérifié en direct (2026-08-19).** Nouveau mode `app._compare`
+  (5e outil, carte dédiée en page d'accueil), `st.multiselect(...,
+  max_selections=5)`. Palette `_COMPARE_PALETTE` = 5 premières teintes
+  tableau10 (`#4c78a8, #f58518, #e45756, #72b7b2, #54a24b`), un dict
+  `{nom affiché -> couleur}` construit UNE fois et réutilisé tel quel dans
+  les 3 graphiques (`alt.Scale(domain=..., range=...)` explicite partout,
+  pas de dépendance à l'ordre implicite d'un domaine partagé). Radar
+  (`_aroma_wheel_compare`, généralisation multi-houblons de `_aroma_wheel` —
+  grille/spokes/labels calculés une fois, un polygone par houblon avec
+  `color`+`detail` sur `Hop`) : houblons sans `hop_aroma_intensity` exclus
+  du polygone et listés explicitement dans une caption "No quantitative
+  aroma wheel data for: ..." (jamais une valeur à 0 fabriquée). Barplot 1
+  (`_compare_principal_values` + `_compare_dual_axis_barplot`) : co-humulone
+  converti en % absolu (`alpha_acid_pct * co_humulone_pct_of_AA / 100`),
+  `alt.layer(...).resolve_scale(y="independent")` avec un `scale.domain`
+  EXPLICITE et identique sur `x` dans les deux couches (indispensable :
+  chaque couche ne reçoit qu'un SOUS-ENSEMBLE des 4 champs, sans domaine
+  explicite partagé les groupes de barres se désalignent entre couches).
+  Barplot 2 (mêmes helpers, réutilisés) : liste fixe de 10 composés `pct_oil`
+  + `thiols` (`ug_kg`) sur son propre axe secondaire, exactement le second
+  piège d'unité anticipé dans ce ticket — confirmé en direct que sans ce
+  traitement la barre thiols (~0.06) aurait été invisible à côté du myrcène
+  (~40%). Composés absents de TOUS les houblons sélectionnés exclus du
+  domaine `x` (pas de colonne vide). Vérifié en direct dans le navigateur
+  (Citra/Mosaic/Simcoe) : radar superposé avec légende, barplot 1 à double
+  axe (% à gauche, ml/100g à droite), barplot 2 à double axe (% d'huile à
+  gauche, µg/kg thiols à droite) — tout rendu correctement, couleurs
+  cohérentes hop-par-hop sur les 3 graphiques. Choix de layout tranchés :
+  page dédiée (pas une section d'un autre mode) ; barres dans l'ordre fixe
+  de la liste (pas de tri par valeur, cohérent avec le radar qui a lui
+  aussi un ordre d'axe fixe) ; donnée absente = barre/axe omis, jamais 0.
+
+  **Addendum — lisibilité des labels d'axe X (signalé par l'utilisateur le
+  même jour, immédiatement après vérification de T58).** Deux problèmes :
+  (1) barplot 1, le label "Co-humulone (% of hop)" tronqué en "Co-humulone
+  (% …" ; (2) barplot 2, un label sur deux invisible à l'angle par défaut
+  (-20°), chevauchement masqué silencieusement par `labelOverlap` de
+  Vega-Lite plutôt que rendu qui se recouvre.
+  Pour (1), suggestion utilisateur d'insérer un `\n` avant "(%..." dans le
+  libellé — **insuffisant seul, vérifié en direct** : le JSON de la spec
+  Vega-Lite contient bien le vrai caractère de saut de ligne (confirmé via
+  `chart.to_dict()`), mais l'axe restait tronqué sur une seule ligne. Cause
+  réelle : le mark texte d'axe de Vega-Lite ne coupe PAS automatiquement sur
+  un `\n` littéral dans une chaîne — il faut lui fournir un TABLEAU de
+  lignes. Corrigé en ajoutant `axis.labelExpr: "split(datum.label, '\\n')"`
+  (convertit la chaîne en tableau au moment du rendu) + `axis.labelLineHeight`
+  (espacement entre les lignes) + `axis.labelLimit=200` (pour ne plus jamais
+  tronquer avant même d'atteindre le saut de ligne) dans
+  `app._compare_dual_axis_barplot`. Pour (2), angle porté à -45° (`label_angle`
+  nouveau paramètre de `_compare_dual_axis_barplot`, passé explicitement
+  `label_angle=-45` au barplot 2 seulement — le barplot 1 garde -20°, ses
+  4 libellés courts n'en ont pas besoin) ; `labelAlign="right"` +
+  `labelBaseline="middle"` déjà présents (ajoutés lors de l'implémentation
+  initiale, cf. docstring de la fonction) assurent l'alignement du label
+  pivoté avec son tick, indépendamment de l'angle choisi. Vérifié en direct
+  dans le navigateur (Citra/Mosaic/Simcoe) : "Co-humulone (% of hop)"
+  s'affiche désormais sur deux lignes complètes sous son tick ; les 5
+  labels du barplot 2 (myrcene, caryophyllene, linalool, beta-pinene,
+  ketones) sont tous visibles et correctement alignés à -45°. Suite pytest
+  (197 tests) verte après ce correctif, aucune régression.
+
+  **Second addendum — le premier correctif jugé insuffisant par l'utilisateur
+  ("No you didn't fix the issue, I think it's worse"), 4 points corrigés le
+  même jour.** (1) **Radar trop petit / "narrow"** : le radar utilisait
+  `width="content"` avec une largeur Vega-Lite FIGÉE à 480px, tandis que les
+  deux barplots utilisaient `width="stretch"` (remplissage du conteneur,
+  potentiellement bien plus large) -- trois graphiques, trois stratégies de
+  largeur incohérentes entre elles. Corrigé en unifiant sur une largeur
+  numérique EXPLICITE et PARTAGÉE (`app._COMPARE_CHART_WIDTH = 700`),
+  appliquée identiquement aux 3 `properties(width=...)` (radar carré
+  700×700, les deux barplots 700×320) et rendue partout avec
+  `width="content"` (jamais "stretch", qui écraserait cette largeur
+  explicite). Nécessaire pour le radar : son domaine x/y est QUANTITATIF et
+  géométriquement carré (coordonnées calculées à la main, voir
+  `_aroma_wheel_compare`) -- un simple passage à `width="stretch"` sans
+  ajuster la hauteur en proportion aurait déformé les polygones (cercle →
+  ellipse), d'où le choix d'une largeur fixe partagée plutôt qu'un
+  redimensionnement responsive. (2) **Angle différent entre les deux
+  barplots** : le premier correctif avait laissé le barplot 1 à -20° (par
+  défaut) et seulement forcé -45° sur le barplot 2 via un paramètre
+  `label_angle` -- incohérent d'un graphique à l'autre. Le paramètre est
+  retiré, remplacé par une constante unique `_COMPARE_LABEL_ANGLE = -45`
+  appliquée aux deux. (3) **"FORCE THE DISPLAY OF ALL LABELS"** : cause
+  racine non traitée par le premier correctif -- Vega-Lite masque par
+  défaut un label qu'il calcule comme chevauchant son voisin
+  (`labelOverlap`, valeur implicite non désactivée jusqu'ici). Ajouté
+  `axis.labelOverlap=False` (force l'affichage de TOUS les labels, quitte à
+  un léger chevauchement visuel à forte densité de catégories -- préférable
+  à un label silencieusement absent, même principe d'honnêteté que le reste
+  de la GUI). (4) **"Total oil (ml/100g)" sur 2 lignes, comme Co-humulone"**
+  (retour utilisateur explicite) : `_compare_principal_values` renvoie
+  désormais `"Total oil\n(ml/100g)"` (même mécanisme `labelExpr: split()`
+  que Co-humulone, aucun code supplémentaire nécessaire). Vérifié en direct
+  dans le navigateur (Citra/Mosaic/Simcoe) : radar large occupant toute la
+  largeur du conteneur, alignée pixel-perfect avec les deux barplots en
+  dessous ; barplot 1 -- "Co-humulone (% of hop)" ET "Total oil (ml/100g)"
+  sur deux lignes complètes, angle -45° ; barplot 2 -- les 10 labels
+  (myrcene, humulene, caryophyllene, farnesene, linalool, geraniol,
+  beta-pinene, isobutyrate, ketones, thiols) TOUS visibles au même angle
+  -45°, alignés avec leurs ticks. Suite pytest (197 tests) verte, aucune
+  régression.
+
+  **Troisième addendum — surlignage au survol du radar (demande utilisateur,
+  2026-08-19).** "Would it be possible ... to highlight the line when the
+  user mouseover one of the line?" `_aroma_wheel_compare` gagne un
+  `alt.selection_point(fields=["Hop"], on="mouseover", nearest=True)`
+  (`hover`), attaché à `points` (cibles d'accroche -- cercles pleins, plus
+  faciles à survoler précisément qu'un simple trait) et référencé en
+  CONDITION dans `polygon_line`, layer SŒUR de la même composition `layer`
+  -- pattern standard Vega-Lite (un paramètre de sélection déclaré sur une
+  couche reste visible aux couches sœurs). Premier essai : opacité 0.15
+  pour les houblons non survolés -- **jugé pire par l'utilisateur** ("all
+  the non mouseover lines are not visible... not hide the other") : corrigé
+  en remontant à 0.55 (clairement visible, mais visuellement en retrait par
+  rapport au houblon survolé à opacité pleine + trait 2.5x plus épais [2→5]
+  + points 2.2x plus gros [50→110]). **Limite documentée et assumée** (pas
+  de contournement tenté) : passer le trait survolé visuellement AU-DESSUS
+  des autres (vrai z-index) n'est PAS possible en Vega-Lite déclaratif --
+  un `mark_line` multi-séries (`detail="Hop:N"`) compile en UN SEUL mark
+  Vega dont l'ordre d'empilement des sous-tracés est figé à la compilation
+  par l'ordre du domaine `color` ; il n'existe pas de canal d'encodage
+  Vega-Lite pour un z-index RÉACTIF au survol (le canal `order` ne contrôle
+  que l'ordre des points LE LONG d'un même tracé, pas l'empilement entre
+  tracés -- un vrai z-index dynamique demanderait de redescendre en Vega
+  bas niveau, hors de portée d'Altair). Compensé par le contraste fort
+  (opacité + épaisseur) plutôt qu'un vrai passage au premier plan --
+  suffisant en pratique avec ≤5 houblons aux couleurs bien distinctes.
+  `clear="mouseout"` ajouté pour réinitialiser l'état par défaut en
+  quittant le radar. Vérifié en direct dans le navigateur (Citra/Mosaic) :
+  survol d'un point -- le houblon le plus proche (`nearest=True`) passe en
+  trait épais/opacité pleine, l'autre reste net à 0.55 (plus jamais quasi
+  invisible) ; tooltip inchangé (Hop/Descriptor/Intensity). Suite pytest
+  (197 tests) verte, aucune régression.
+
+- [x] **T59 — Retirer ®/™ du DÉBUT des noms de houblon (demande utilisateur,
+  2026-08-19)**
+
+  Signalé : "I see some ® or ™ in the name of some results of hop. Could
+  you remove this from the name at the beginning to avoid having them and
+  allow proper merging of multiple sources?"
+
+  **À vérifier avant d'implémenter (pas encore fait à l'écriture de ce
+  ticket)** : les cas déjà connus/corrigés dans ce projet (`_fix_barthhaas_
+  trademark_slug`, `_strip_yakima_brand_suffix`) concernent des ® /™ COLLÉS
+  À LA FIN d'un mot ou dans un slug d'URL (ex. "Citra®" → slug `citrar`,
+  "Mosaic® Brand" → nom affiché) — jamais un symbole EN DÉBUT de nom
+  affiché. Avant de coder quoi que ce soit : lister les houblons réels de
+  la base dont `name` commence par `®`/`™` (`SELECT variety, name FROM hops
+  WHERE name LIKE '®%' OR name LIKE '™%'`) pour confirmer le motif exact et
+  la ou les source(s) concernée(s) (BarthHaas ? Yakima ? les deux ?) — même
+  méthodologie que pour tous les autres correctifs de nommage de ce projet
+  (jamais corriger sur la seule base d'une supposition, voir T51/T53 pour
+  les précédents). Le lien avec "allow proper merging of multiple sources"
+  suggère que le symbole en tête empêche la clé de réconciliation
+  (`ingest._normalize_hop_key`/`_find_variety_by_name_region`) de matcher
+  deux entrées qui devraient fusionner — à confirmer en reproduisant un cas
+  concret avant de corriger.
+
+  **Vérifié en direct puis implémenté (2026-08-19).** Aucun houblon réel
+  n'avait le symbole EN TOUTE PREMIÈRE position (`SELECT ... WHERE name LIKE
+  '®%'` : 0 résultat) — "at the beginning" relu comme "dès le départ /
+  systématiquement", pas "en position 0" : 62 houblons réels portent ®/™
+  ailleurs dans le nom (ex. "Citra®", "El Dorado® Hops"), cohérent avec le
+  reste du message ("remove this... to avoid having them"). Nouveau
+  `parsers.strip_trademark_symbols` (retire `[®™©]`, recollapse les espaces
+  — même mécanisme que `_strip_yakima_brand_suffix`, T51), appliqué à LA
+  SOURCE : `parsers.parse_yakima_hit` (après le retrait de "Brand") et
+  `ingest.crawl_barthhaas` (sur `h1_title`) — jamais seulement à
+  l'affichage GUI. Confirmé que `_normalize_hop_key` (réconciliation
+  BeerMaverick) retirait déjà ces symboles pour SA clé interne, mais
+  `hops.name` et la comparaison brute de `_find_variety_by_name_region`
+  (T53) les gardaient — un houblon dont le symbole différerait entre
+  BarthHaas et Yakima pouvait donc échapper à la fusion cross-source, exactement
+  le risque signalé par l'utilisateur. Réingestion réelle (`crawl-barthhaas`
+  + `crawl-yakima`) : 0/189 houblons avec ®/™/© restant, aucune régression
+  de comptage (194→189 déjà stable depuis T53, aucun houblon perdu ni
+  dupliqué par ce correctif). Vérifié qu'aucune NOUVELLE collision de nom
+  n'a été introduite par la suppression du symbole au-delà des 4 paires déjà
+  connues et gérées par T60 (Amarillo/Perle/Saaz/Northern Brewer).
+
+- [x] **T60 — Doublon "Northern Brewer" dans `contrast` : dédoublonnage par
+  couverture d'info plutôt que par région (demande utilisateur, 2026-08-19)**
+
+  Signalé : "I see Northern Brewer twice in the result of contrast:mango, it
+  has different values and one purpose is bittering while the other is
+  infered:bittering. please investigate this issue and remove duplicates. I
+  guess if both are actually in yakima we should select the one with the
+  higher coverage of information (here the purpose is missing in one of
+  them)."
+
+  **Investigation faite (2026-08-19, en direct sur la base réelle).**
+  Confirmé : `northern-brewer` (région "United States", `sources='yakima'`,
+  `purpose='bittering'` RÉEL BeerMaverick, 8 descripteurs dont 3
+  BeerMaverick, 11 lignes de composition) et `northern-brewer-nob03`
+  (région "Germany", `sources='yakima'` aussi, `purpose=None` → affiché
+  "Inferred: Bittering", 4 descripteurs Yakima seulement, 11 lignes de
+  composition) — mêmes valeurs de composition très proches mais PAS
+  identiques (alpha_acid 7-10% vs 6-10%, co_humulone 30-34% vs 27-32%...).
+  Root cause identique à Amarillo/Perle/Saaz déjà documentée en T53/T54 :
+  Yakima catalogue CE cultivar sous deux `variety_code` distincts
+  (`NOB01`/`NOB03`) cultivés dans deux pays différents (vérifié en direct
+  sur l'API Algolia à l'époque de T53) — PAS un artefact de crawl, un choix
+  déclaré de la source elle-même. BeerMaverick (purpose + descripteurs
+  enrichis) ne s'est réconcilié qu'avec UNE seule des deux entrées
+  (`northern-brewer`), laissant l'autre avec une couverture d'info
+  nettement plus pauvre — c'est CE déséquilibre que l'utilisateur observe
+  concrètement ("higher coverage of information").
+
+  **Tension avec la décision T53/T54 à trancher avant d'implémenter.** T53
+  avait explicitement choisi de NE PAS fusionner Amarillo/Perle/Saaz/
+  Northern Brewer (contrairement à Challenger/Fuggle/Hallertauer Tradition/
+  Hersbrucker Spät/Target, de VRAIS doublons de slug pour la MÊME région) :
+  fusionner aurait perdu une vraie distinction de terroir confirmée par la
+  source elle-même. L'utilisateur propose maintenant un critère différent
+  ("si les deux sont dans yakima, garder celui avec la meilleure couverture
+  d'info") qui REVIENT à fusionner ces paires quand elles partagent une
+  source unique — à confirmer explicitement avec l'utilisateur avant
+  implémentation, car ça inverse une décision déjà prise et documentée : la
+  région (donc potentiellement la composition réelle) diffère, fusionner
+  perd cette info même si l'un des deux est mieux enrichi côté
+  BeerMaverick/descripteurs.
+
+  **Complication vérifiée en direct, à ne pas ignorer si le critère
+  "couverture d'info" est retenu** : il n'est PAS uniformément cohérent sur
+  les 4 paires connues. Saaz et Perle : un côté domine clairement sur tous
+  les axes (composition + descripteurs + purpose). **Amarillo est un cas
+  CONFLICTUEL** : `amarillo` (US, multi-source barthhaas+yakima) a PLUS de
+  lignes de composition (20 vs 11, grâce à la fusion barthhaas) mais MOINS
+  de descripteurs (5 vs 16) et pas de purpose réel, alors que
+  `amarillo-brand-ama04` (Allemagne, yakima seul) a un purpose réel ET 16
+  descripteurs mais moins de composition — un simple "score de complétude"
+  devra définir explicitement quel(s) axe(s) comptent (composition ?
+  descripteurs ? purpose ? une pondération des trois ?) plutôt que supposer
+  qu'un côté domine toujours l'autre.
+
+  **Si retenu (après confirmation utilisateur)**, mécanisme envisageable :
+  réutiliser `ingest.merge_hop_varieties` (déjà écrit pour T53, generic
+  "fusionner deux variety keys") avec un critère de sélection du survivant
+  basé sur une fonction de score de couverture (nb de sources, nb de
+  descripteurs, présence d'un purpose réel, nb de compounds) plutôt que sur
+  "BarthHaas toujours primaire" (règle actuelle, qui ne s'applique pas ici
+  puisque les deux côtés sont `yakima` seul).
+
+  **Décision utilisateur (2026-08-19, tranche la tension ci-dessus) :**
+  "you either need to remove duplicate or modify the name base on the
+  provenance. I suggest to drop it if it's not easy to retrieve the origin
+  (terroir)." La provenance (région) est FACILE à retrouver -- déjà dans
+  `hops.region`, vérifiée en direct via l'API Algolia (ci-dessus, T53/T54) --
+  donc modification du nom retenue, PAS suppression : ces paires restent
+  deux crops réels distincts, jamais fusionnées.
+
+  **Implémenté.** Nouveau `matching._disambiguate_hop_names(hops)` (privé),
+  appliqué UNE FOIS à l'intérieur de `load()` -- la seule source de `hops`
+  pour TOUT le reste (amplify/contrast/by_descriptor/blends/CLI/GUI) : "Foo"
+  x2 avec régions différentes devient "Foo (Region A)"/"Foo (Region B)" EN
+  PLACE, sans code de désambiguïsation répété ailleurs. Pas de suffixe
+  fabriqué si la région manque d'un côté (filet de sécurité testé). Ancien
+  `app._disambiguated_hop_labels` (T53, ne couvrait QUE le sélecteur Browse)
+  retiré -- redondant, `_browse` utilise directement `hops[v]["name"]`
+  désormais. Vérifié en direct sur données réelles : `contrast --descriptors
+  mango` affiche bien "Northern Brewer (United States)" et "Northern Brewer
+  (Germany)" comme deux lignes distinctes et lisibles (au lieu de deux
+  "Northern Brewer" indiscernables), même chose pour "Amarillo (Germany)"
+  dans la même liste de résultats -- aucun changement de comportement pour
+  la structure des blends (toujours basée sur le purpose RÉEL, jamais
+  affecté par ce renommage d'affichage).
+
+- [x] **T61 — `contrast` : filtre par purpose (aromatic/bittering), pré-coché
+  sur les deux (demande utilisateur, 2026-08-19)**
+
+  Signalé : "In the contrast tool, we should add another menu for purpose,
+  it would be pre-selecting both bittering and aromatic but we should let
+  user add a filter on this purpose."
+
+  Même esprit que T57 (menu de cible d'affinité pré-coché mais modifiable) :
+  nouveau `st.pills`/`st.multiselect` sous (ou à côté de) la section cible
+  d'affinité de `app._contrast`, options = les valeurs de purpose EFFECTIF
+  affichées ailleurs dans la GUI (`matching.resolve_purpose` : "aromatic",
+  "bittering", "both" — voir aussi si "both" doit compter comme
+  aromatic+bittering simultanément ou comme une 3e case à part, à décider à
+  l'implémentation), pré-coché sur `["aromatic", "bittering"]` (donc "both"
+  inclus par défaut puisqu'il satisfait les deux, à confirmer). Filtre les
+  lignes de `r["ranked"]` (résultat de `matching.contrast`) après résolution
+  du purpose (réel ou inféré, `_row_with_purpose`/`matching.resolve_purpose`
+  — déjà utilisé pour l'affichage) avant rendu du tableau — ATTENTION :
+  `total_matches`/la troncature `top` sont calculés AVANT ce filtre côté
+  `matching.contrast` (qui ne connaît pas le purpose désiré par l'utilisateur
+  pour le tri) ; un filtrage purement côté GUI après coup fausserait le
+  message de troncature (T56) et pourrait masquer des résultats qui
+  auraient dû apparaître avant le plafond `top` -- probablement nécessaire
+  de faire remonter ce filtre dans `matching.contrast` lui-même (nouveau
+  paramètre, même pattern que `target_descriptors` en T57) plutôt que de
+  filtrer après coup côté GUI, pour que `total_matches`/le tri/la
+  troncature restent cohérents avec ce que l'utilisateur voit réellement.
+
+  **Implémenté et vérifié en direct (2026-08-19), exactement comme
+  anticipé.** `matching.contrast`/`contrast_blend` gagnent un paramètre
+  `purposes: list[str] | None = None` -- `None` (défaut) = comportement
+  inchangé, rétrocompatible CLI. Le filtre est appliqué DANS la boucle de
+  construction de `ranked` (avant le calcul de `total_matches` et la
+  troncature à `top`), en résolvant le purpose EFFECTIF de chaque houblon
+  via `resolve_purpose` (réel BeerMaverick, ou inféré depuis l'acide alpha)
+  — exactement ce que la GUI affiche déjà par ligne. Nouveau
+  `_purpose_matches_filter` : un houblon "both" satisfait le filtre dès
+  qu'AU MOINS un des deux rôles est demandé (jamais une 3e case séparée) ;
+  un purpose totalement inconnu (ni réel ni inférable) est exclu dès qu'un
+  filtre est actif. GUI (`app._contrast`) : `st.pills` sous la section
+  cible d'affinité (T57), pré-cochée sur `["aromatic", "bittering"]`,
+  propagée à la fois au tableau de résultats ET au blend proposé (même
+  cible, même filtre partout). Vérifié en direct sur données réelles :
+  "mango" → 91 matches (les deux purposes) ; décocher "bittering" → 74
+  matches, chaque ligne restante affichant "Aromatic" ou "Aromatic +
+  Bittering", plus aucune ligne "Bittering" seule.
+
+- [x] **T62 — Définitions des 15 catégories de la roue d'arôme, tooltip au
+  survol de chaque label (demande utilisateur, 2026-08-19)**
+
+  Point de départ : signalement que "grassy", "herbal" et "vegetal"
+  semblaient redondants dans le radar Compare Hops ("in my mind grassy,
+  herbal and vegetal mean the same thing: it's the taste of fresh herb").
+  Investigation en plusieurs passes AVANT tout changement de code
+  (`hop_aroma_intensity` reste 100% Yakima, confirmé deux fois par requête
+  SQL directe -- aucune fusion BarthHaas en jeu) :
+  - Corrélation `vegetal`/`grassy` mesurée sur les 81 houblons réels à
+    `vegetal>0` : Pearson r=0.16 (faible), écart absolu moyen 13.8 points,
+    seulement 30% des houblons à moins de 5 points d'écart -- Saaz est le
+    contre-exemple le plus net (grassy=75, vegetal=8, écart de 67 points).
+    Conclusion à ce stade : PAS une redondance systématique malgré quelques
+    houblons où ça se ressemble (Mosaic, Citra).
+  - Site public actuel de Yakima Chief (yakimachief.com, vérifié en direct
+    sur `/variety/saaz-saz01`) : AUCUN radar/roue d'arôme affiché
+    publiquement, seulement une courte liste de badges ("Aroma Profile" --
+    5-6 termes, ex. Saaz : Spicy/Earthy/Floral/Grassy/Woody), qui correspond
+    exactement à `hop_descriptors` (source=yakima, 38 termes) -- jamais
+    "vegetal" dedans. Donc "vegetal" vient d'un champ Yakima plus profond
+    (`aroma_values`/`sensory_values`, T26) jamais rendu publiquement par
+    Yakima elle-même -- pas une invention hopmatch, mais une donnée Yakima
+    peu visible ailleurs.
+  - **Source qui a tranché la question** : le "Hop Sensory Ballot" officiel
+    de Yakima Chief (`Hop_Sensory_Ballot_V2.pdf`, révisé juin 2021 --
+    l'URL directe sur yakimachief.com est cassée depuis leur migration de
+    site, récupéré via Wayback Machine, capture du 2024-06-27). Ce document
+    liste NOMMÉMENT les 15 catégories de `hop_aroma_intensity` (+ 2 de plus,
+    "Onion/Garlic" et "Dank", absentes de notre vocabulaire à 15) avec leurs
+    "Specific Aromas" par catégorie -- confirme que grassy/herbal/vegetal
+    sont TROIS notions réellement distinctes dans le vocabulaire officiel
+    Yakima, pas une redondance perçue à tort : **Grassy** = green
+    grass/hay (herbe fraîchement coupée, végétal SEC) ; **Herbal** = black
+    tea/dill/green tea/mint/rosemary/thyme (herbe AROMATIQUE culinaire) ;
+    **Vegetal** = cabbage/celery/green pepper/tomato plant (légume, souvent
+    un signal de prudence en brassage). Confirme aussi, en creusant : la
+    catégorie "Pomme" (notre alias → "apple") N'EST PAS une coquille
+    française du CMS Yakima comme documenté précédemment (`CLAUDE.md`,
+    `reference.DESCRIPTOR_ALIASES`) -- c'est le terme professionnel
+    standard de dégustation pour "fruits à pépins" (pomme/poire), utilisé
+    tel quel dans LEUR PROPRE document officiel en anglais. Commentaire
+    corrigé dans `reference.py` en conséquence (l'alias d'affichage
+    "apple" lui-même n'a pas changé, toujours plus clair pour un public
+    GUI non spécialiste).
+
+  **Implémenté.** `reference.AROMA_WHEEL_DEFINITIONS` (nouveau) : dict des
+  15 catégories → définition sourcée sur le ballot officiel, ré-exporté via
+  `matching.AROMA_WHEEL_DEFINITIONS` (même pattern que
+  `CONTRAST_CORE_CATEGORIES` -- `app.py` n'importe jamais `reference`
+  directement). Demande utilisateur explicite pour l'affichage : "(?) close
+  to each label name, displaying the description of this specific note when
+  mouseovering it" (option retenue, plutôt qu'un unique (?) global) --
+  implémenté nativement en Vega-Lite plutôt qu'une icône (?) positionnée à
+  la main sur 15 positions radiales : le mark `text` des labels d'axe
+  (`_aroma_wheel`/`_aroma_wheel_compare`) gagne un champ `Definition` sur
+  ses données + `tooltip=["Descriptor:N", "Definition:N"]` sur son
+  encodage -- Vega-Lite affiche déjà nativement une infobulle au survol de
+  n'importe quel mark ayant un canal `tooltip`, donc survoler UN SEUL label
+  affiche SA définition précise, sans DOM/JS custom. Fonctionne aussi sur
+  un axe à intensité 0 (testé sur Saaz US, apple/vegetal à 0) puisque le
+  mark texte reste présent même quand le polygone n'atteint pas cet axe.
+  Caption de découvrabilité ajoutée sous CHAQUE rendu de roue (4 emplacements
+  -- `_browse`, `_hop_detail_expanders` [partagé Amplify+Contrast],
+  `by-descriptor`, `_compare`) : "Hover a label for its definition (Yakima
+  Chief Hop Sensory Ballot)." -- sans ça, une infobulle pure au survol
+  n'est pas découvrable. Vérifié en direct : survol de "vegetal" sur Saaz
+  (CZ et US) affiche bien "Cabbage, celery, green pepper, tomato plant —
+  savory vegetable notes, often a caution flag in brewing", et de même pour
+  chacun des 15 labels sur Browse/Compare Hops. Suite pytest (197 tests)
+  verte, aucune régression.
+
 ## Sources de données additionnelles (recherche)
 
 - **Investigué à nouveau, PAS retenu — Hopsteiner (shop.hopsteiner.com)**.

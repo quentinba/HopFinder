@@ -1,4 +1,8 @@
-# hopmatch
+# HopFinder
+
+*Nom d'affichage du projet (GUI, GitHub) ; le paquet Python et la commande CLI restent
+`hopmatch` (décision utilisateur 2026-08-19 — renommage d'affichage seulement, pas de
+renommage mécanique du paquet/CLI/`pyproject.toml`).*
 
 **Note olfactive → molécules → houblons.** Un outil pour brasseur qui répond à une
 question concrète : *quel houblon accorder à un ajout* (yuzu, basilic…) — en le
@@ -29,7 +33,7 @@ prolongeant (`amplify`) ou en le contrastant (`contrast`) ?
 
 Un arôme (yuzu, basilic, mangue) est un ensemble de **molécules volatiles**. Un houblon,
 lui, a un **profil d'huile essentielle** (myrcène, linalol, géraniol, thiols…) et une
-**roue d'arôme** (descripteurs : agrume, tropical, résineux…). hopmatch relie les deux :
+**roue d'arôme** (descripteurs : agrume, tropical, résineux…). HopFinder relie les deux :
 tu mets un ajout dans ta bière et tu cherches le houblon qui va bien avec — soit en
 **amplifiant** (prolonger le caractère de l'ajout), soit en **contrastant**.
 
@@ -48,12 +52,12 @@ tu mets un ajout dans ta bière et tu cherches le houblon qui va bien avec — s
 
 Le vrai facteur perceptuel serait l'**OAV** (Odor Activity Value = concentration ÷ seuil de
 détection), et un moteur de matching plus sophistiqué (cosinus pondéré par OAV) serait
-tentant. hopmatch y renonce pour une raison empirique : **aucune concentration fiable** n'est
+tentant. HopFinder y renonce pour une raison empirique : **aucune concentration fiable** n'est
 disponible côté ingrédient — la seule source quantitative (FooDB) est lacunaire (14,4 % des
 liens compound↔aliment portent une concentration). Un cosinus-OAV sur des données de présence
 produirait de la *précision-déchet* : une élégance mathématique posée sur du vide.
 
-hopmatch fait donc trois choix assumés :
+HopFinder fait donc trois choix assumés :
 
 1. **Descripteurs = couche primaire.** Le brasseur pense en « agrume / tropical / dank ».
    Les roues d'arôme (BarthHaas, Yakima) sont des données réelles, robustes, sans besoin de
@@ -69,7 +73,7 @@ hopmatch fait donc trois choix assumés :
 ## Les bases de données : pourquoi et comment chacune
 
 Le pipeline joint trois mondes — l'**ingrédient** (l'ajout), la **molécule**, le **houblon** —
-et chacun a ses sources. Pour chaque base : *pourquoi* elle sert, *comment* hopmatch y accède,
+et chacun a ses sources. Pour chaque base : *pourquoi* elle sert, *comment* HopFinder y accède,
 et *ce qu'elle vaut*.
 
 ### Vue d'ensemble
@@ -138,7 +142,7 @@ et *ce qu'elle vaut*.
   découvert en vérifiant que la variété `admiral` avait une entrée corrompue côté YCH lui-même
   (voir `docs/DATA_SOURCES.md`).
 
-> **Fusion.** Une variété peut recevoir des mesures des deux sources ; hopmatch les stocke
+> **Fusion.** Une variété peut recevoir des mesures des deux sources ; HopFinder les stocke
 > toutes (schéma EAV) et les *réconcilie à la lecture* (moyenne des milieux de fourchette,
 > provenance tracée). Citra combine ainsi le β-pinène de Yakima **et** les thiols de BarthHaas.
 
@@ -237,7 +241,7 @@ et *ce qu'elle vaut*.
 - **Limite cruciale.** Le lien ingrédient→molécule est en **présence/absence** : aucune
   concentration *dans l'ingrédient*. Le seuil reste donc un prior, pas un OAV. Licence
   CC BY-NC-SA. `ingest.ingest_flavordb2` se borne aux ~734 composés de la whitelist Flavornet
-  (pas les 25 595 molécules du site — hors du périmètre utile à hopmatch, et inutilement lourd
+  (pas les 25 595 molécules du site — hors du périmètre utile à HopFinder, et inutilement lourd
   pour leur serveur), et écrit dans `flavordb2_thresholds`, jamais dans
   `molecules`/`reference.MOLECULES`.
 
@@ -457,7 +461,7 @@ donc deux fois dans le score (une fois comme « géraniol », une fois redirigé
 « citronellol »), gonflant le classement sans réelle justification (vérifié : change
 le houblon n°1 sur plusieurs notes réelles, ex. "coriander"). Corriger le double
 comptage à la racine aurait ajouté de la complexité à une hypothèse déjà étroite
-(une seule souche « standard », non vérifiable par hopmatch) pour un bénéfice
+(une seule souche « standard », non vérifiable par HopFinder) pour un bénéfice
 marginal — voir `reference.py` pour le détail complet et le raisonnement pour ne
 pas la réintroduire sans corriger le double comptage.
 
@@ -746,6 +750,6 @@ Reste :
 ## Licences
 
 **Code : MIT** (voir `LICENSE`). **Les données ne le sont pas** : FooDB et FlavorDB2 sont **non
-commerciales**, TGSC restrictive. Tant que hopmatch reste personnel ou open-source non lucratif,
+commerciales**, TGSC restrictive. Tant que HopFinder reste personnel ou open-source non lucratif,
 c'est bon ; une distribution commerciale imposerait de retirer ou renégocier ces sources. Détail
 par source dans `docs/DATA_SOURCES.md`.
