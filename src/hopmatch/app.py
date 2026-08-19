@@ -34,8 +34,15 @@ DEFAULT_DB = "aromahops.db"
 # par l'utilisateur, stockée hors de src/ (assets/, à la racine du dépôt) --
 # chemin résolu depuis __file__ pour rester correct quel que soit le cwd
 # d'où `streamlit run` est lancé.
+# `background_zoomed.png` (pas `background.png`) : demande utilisateur
+# explicite -- un crop déjà cadré par l'utilisateur, affiché FIXE (attaché au
+# viewport, jamais recalculé par `cover` contre une hauteur de page qui
+# change), pour ne plus jamais changer de niveau de zoom d'une interaction à
+# l'autre (signalé : "each time you change something it change the image
+# zoom" avec l'ancienne image + `background-attachment: local`, qui
+# recalcule `cover` contre la hauteur RÉELLE, donc VARIABLE, du contenu).
 _BACKGROUND_PATH = os.path.join(
-    os.path.dirname(__file__), "..", "..", "assets", "background.png")
+    os.path.dirname(__file__), "..", "..", "assets", "background_zoomed.png")
 
 # Libellés GUI affichés à l'utilisateur, distincts des clés internes ("mode")
 # qui pilotent le dispatch et restent stables (CLI/tests/URLs internes non
@@ -227,17 +234,17 @@ _BACKGROUND_SCRIPT_TEMPLATE = """
 
     function apply() {
         var stApp = doc.querySelector(".stApp");
-        var main = doc.querySelector('[data-testid="stMain"]');
-        if (!stApp || !main) return;
+        var target = doc.querySelector('[data-testid="stAppViewContainer"]');
+        if (!stApp || !target) return;
         var dark = getComputedStyle(stApp).colorScheme === "dark";
         var veil = dark ? darkVeil : lightVeil;
         var uri = dark ? invertedUri : normalUri;
-        main.style.backgroundImage =
+        target.style.backgroundImage =
             'linear-gradient(' + veil + ', ' + veil + '), url("' + uri + '")';
-        main.style.backgroundSize = "cover";
-        main.style.backgroundPosition = "right top";
-        main.style.backgroundAttachment = "local";
-        main.style.backgroundRepeat = "no-repeat";
+        target.style.backgroundSize = "cover";
+        target.style.backgroundPosition = "center center";
+        target.style.backgroundAttachment = "fixed";
+        target.style.backgroundRepeat = "no-repeat";
     }
 
     apply();
@@ -299,10 +306,25 @@ def _inject_background() -> None:
     `_background_data_uri`) choisies par le script selon `dark`, jamais par
     médiaquery CSS ni par `st.context.theme.type` désormais.
 
-    `background-attachment: local` + `background-position: right top` sur
-    `[data-testid="stMain"]` (PAS `stAppViewContainer`, qui ne défile jamais
-    réellement -- mise en page à défilement imbriqué, voir commit précédent)
-    inchangés, appliqués en JS pour rester dans le même mécanisme."""
+    **Quatrième passage (2026-08-19, même jour) : l'utilisateur a signalé que
+    le niveau de zoom de l'image changeait à chaque interaction.** Cause :
+    `background-attachment: local` sur `stMain` (le passage précédent) fait
+    recalculer `background-size: cover` contre le `scrollHeight` RÉEL de
+    `stMain`, qui change à chaque page/résultat affiché -- l'image "respire"
+    visiblement d'une interaction à l'autre, jamais un vrai zoom figé.
+    Corrigé en repassant `background-attachment: fixed` (ancré au VIEWPORT,
+    constant tant que la fenêtre n'est pas redimensionnée) sur
+    `[data-testid="stAppViewContainer"]` -- PAS `stMain` : `fixed` sur un
+    élément qui défile lui-même (`overflow-y: auto`) a un rendu
+    cross-browser incohérent (le fond peut soit rester figé soit défiler
+    selon le moteur) ; `stAppViewContainer`, qui fait toujours exactement la
+    hauteur du viewport et ne défile jamais lui-même (voir passage
+    précédent), est la cible correcte pour un fond réellement figé.
+    Utilise désormais `background_zoomed.png` (pas `background.png`) --
+    demande utilisateur explicite : un crop déjà recadré par l'utilisateur,
+    affiché tel quel (`background-position: center center`) plutôt que
+    recadré côté CSS (`right top` n'a plus de sens ici, cible déjà cadrée en
+    amont)."""
     if not os.path.exists(_BACKGROUND_PATH):
         return
     version = os.path.getmtime(_BACKGROUND_PATH)

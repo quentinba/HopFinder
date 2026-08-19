@@ -563,6 +563,24 @@ pour le cas "System" + OS qui change en cours de session. Iframe rendue à haute
 quasi nulle (`height=1`), aucun contenu visible voulu. Vérifié en direct : bascule
 Light/Dark/System dans le menu Streamlit change l'image immédiatement, dans les deux
 sens, sans aucune interaction supplémentaire.
+
+**Troisième correctif, toujours le même jour — l'utilisateur a signalé que le niveau de
+zoom de l'image changeait à chaque interaction.** Cause : `background-attachment:
+local` sur `stMain` (second correctif) fait recalculer `background-size: cover` contre
+le `scrollHeight` RÉEL de `stMain`, qui change à chaque page/résultat affiché — l'image
+"respire" visiblement d'une interaction à l'autre, jamais un vrai zoom figé. Corrigé en
+repassant `background-attachment: fixed` (ancré au VIEWPORT, constant hors
+redimensionnement de fenêtre) sur `[data-testid="stAppViewContainer"]` — PAS `stMain` :
+`fixed` sur un élément qui défile lui-même (`overflow-y: auto`) a un rendu
+cross-browser incohérent (le fond peut rester figé ou défiler selon le moteur) ;
+`stAppViewContainer`, qui ne défile jamais lui-même (voir second correctif), est la
+cible correcte pour un fond réellement figé. Utilise aussi désormais
+`assets/background_zoomed.png` (fournie par l'utilisateur, remplace `background.png`,
+toujours présente dans le dépôt mais inutilisée) — un crop déjà recadré par
+l'utilisateur, affiché tel quel (`background-position: center center`, plus de
+recadrage `right top` côté CSS, qui n'avait plus de sens sur un crop déjà cadré en
+amont). Vérifié en direct : le fond ne bouge plus du tout en défilant, dans les deux
+thèmes, sans changement de zoom d'une interaction à l'autre.
 Reste :
 1. Jointure FooDB/hop_composition au-delà des ~734 composés Flavornet si le vocabulaire
    s'élargit beaucoup (crawl Yakima déjà réel, plus d'aliments FooDB).

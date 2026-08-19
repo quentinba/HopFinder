@@ -387,6 +387,22 @@ l'implémentation ([ ] à faire, [x] fait — voir le commit associé).
   en cours de session. Vérifié en direct : bascule Light/Dark/System dans
   le menu Streamlit change l'image immédiatement, dans les deux sens.
 
+  **Addendum 4 (même jour, l'utilisateur signale que le niveau de zoom
+  change à chaque interaction)** — cause : `background-attachment: local`
+  sur `stMain` (addendum 2) fait recalculer `background-size: cover` contre
+  le `scrollHeight` RÉEL de `stMain`, qui change à chaque page/résultat
+  affiché — l'image "respire" visiblement d'une interaction à l'autre.
+  Corrigé en repassant `background-attachment: fixed` (ancré au VIEWPORT,
+  constant hors redimensionnement de fenêtre) sur `stAppViewContainer` —
+  PAS `stMain` : `fixed` sur un élément qui défile lui-même a un rendu
+  cross-browser incohérent, `stAppViewContainer` (qui ne défile jamais
+  lui-même, voir addendum 2) est la cible correcte pour un fond réellement
+  figé. Utilise aussi `assets/background_zoomed.png` (fournie par
+  l'utilisateur) au lieu de `background.png` — un crop déjà recadré,
+  affiché tel quel (`background-position: center center`, plus de recadrage
+  `right top` côté CSS). Vérifié en direct : le fond ne bouge plus du tout
+  en défilant, dans les deux thèmes.
+
 ## Sources de données additionnelles (recherche)
 
 - **Investigué à nouveau, PAS retenu — Hopsteiner (shop.hopsteiner.com)**.
