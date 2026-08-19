@@ -230,7 +230,8 @@ def test_by_descriptor_mode_shows_comparison_heatmap_for_multiple_hops(toy_cwd):
     # ET hopb dans la base jouet (by_descriptor matche l'union, pas
     # l'intersection). AppTest ne structure pas les graphiques Vega-Lite
     # (st.altair_chart) : on vérifie leur présence via UnknownElement, faute
-    # d'accesseur dédié.
+    # d'accesseur dédié -- au moins 2 désormais (la heatmap ET l'iframe
+    # toujours présente de `app._inject_background`, voir le test suivant).
     from streamlit.testing.v1.element_tree import UnknownElement
     at = _app()
     at.run()
@@ -238,11 +239,15 @@ def test_by_descriptor_mode_shows_comparison_heatmap_for_multiple_hops(toy_cwd):
     at.multiselect[0].select("citrus").select("floral").run()
     assert not at.exception
     assert any("Descriptor profile comparison" in c.value for c in at.caption)
-    assert any(isinstance(n, UnknownElement) for n in at.main)
+    assert len([n for n in at.main if isinstance(n, UnknownElement)]) >= 2
 
 def test_by_descriptor_mode_hides_heatmap_for_single_hop(toy_cwd):
     # Un seul houblon recoupé -> rien à comparer, pas de grille (juste
-    # l'expander habituel).
+    # l'expander habituel). Exactement 1 UnknownElement attendu (l'iframe
+    # toujours présente de `app._inject_background`), pas 0 : ce n'est plus
+    # un st.markdown/CSS mais un st.iframe (seul moyen de faire réagir le
+    # fond au sélecteur de thème Streamlit sans dépendre d'un rerun Python,
+    # voir CLAUDE.md) -- présent sur CHAQUE page, indépendamment du mode.
     from streamlit.testing.v1.element_tree import UnknownElement
     at = _app()
     at.run()
@@ -250,7 +255,7 @@ def test_by_descriptor_mode_hides_heatmap_for_single_hop(toy_cwd):
     at.multiselect[0].select("citrus").run()
     assert not at.exception
     assert not any("Descriptor profile comparison" in c.value for c in at.caption)
-    assert not any(isinstance(n, UnknownElement) for n in at.main)
+    assert len([n for n in at.main if isinstance(n, UnknownElement)]) == 1
 
 def test_browse_mode_shows_hop_composition_and_descriptors(toy_cwd):
     # T5 backlog : consulter un houblon (composition + descripteurs) sans

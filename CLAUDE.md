@@ -538,6 +538,31 @@ en direct sur le DOM/CSS réel plutôt que supposée :
   `background-position: right top` conservé.
 Vérifié en direct dans les deux thèmes, y compris en défilant longuement (composition
 de l'illustration visiblement différente entre le haut et le bas de page).
+
+**Second correctif, toujours le même jour — le thème restait cassé aussi ("changing
+theme doesn't change the image used") : la médiaquery `prefers-color-scheme` du premier
+correctif suit la préférence OS, PAS le sélecteur Light/Dark/System du menu Streamlit —
+aucune des deux méthodes tentées jusque-là (`st.context.theme.type`, `prefers-color-
+scheme`) ne suit ce sélecteur de façon fiable et instantanée.** Trouvé en direct
+(`getComputedStyle`) : `.stApp` a une propriété CSS `color-scheme` calculée qui, elle,
+se met à jour INSTANTANÉMENT au clic sur Light/Dark/System (vérifié : "dark"→"light"
+sans aucun rerun Python) — pilotée par une classe Emotion générée dynamiquement (nom
+non stable, pas utilisable comme sélecteur), mais la propriété CSS calculée qui en
+résulte est stable et lisible. Problème : `color-scheme` n'est utilisable qu'en valeur
+`<color>` (`light-dark()`), pas pour choisir entre deux `background-image`/`url()`
+entières — aucune solution CSS pure ne permet ce choix. Basculé sur `st.iframe` (PAS
+`st.markdown` : un `<script>` injecté via `st.markdown(unsafe_allow_html=True)` NE
+S'EXÉCUTE JAMAIS, vérifié en direct avec un test minimal — `window.__test` reste
+`undefined`) avec une chaîne HTML brute : documenté comme exécutant du JS avec accès
+same-origin à la page parente. Le script (`app._BACKGROUND_SCRIPT_TEMPLATE`) lit
+`color-scheme` sur `.stApp` via `window.parent.document`, applique le fond directement
+en JS (plus de `<style>` séparé), et observe les changements de `class` sur `.stApp`
+(`MutationObserver`) pour réagir à CHAQUE bascule de thème sans dépendre d'un rerun
+Python ; écoute aussi `matchMedia("(prefers-color-scheme: dark)").addEventListener`
+pour le cas "System" + OS qui change en cours de session. Iframe rendue à hauteur
+quasi nulle (`height=1`), aucun contenu visible voulu. Vérifié en direct : bascule
+Light/Dark/System dans le menu Streamlit change l'image immédiatement, dans les deux
+sens, sans aucune interaction supplémentaire.
 Reste :
 1. Jointure FooDB/hop_composition au-delà des ~734 composés Flavornet si le vocabulaire
    s'élargit beaucoup (crawl Yakima déjà réel, plus d'aliments FooDB).

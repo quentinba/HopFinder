@@ -216,53 +216,93 @@ def _background_data_uri(path: str, _version: float, invert: bool) -> str | None
     return f"data:image/jpeg;base64,{encoded}"
 
 
+_BACKGROUND_SCRIPT_TEMPLATE = """
+<script>
+(function() {
+    var doc = window.parent.document;
+    var lightVeil = "__LIGHT_VEIL__";
+    var darkVeil = "__DARK_VEIL__";
+    var normalUri = "__NORMAL_URI__";
+    var invertedUri = "__INVERTED_URI__";
+
+    function apply() {
+        var stApp = doc.querySelector(".stApp");
+        var main = doc.querySelector('[data-testid="stMain"]');
+        if (!stApp || !main) return;
+        var dark = getComputedStyle(stApp).colorScheme === "dark";
+        var veil = dark ? darkVeil : lightVeil;
+        var uri = dark ? invertedUri : normalUri;
+        main.style.backgroundImage =
+            'linear-gradient(' + veil + ', ' + veil + '), url("' + uri + '")';
+        main.style.backgroundSize = "cover";
+        main.style.backgroundPosition = "right top";
+        main.style.backgroundAttachment = "local";
+        main.style.backgroundRepeat = "no-repeat";
+    }
+
+    apply();
+    var stApp = doc.querySelector(".stApp");
+    if (stApp) {
+        new MutationObserver(apply).observe(stApp, {attributes: true, attributeFilter: ["class"]});
+    }
+    window.parent.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", apply);
+})();
+</script>
+"""
+
+
 def _inject_background() -> None:
     """Image de fond derrière le contenu principal (demande utilisateur).
 
-    **Second passage (2026-08-19), les deux bugs signalés par l'utilisateur
-    investigués en direct (DOM/CSS réel, pas une supposition) :**
+    **Troisième passage (2026-08-19) : les deux correctifs précédents ne
+    marchaient toujours pas, signalé par l'utilisateur ("changing theme
+    doesn't change the image used"). Root cause enfin identifiée pour de bon,
+    en inspectant le DOM/CSS réel en direct plutôt qu'en supposant :**
 
-    (1) Négatif couleur en thème sombre qui ne s'appliquait pas en thème
-    clair. Root cause vérifiée : le sélecteur de thème Streamlit (menu "⋮")
-    est un état 100% CÔTÉ CLIENT (aucune trace dans le DOM -- `<html>`/
-    `<body>` sans attribut/style lié au thème, vérifié en inspectant le DOM
-    en direct) qui ne déclenche PAS de rerun Python immédiat : `st.context.
-    theme.type`, lu au tout début de `main()`, reste bloqué sur l'ancienne
-    valeur tant qu'aucune VRAIE interaction widget (donc un rerun réel) n'a
-    eu lieu -- confirmé en direct : après avoir choisi "Light" dans le menu,
-    DEUX reruns réels (clics sur des boutons radio) plus tard, le fond était
-    encore le négatif sombre ; il a fallu un troisième rerun pour rattraper
-    la synchronisation. Corrigé en abandonnant `st.context.theme.type` pour
-    CE composant précis : les deux variantes (normale + négatif) sont
-    générées et embarquées TOUTES LES DEUX dans le CSS, sélectionnées par
-    `@media (prefers-color-scheme: dark)` -- une media query CSS pure,
-    évaluée par le navigateur, instantanée, sans aller-retour Python. Limite
-    assumée et documentée : ne suit que la préférence OS ("System" dans le
-    menu Streamlit, le réglage par défaut) ; un choix MANUEL "Light"/"Dark"
-    dans le menu Streamlit qui contredit l'OS ne sera reflété qu'après une
-    vraie interaction (même limite qu'avant, mais confinée à ce cas
-    minoritaire plutôt que systématique).
+    Le passage précédent utilisait `@media (prefers-color-scheme: dark)` en
+    CSS pur -- ça suit la préférence OS, PAS le sélecteur Light/Dark/System
+    du menu Streamlit. Or `st.context.theme.type` (tenté avant ça, tout
+    premier passage) ne se synchronise qu'après plusieurs reruns réels (le
+    sélecteur est un état 100% côté client, aucun rerun immédiat). AUCUNE
+    des deux méthodes ne suit donc le sélecteur Streamlit de façon fiable et
+    instantanée.
 
-    (2) Le fond restait bloqué sur la même tranche du haut en défilant,
-    malgré le retrait de `background-attachment: fixed` au passage
-    précédent. Root cause vérifiée : `[data-testid="stAppViewContainer"]`
-    N'EST PAS l'élément qui défile réellement -- Streamlit a une mise en
-    page à défilement imbriqué, c'est `[data-testid="stMain"]` qui a
-    `overflow-y: auto` et un `scrollHeight` > `clientHeight` (vérifié en
-    direct via `getComputedStyle`/`scrollHeight` sur le DOM réel).
-    `stAppViewContainer` fait toujours exactement la hauteur du viewport,
-    donc `background-size: cover` dessus ne voyait jamais plus qu'un
-    viewport de l'image, peu importe `fixed` ou pas. Corrigé en ciblant
-    `stMain` et en passant `background-attachment: local` (PAS le défaut
-    `scroll`, qui fixe le fond par rapport à la BOÎTE de l'élément et non
-    par rapport à SON CONTENU défilant) : `local` fait défiler le fond avec
-    le contenu réel de `stMain`, et sa zone de positionnement de fond
-    inclut toute la hauteur défilable (pas juste la partie visible) --
-    `cover` se recalcule donc sur la hauteur RÉELLE de la page. Sidebar non
-    concernée (élément séparé), garde son propre fond plein.
+    Trouvé en inspectant le DOM en direct (`getComputedStyle`) : l'élément
+    `.stApp` a une propriété CSS `color-scheme` calculée qui, elle,
+    se met à jour INSTANTANÉMENT quand on choisit Light/Dark/System dans le
+    menu Streamlit (vérifié : "dark" -> clic "Light" -> "light", sans AUCUN
+    rerun Python entretemps) -- Streamlit la pilote par une classe
+    Emotion générée dynamiquement (nom non stable d'une session à l'autre,
+    donc pas utilisable comme sélecteur CSS direct), mais la propriété
+    CSS *calculée* qui en résulte, elle, est stable et lisible.
 
-    `background-position: right top` cadre sur la partie droite de l'image
-    (jugée plus réussie par l'utilisateur) plutôt que le centre."""
+    `color-scheme` n'est cependant utilisable qu'en valeur `<color>` (via
+    `light-dark()`), pas pour choisir entre deux `background-image`/`url()`
+    entières -- aucune solution CSS pure ne permet ce choix. Solution
+    retenue : `st.iframe` (PAS `st.markdown` -- un `<script>` injecté via
+    `st.markdown(unsafe_allow_html=True)` NE S'EXÉCUTE JAMAIS, vérifié en
+    direct) avec une chaîne HTML brute, qui exécute du JS avec accès
+    same-origin à la page parente (documenté : "HTML strings... are
+    embedded as-is in an iframe that allows JavaScript execution and
+    same-origin access to the Streamlit app"). Le script lit `color-scheme`
+    sur `.stApp` DANS LE PARENT (`window.parent.document`), applique le
+    fond directement en JS (pas de CSS injecté séparément), et observe les
+    changements de `class` sur `.stApp` (`MutationObserver`) -- c'est ce
+    changement de classe Emotion qui accompagne chaque bascule de thème,
+    réagit donc instantanément à CHAQUE bascule (System/Light/Dark), sans
+    dépendre d'un rerun Python. Écoute aussi le changement OS
+    (`matchMedia(...).addEventListener`) pour le cas "System" + OS qui
+    change en cours de session. Iframe rendue à hauteur quasi nulle (pas de
+    contenu visible voulu, juste le script).
+
+    Fond scindé en deux variantes (normale/négatif, voir
+    `_background_data_uri`) choisies par le script selon `dark`, jamais par
+    médiaquery CSS ni par `st.context.theme.type` désormais.
+
+    `background-attachment: local` + `background-position: right top` sur
+    `[data-testid="stMain"]` (PAS `stAppViewContainer`, qui ne défile jamais
+    réellement -- mise en page à défilement imbriqué, voir commit précédent)
+    inchangés, appliqués en JS pour rester dans le même mécanisme."""
     if not os.path.exists(_BACKGROUND_PATH):
         return
     version = os.path.getmtime(_BACKGROUND_PATH)
@@ -270,28 +310,14 @@ def _inject_background() -> None:
     inverted_uri = _background_data_uri(_BACKGROUND_PATH, version, invert=True)
     if normal_uri is None or inverted_uri is None:
         return
-    light_veil = "rgba(255,255,255,0.86)"
-    dark_veil = "rgba(14,17,23,0.72)"
-    st.markdown(
-        f"""
-        <style>
-        [data-testid="stMain"] {{
-            background-image: linear-gradient({light_veil}, {light_veil}), url("{normal_uri}");
-            background-size: cover;
-            background-position: right top;
-            background-attachment: local;
-            background-repeat: no-repeat;
-        }}
-        @media (prefers-color-scheme: dark) {{
-            [data-testid="stMain"] {{
-                background-image:
-                    linear-gradient({dark_veil}, {dark_veil}), url("{inverted_uri}");
-            }}
-        }}
-        </style>
-        """,
-        unsafe_allow_html=True,
+    html = (
+        _BACKGROUND_SCRIPT_TEMPLATE
+        .replace("__LIGHT_VEIL__", "rgba(255,255,255,0.86)")
+        .replace("__DARK_VEIL__", "rgba(14,17,23,0.72)")
+        .replace("__NORMAL_URI__", normal_uri)
+        .replace("__INVERTED_URI__", inverted_uri)
     )
+    st.iframe(html, height=1)
 
 
 # purpose (aromatic/bittering/both) : SEULE donnée BeerMaverick classant un

@@ -362,6 +362,31 @@ l'implémentation ([ ] à faire, [x] fait — voir le commit associé).
   `background-position: right top` conservé. Vérifié en direct : le fond
   change bien de portion en défilant, dans les deux thèmes.
 
+  **Addendum 3 (même jour, l'utilisateur signale que le thème ne change
+  toujours pas l'image : "changing theme doesn't change the image used")**
+  — la médiaquery CSS de l'addendum 2 suit la préférence OS, PAS le
+  sélecteur Light/Dark/System du menu Streamlit lui-même : aucune des deux
+  méthodes tentées (`st.context.theme.type`, `prefers-color-scheme`) ne
+  suit ce sélecteur de façon fiable et instantanée. Trouvé en direct
+  (`getComputedStyle`) : `.stApp` a une propriété CSS `color-scheme`
+  calculée qui, elle, se met à jour INSTANTANÉMENT au clic sur Light/Dark/
+  System (vérifié : "dark"→"light" sans aucun rerun Python) — pilotée par
+  une classe Emotion générée dynamiquement, mais la propriété CSS calculée
+  qui en résulte est stable et lisible. Problème : `color-scheme` n'est
+  utilisable qu'en valeur `<color>` (`light-dark()`), pas pour choisir entre
+  deux `background-image`/`url()` entières — aucune solution CSS pure ne
+  permet ce choix. Basculé sur `st.iframe` (PAS `st.markdown` : un
+  `<script>` injecté via `st.markdown(unsafe_allow_html=True)` NE
+  S'EXÉCUTE JAMAIS, vérifié en direct avec un test minimal) avec une chaîne
+  HTML brute — documenté comme exécutant du JS avec accès same-origin à la
+  page parente. Le script lit `color-scheme` sur `.stApp` via
+  `window.parent.document`, applique le fond directement en JS, et observe
+  les changements de `class` sur `.stApp` (`MutationObserver`) pour réagir
+  à chaque bascule de thème sans dépendre d'un rerun Python ; écoute aussi
+  `matchMedia(...).addEventListener` pour le cas "System" + OS qui change
+  en cours de session. Vérifié en direct : bascule Light/Dark/System dans
+  le menu Streamlit change l'image immédiatement, dans les deux sens.
+
 ## Sources de données additionnelles (recherche)
 
 - **Investigué à nouveau, PAS retenu — Hopsteiner (shop.hopsteiner.com)**.
