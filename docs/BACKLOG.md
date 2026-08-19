@@ -318,6 +318,16 @@ l'implémentation ([ ] à faire, [x] fait — voir le commit associé).
   (aromatic) + Millennium (bittering, complément) à la taille 2, puis
   seulement des houblons aromatiques/both aux tailles 3-5.
 
+- [x] **T50 — Image de fond**
+  Demande utilisateur : gravure houblon fournie (`assets/background.png`)
+  comme fond de l'app. PNG (~3,1 Mo) reconverti en JPEG qualité 82 à
+  l'ingestion GUI (`app._background_data_uri`, ~360 Ko), inliné en base64
+  via CSS (`st.markdown(..., unsafe_allow_html=True)`) — pas de serveur de
+  fichiers statiques à configurer. Voile semi-transparent couleur du thème
+  (même mécanisme que `_aroma_wheel`, `st.context.theme.type`) pour rester
+  lisible en clair et en sombre ; cible `stAppViewContainer` seulement, pas
+  la sidebar. Vérifié en direct dans les deux thèmes.
+
 ## Sources de données additionnelles (recherche)
 
 - **Investigué à nouveau, PAS retenu — Hopsteiner (shop.hopsteiner.com)**.

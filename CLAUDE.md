@@ -494,6 +494,20 @@ contrast, et blends structurés pour garantir au moins 1 aromatique + 1 amérisa
 taille 2 puis ne recruter que des aromatiques ensuite (voir la section BeerMaverick
 ci-dessus pour le détail complet des trois). En cours de ce même batch, corrigé aussi le
 seul axe non-anglais de la roue d'arôme ("Pomme"→"apple", voir section Yakima Chief).
+
+**Image de fond ajoutée (2026-08-19, demande utilisateur, `assets/background.png`, fournie
+par l'utilisateur — gravure houblon).** Fichier hors sandbox (`~/Downloads`) au départ,
+copié manuellement par l'utilisateur (Finder, pas Terminal — `cp`/`sudo cp` échouaient
+avec `Operation not permitted`, restriction TCC macOS sur Downloads, pas un problème
+hopmatch). PNG fourni (~3,1 Mo, texture papier + hachures fines qui compresse mal en PNG)
+reconverti en JPEG qualité 82 à l'ingestion GUI (`app._background_data_uri`, ~360 Ko) et
+inliné en base64 (`data:image/jpeg;base64,...`) via CSS injecté par `st.markdown(...,
+unsafe_allow_html=True)` — pas de serveur de fichiers statiques Streamlit à configurer.
+Voile semi-transparent COULEUR DU THÈME par-dessus (`rgba(14,17,23,0.88)` sombre /
+`rgba(255,255,255,0.86)` clair, `st.context.theme.type` — même mécanisme que
+`_aroma_wheel`) pour rester lisible dans les deux thèmes ; cible uniquement
+`[data-testid="stAppViewContainer"]`, pas la sidebar (garde son fond plein pour la
+navigation). Vérifié en direct dans les deux thèmes.
 Reste :
 1. Jointure FooDB/hop_composition au-delà des ~734 composés Flavornet si le vocabulaire
    s'élargit beaucoup (crawl Yakima déjà réel, plus d'aliments FooDB).

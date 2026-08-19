@@ -14,6 +14,8 @@ date, toute la GUI était en français.
 Lancer : streamlit run src/hopmatch/app.py [-- --db chemin/vers/aromahops.db]
 """
 from __future__ import annotations
+import base64
+import io
 import math
 import os
 import sys
@@ -21,11 +23,19 @@ from datetime import datetime
 
 import altair as alt
 import streamlit as st
+from PIL import Image
 
 from hopmatch import matching
 from hopmatch.schema import connect
 
 DEFAULT_DB = "aromahops.db"
+
+# Image de fond (demande utilisateur, 2026-08-19) : gravure houblon fournie
+# par l'utilisateur, stockée hors de src/ (assets/, à la racine du dépôt) --
+# chemin résolu depuis __file__ pour rester correct quel que soit le cwd
+# d'où `streamlit run` est lancé.
+_BACKGROUND_PATH = os.path.join(
+    os.path.dirname(__file__), "..", "..", "assets", "background.png")
 
 # Libellés GUI affichés à l'utilisateur, distincts des clés internes ("mode")
 # qui pilotent le dispatch et restent stables (CLI/tests/URLs internes non
@@ -174,6 +184,55 @@ def _intensity_vocabulary(con) -> list[str]:
 def _stats(con) -> dict:
     db_path = _db_path()
     return _cached_stats(con, db_path, _db_version(db_path))
+
+
+@st.cache_data
+def _background_data_uri(path: str, _version: float) -> str | None:
+    """Convertit l'image de fond en data URI base64 (JPEG), mise en cache
+    par mtime du fichier (même schéma que `_cached_stats`/etc.). Recompressé
+    en JPEG qualité 82 : le PNG fourni (~3.1 Mo, texture papier + hachures
+    fines qui compressent mal en PNG) tombe à ~360 Ko une fois réencodé,
+    négligeable une fois inliné en base64 dans le HTML d'une app locale.
+    None si le fichier est absent (image optionnelle, pas d'erreur bloquante
+    si `assets/background.png` n'existe pas)."""
+    if not os.path.exists(path):
+        return None
+    im = Image.open(path).convert("RGB")
+    buf = io.BytesIO()
+    im.save(buf, format="JPEG", quality=82, optimize=True)
+    encoded = base64.b64encode(buf.getvalue()).decode("ascii")
+    return f"data:image/jpeg;base64,{encoded}"
+
+
+def _inject_background() -> None:
+    """Image de fond derrière le contenu principal (demande utilisateur),
+    assombrie par un voile semi-transparent COULEUR DU THÈME (pas une
+    couleur fixe) pour rester lisible en clair ET en sombre -- même logique
+    que `_aroma_wheel` : `st.context.theme.type` est la seule info de thème
+    exposée par Streamlit, palette choisie à la main pour les deux cas.
+    Cible `[data-testid="stAppViewContainer"]` (zone de contenu), pas la
+    sidebar : elle garde son fond plein pour que la navigation reste nette."""
+    if not os.path.exists(_BACKGROUND_PATH):
+        return
+    uri = _background_data_uri(_BACKGROUND_PATH, os.path.getmtime(_BACKGROUND_PATH))
+    if uri is None:
+        return
+    dark = st.context.theme.type == "dark"
+    veil = "rgba(14,17,23,0.88)" if dark else "rgba(255,255,255,0.86)"
+    st.markdown(
+        f"""
+        <style>
+        [data-testid="stAppViewContainer"] {{
+            background-image: linear-gradient({veil}, {veil}), url("{uri}");
+            background-size: cover;
+            background-position: center top;
+            background-attachment: fixed;
+            background-repeat: no-repeat;
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 # purpose (aromatic/bittering/both) : SEULE donnée BeerMaverick classant un
@@ -709,6 +768,7 @@ def _by_descriptor(con):
 
 def main():
     st.set_page_config(page_title="hopmatch", page_icon="🌿")
+    _inject_background()
     if "_next_mode" in st.session_state:
         # Relais utilisé par la page d'accueil (_home) : Streamlit interdit
         # de modifier st.session_state["mode"] une fois le widget radio
