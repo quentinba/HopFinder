@@ -328,24 +328,39 @@ l'implémentation ([ ] à faire, [x] fait — voir le commit associé).
   lisible en clair et en sombre ; cible `stAppViewContainer` seulement, pas
   la sidebar. Vérifié en direct dans les deux thèmes.
 
-  **Addendum (2026-08-19, deux problèmes signalés par l'utilisateur juste
+  **Addendum 1 (2026-08-19, deux problèmes signalés par l'utilisateur juste
   après) :** (1) l'image (fond crème, trait noir) ne convenait qu'au thème
-  clair — un voile sombre par-dessus ne suffisait pas à la rendre adaptée au
-  thème sombre. Corrigé par un négatif couleur (`PIL.ImageOps.invert`) généré
-  à la volée et mis en cache (`_background_data_uri(..., invert=dark)`), pas
-  un second fichier statique à maintenir — le négatif exact d'un trait noir
-  sur fond crème donne un fond quasi-noir à trait clair, propre visuellement
-  (vérifié, pas de dominante de teinte parasite malgré la teinte sépia
-  d'origine). (2) le fond restait bloqué sur la tranche du haut de l'image
-  même en défilant. Cause : `background-attachment: fixed` calcule la taille
-  de `background-size: cover` par rapport au VIEWPORT, pas au contenu réel
-  (souvent bien plus haut qu'un seul écran) — `cover` n'avait donc jamais
-  qu'une fine tranche fixe à afficher. Retiré (`fixed` + `center top`) au
-  profit du comportement par défaut (l'image défile avec le contenu, `cover`
-  se recalcule sur la hauteur réelle de la page) + `background-position:
-  right top` pour cadrer sur la partie droite (jugée plus réussie par
-  l'utilisateur). Vérifié en direct : le fond change bien en défilant, dans
-  les deux thèmes.
+  clair. Corrigé par un négatif couleur (`PIL.ImageOps.invert`) via
+  `st.context.theme.type`. (2) le fond restait bloqué sur la tranche du haut
+  même en défilant. Tentative : retirer `background-attachment: fixed` +
+  `center top` au profit de `right top` sans `fixed`.
+
+  **Addendum 2 (même jour, l'utilisateur signale que les DEUX ne sont
+  toujours pas corrigés) — root cause réinvestiguée en direct sur le DOM/CSS
+  réel, pas supposée :** (1) le sélecteur de thème Streamlit (menu "⋮") est
+  un état 100% CÔTÉ CLIENT (aucun attribut/style lié au thème sur `<html>`/
+  `<body>`, vérifié) qui ne déclenche PAS de rerun Python immédiat —
+  `st.context.theme.type` reste bloqué sur l'ancienne valeur tant qu'aucune
+  VRAIE interaction widget n'a eu lieu (confirmé : deux reruns réels après
+  avoir choisi "Light" ne suffisaient pas, il en a fallu un troisième).
+  `st.context.theme.type` abandonné pour ce composant : les deux variantes
+  (normale + négatif) sont désormais TOUTES LES DEUX embarquées dans le CSS,
+  sélectionnées par `@media (prefers-color-scheme: dark)` — évalué par le
+  navigateur, instantané, sans aller-retour Python. Limite assumée : ne suit
+  que la préférence OS ("System", le réglage par défaut), pas un override
+  manuel Light/Dark qui contredirait l'OS (cas minoritaire, toujours corrigé
+  après une vraie interaction). (2) `[data-testid="stAppViewContainer"]`
+  n'est PAS l'élément qui défile réellement — mise en page à défilement
+  imbriqué, c'est `[data-testid="stMain"]` qui a `overflow-y: auto` et un
+  `scrollHeight` > `clientHeight` (vérifié via `getComputedStyle`/
+  `scrollHeight` en direct) ; `stAppViewContainer` fait toujours exactement
+  la hauteur du viewport, donc `cover` dessus ne voyait jamais plus qu'un
+  viewport de l'image, `fixed` ou pas. Corrigé en ciblant `stMain` avec
+  `background-attachment: local` (pas le défaut `scroll`, qui fixe le fond
+  par rapport à la BOÎTE de l'élément, pas à son contenu défilant) : `local`
+  fait défiler le fond avec le contenu réel, sur toute la hauteur défilable.
+  `background-position: right top` conservé. Vérifié en direct : le fond
+  change bien de portion en défilant, dans les deux thèmes.
 
 ## Sources de données additionnelles (recherche)
 

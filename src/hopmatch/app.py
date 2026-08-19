@@ -217,41 +217,76 @@ def _background_data_uri(path: str, _version: float, invert: bool) -> str | None
 
 
 def _inject_background() -> None:
-    """Image de fond derrière le contenu principal (demande utilisateur),
-    assombrie par un voile semi-transparent COULEUR DU THÈME (pas une
-    couleur fixe) pour rester lisible en clair ET en sombre -- même logique
-    que `_aroma_wheel` : `st.context.theme.type` est la seule info de thème
-    exposée par Streamlit, palette choisie à la main pour les deux cas.
-    Cible `[data-testid="stAppViewContainer"]` (zone de contenu), pas la
-    sidebar : elle garde son fond plein pour que la navigation reste nette.
+    """Image de fond derrière le contenu principal (demande utilisateur).
 
-    Deux ajustements du 2026-08-19 (retour utilisateur sur la première
-    version) : (1) négatif couleur en thème sombre plutôt qu'un simple voile
-    (voir `_background_data_uri`) ; (2) `background-attachment: fixed` +
-    `center top` retiré -- avec `fixed`, la taille de l'image se calcule par
-    rapport au VIEWPORT (pas au contenu, souvent bien plus haut qu'un seul
-    écran une fois défilé), donc `cover` n'affichait jamais que la tranche du
-    haut, toujours la même en défilant. Sans `fixed` (comportement par
-    défaut, l'image défile avec le contenu), `cover` se recalcule par
-    rapport à la hauteur RÉELLE de la page -- on voit donc bien plus de la
-    hauteur de l'illustration en descendant. `background-position: right
-    top` cadre sur la partie droite de l'image (jugée plus réussie par
-    l'utilisateur) plutôt que le centre."""
+    **Second passage (2026-08-19), les deux bugs signalés par l'utilisateur
+    investigués en direct (DOM/CSS réel, pas une supposition) :**
+
+    (1) Négatif couleur en thème sombre qui ne s'appliquait pas en thème
+    clair. Root cause vérifiée : le sélecteur de thème Streamlit (menu "⋮")
+    est un état 100% CÔTÉ CLIENT (aucune trace dans le DOM -- `<html>`/
+    `<body>` sans attribut/style lié au thème, vérifié en inspectant le DOM
+    en direct) qui ne déclenche PAS de rerun Python immédiat : `st.context.
+    theme.type`, lu au tout début de `main()`, reste bloqué sur l'ancienne
+    valeur tant qu'aucune VRAIE interaction widget (donc un rerun réel) n'a
+    eu lieu -- confirmé en direct : après avoir choisi "Light" dans le menu,
+    DEUX reruns réels (clics sur des boutons radio) plus tard, le fond était
+    encore le négatif sombre ; il a fallu un troisième rerun pour rattraper
+    la synchronisation. Corrigé en abandonnant `st.context.theme.type` pour
+    CE composant précis : les deux variantes (normale + négatif) sont
+    générées et embarquées TOUTES LES DEUX dans le CSS, sélectionnées par
+    `@media (prefers-color-scheme: dark)` -- une media query CSS pure,
+    évaluée par le navigateur, instantanée, sans aller-retour Python. Limite
+    assumée et documentée : ne suit que la préférence OS ("System" dans le
+    menu Streamlit, le réglage par défaut) ; un choix MANUEL "Light"/"Dark"
+    dans le menu Streamlit qui contredit l'OS ne sera reflété qu'après une
+    vraie interaction (même limite qu'avant, mais confinée à ce cas
+    minoritaire plutôt que systématique).
+
+    (2) Le fond restait bloqué sur la même tranche du haut en défilant,
+    malgré le retrait de `background-attachment: fixed` au passage
+    précédent. Root cause vérifiée : `[data-testid="stAppViewContainer"]`
+    N'EST PAS l'élément qui défile réellement -- Streamlit a une mise en
+    page à défilement imbriqué, c'est `[data-testid="stMain"]` qui a
+    `overflow-y: auto` et un `scrollHeight` > `clientHeight` (vérifié en
+    direct via `getComputedStyle`/`scrollHeight` sur le DOM réel).
+    `stAppViewContainer` fait toujours exactement la hauteur du viewport,
+    donc `background-size: cover` dessus ne voyait jamais plus qu'un
+    viewport de l'image, peu importe `fixed` ou pas. Corrigé en ciblant
+    `stMain` et en passant `background-attachment: local` (PAS le défaut
+    `scroll`, qui fixe le fond par rapport à la BOÎTE de l'élément et non
+    par rapport à SON CONTENU défilant) : `local` fait défiler le fond avec
+    le contenu réel de `stMain`, et sa zone de positionnement de fond
+    inclut toute la hauteur défilable (pas juste la partie visible) --
+    `cover` se recalcule donc sur la hauteur RÉELLE de la page. Sidebar non
+    concernée (élément séparé), garde son propre fond plein.
+
+    `background-position: right top` cadre sur la partie droite de l'image
+    (jugée plus réussie par l'utilisateur) plutôt que le centre."""
     if not os.path.exists(_BACKGROUND_PATH):
         return
-    dark = st.context.theme.type == "dark"
-    uri = _background_data_uri(_BACKGROUND_PATH, os.path.getmtime(_BACKGROUND_PATH), dark)
-    if uri is None:
+    version = os.path.getmtime(_BACKGROUND_PATH)
+    normal_uri = _background_data_uri(_BACKGROUND_PATH, version, invert=False)
+    inverted_uri = _background_data_uri(_BACKGROUND_PATH, version, invert=True)
+    if normal_uri is None or inverted_uri is None:
         return
-    veil = "rgba(14,17,23,0.72)" if dark else "rgba(255,255,255,0.86)"
+    light_veil = "rgba(255,255,255,0.86)"
+    dark_veil = "rgba(14,17,23,0.72)"
     st.markdown(
         f"""
         <style>
-        [data-testid="stAppViewContainer"] {{
-            background-image: linear-gradient({veil}, {veil}), url("{uri}");
+        [data-testid="stMain"] {{
+            background-image: linear-gradient({light_veil}, {light_veil}), url("{normal_uri}");
             background-size: cover;
             background-position: right top;
+            background-attachment: local;
             background-repeat: no-repeat;
+        }}
+        @media (prefers-color-scheme: dark) {{
+            [data-testid="stMain"] {{
+                background-image:
+                    linear-gradient({dark_veil}, {dark_veil}), url("{inverted_uri}");
+            }}
         }}
         </style>
         """,

@@ -503,23 +503,41 @@ hopmatch). PNG fourni (~3,1 Mo, texture papier + hachures fines qui compresse ma
 reconverti en JPEG qualité 82 à l'ingestion GUI (`app._background_data_uri`, ~360 Ko) et
 inliné en base64 (`data:image/jpeg;base64,...`) via CSS injecté par `st.markdown(...,
 unsafe_allow_html=True)` — pas de serveur de fichiers statiques Streamlit à configurer.
-Voile semi-transparent COULEUR DU THÈME par-dessus (`rgba(14,17,23,0.72)` sombre /
-`rgba(255,255,255,0.86)` clair, `st.context.theme.type` — même mécanisme que
-`_aroma_wheel`) pour rester lisible dans les deux thèmes ; cible uniquement
-`[data-testid="stAppViewContainer"]`, pas la sidebar (garde son fond plein pour la
-navigation).
-**Deux problèmes corrigés juste après (même jour, retour utilisateur immédiat) :**
-(1) l'image (fond crème, trait noir) ne convenait qu'au thème clair — un voile sombre
-seul ne suffisait pas. Corrigé par un négatif couleur à la volée (`PIL.ImageOps.invert`,
-mis en cache comme le reste via `@st.cache_data`) plutôt qu'un second fichier statique :
-le négatif exact d'un trait noir sur fond crème donne un fond quasi-noir à trait clair,
-propre visuellement (vérifié, pas de dominante de teinte parasite malgré la sépia
-d'origine). (2) le fond restait bloqué sur la tranche du haut en défilant — cause :
-`background-attachment: fixed` calcule `background-size: cover` par rapport au VIEWPORT,
-pas au contenu réel (souvent bien plus haut) ; retiré au profit du comportement par
-défaut (l'image défile avec le contenu) + `background-position: right top` (partie droite
-jugée plus réussie par l'utilisateur). Vérifié en direct dans les deux thèmes, y compris
-en défilant.
+Voile semi-transparent COULEUR DU THÈME par-dessus, cible `[data-testid=
+"stAppViewContainer"]`, pas la sidebar.
+**Premier correctif tenté le même jour (retour utilisateur immédiat) — INSUFFISANT,
+voir le second correctif ci-dessous pour la vraie root cause :** négatif couleur via
+`st.context.theme.type` pour le thème sombre ; retrait de `background-attachment:
+fixed` + `background-position: right top` pour le défilement. L'utilisateur a signalé
+que NI L'UN NI L'AUTRE n'était réellement corrigé (le thème clair montrait encore le
+négatif, la position ne changeait toujours pas en défilant) — root cause réinvestiguée
+en direct sur le DOM/CSS réel plutôt que supposée :
+- **Thème** : le sélecteur Streamlit (menu "⋮") est un état 100% CÔTÉ CLIENT (aucun
+  attribut/style lié au thème sur `<html>`/`<body>`, vérifié) qui ne déclenche PAS de
+  rerun Python immédiat — `st.context.theme.type`, lu en tout début de `main()`, reste
+  bloqué sur l'ancienne valeur tant qu'aucune VRAIE interaction widget n'a eu lieu
+  (confirmé : deux reruns réels après avoir choisi "Light" ne suffisaient pas, il en a
+  fallu un troisième). `st.context.theme.type` abandonné pour ce composant précis : les
+  deux variantes (normale + négatif) sont désormais TOUTES LES DEUX embarquées dans le
+  CSS, sélectionnées par `@media (prefers-color-scheme: dark)` — évalué par le
+  navigateur, instantané, sans aller-retour Python. Limite assumée et documentée : ne
+  suit que la préférence OS ("System", le réglage par défaut), pas un override manuel
+  Light/Dark qui contredirait l'OS (cas minoritaire, toujours corrigé après une vraie
+  interaction — même limite qu'avant, mais confinée à ce cas).
+- **Position** : `[data-testid="stAppViewContainer"]` N'EST PAS l'élément qui défile
+  réellement — Streamlit a une mise en page à défilement imbriqué, c'est
+  `[data-testid="stMain"]` qui a `overflow-y: auto` et un `scrollHeight` >
+  `clientHeight` (vérifié via `getComputedStyle`/`scrollHeight` en direct sur le DOM
+  réel). `stAppViewContainer` fait toujours exactement la hauteur du viewport, donc
+  `background-size: cover` dessus ne voyait jamais plus qu'un viewport de l'image,
+  `fixed` ou pas — le retrait de `fixed` au premier correctif n'avait donc aucun effet
+  puisque la cible elle-même ne grandissait jamais. Corrigé en ciblant `stMain` avec
+  `background-attachment: local` (pas le défaut `scroll`, qui fixe le fond par rapport
+  à la BOÎTE de l'élément, pas à son contenu défilant) : `local` fait défiler le fond
+  avec le contenu réel de `stMain`, sur toute sa hauteur défilable.
+  `background-position: right top` conservé.
+Vérifié en direct dans les deux thèmes, y compris en défilant longuement (composition
+de l'illustration visiblement différente entre le haut et le bas de page).
 Reste :
 1. Jointure FooDB/hop_composition au-delà des ~734 composés Flavornet si le vocabulaire
    s'élargit beaucoup (crawl Yakima déjà réel, plus d'aliments FooDB).
