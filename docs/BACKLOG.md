@@ -328,6 +328,25 @@ l'implémentation ([ ] à faire, [x] fait — voir le commit associé).
   lisible en clair et en sombre ; cible `stAppViewContainer` seulement, pas
   la sidebar. Vérifié en direct dans les deux thèmes.
 
+  **Addendum (2026-08-19, deux problèmes signalés par l'utilisateur juste
+  après) :** (1) l'image (fond crème, trait noir) ne convenait qu'au thème
+  clair — un voile sombre par-dessus ne suffisait pas à la rendre adaptée au
+  thème sombre. Corrigé par un négatif couleur (`PIL.ImageOps.invert`) généré
+  à la volée et mis en cache (`_background_data_uri(..., invert=dark)`), pas
+  un second fichier statique à maintenir — le négatif exact d'un trait noir
+  sur fond crème donne un fond quasi-noir à trait clair, propre visuellement
+  (vérifié, pas de dominante de teinte parasite malgré la teinte sépia
+  d'origine). (2) le fond restait bloqué sur la tranche du haut de l'image
+  même en défilant. Cause : `background-attachment: fixed` calcule la taille
+  de `background-size: cover` par rapport au VIEWPORT, pas au contenu réel
+  (souvent bien plus haut qu'un seul écran) — `cover` n'avait donc jamais
+  qu'une fine tranche fixe à afficher. Retiré (`fixed` + `center top`) au
+  profit du comportement par défaut (l'image défile avec le contenu, `cover`
+  se recalcule sur la hauteur réelle de la page) + `background-position:
+  right top` pour cadrer sur la partie droite (jugée plus réussie par
+  l'utilisateur). Vérifié en direct : le fond change bien en défilant, dans
+  les deux thèmes.
+
 ## Sources de données additionnelles (recherche)
 
 - **Investigué à nouveau, PAS retenu — Hopsteiner (shop.hopsteiner.com)**.

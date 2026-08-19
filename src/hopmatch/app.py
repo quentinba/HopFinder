@@ -187,17 +187,29 @@ def _stats(con) -> dict:
 
 
 @st.cache_data
-def _background_data_uri(path: str, _version: float) -> str | None:
+def _background_data_uri(path: str, _version: float, invert: bool) -> str | None:
     """Convertit l'image de fond en data URI base64 (JPEG), mise en cache
-    par mtime du fichier (même schéma que `_cached_stats`/etc.). Recompressé
+    par (mtime, invert) (même schéma que `_cached_stats`/etc.). Recompressé
     en JPEG qualité 82 : le PNG fourni (~3.1 Mo, texture papier + hachures
     fines qui compressent mal en PNG) tombe à ~360 Ko une fois réencodé,
     négligeable une fois inliné en base64 dans le HTML d'une app locale.
     None si le fichier est absent (image optionnelle, pas d'erreur bloquante
-    si `assets/background.png` n'existe pas)."""
+    si `assets/background.png` n'existe pas).
+
+    `invert` (2026-08-19, signalé par l'utilisateur : l'image ne convenait
+    qu'au thème clair, un simple voile sombre par-dessus ne suffisait pas en
+    thème sombre) : négatif couleur (`ImageOps.invert`) plutôt qu'un
+    deuxième fichier statique à maintenir -- l'illustration fournie est un
+    dessin au trait noir sur fond crème, son négatif exact est un fond
+    quasi-noir avec un trait clair, ce qui donne un résultat propre pour le
+    thème sombre (vérifié visuellement, pas de dominante de teinte
+    parasite malgré la teinte sépia d'origine)."""
     if not os.path.exists(path):
         return None
     im = Image.open(path).convert("RGB")
+    if invert:
+        from PIL import ImageOps
+        im = ImageOps.invert(im)
     buf = io.BytesIO()
     im.save(buf, format="JPEG", quality=82, optimize=True)
     encoded = base64.b64encode(buf.getvalue()).decode("ascii")
@@ -211,22 +223,34 @@ def _inject_background() -> None:
     que `_aroma_wheel` : `st.context.theme.type` est la seule info de thème
     exposée par Streamlit, palette choisie à la main pour les deux cas.
     Cible `[data-testid="stAppViewContainer"]` (zone de contenu), pas la
-    sidebar : elle garde son fond plein pour que la navigation reste nette."""
+    sidebar : elle garde son fond plein pour que la navigation reste nette.
+
+    Deux ajustements du 2026-08-19 (retour utilisateur sur la première
+    version) : (1) négatif couleur en thème sombre plutôt qu'un simple voile
+    (voir `_background_data_uri`) ; (2) `background-attachment: fixed` +
+    `center top` retiré -- avec `fixed`, la taille de l'image se calcule par
+    rapport au VIEWPORT (pas au contenu, souvent bien plus haut qu'un seul
+    écran une fois défilé), donc `cover` n'affichait jamais que la tranche du
+    haut, toujours la même en défilant. Sans `fixed` (comportement par
+    défaut, l'image défile avec le contenu), `cover` se recalcule par
+    rapport à la hauteur RÉELLE de la page -- on voit donc bien plus de la
+    hauteur de l'illustration en descendant. `background-position: right
+    top` cadre sur la partie droite de l'image (jugée plus réussie par
+    l'utilisateur) plutôt que le centre."""
     if not os.path.exists(_BACKGROUND_PATH):
         return
-    uri = _background_data_uri(_BACKGROUND_PATH, os.path.getmtime(_BACKGROUND_PATH))
+    dark = st.context.theme.type == "dark"
+    uri = _background_data_uri(_BACKGROUND_PATH, os.path.getmtime(_BACKGROUND_PATH), dark)
     if uri is None:
         return
-    dark = st.context.theme.type == "dark"
-    veil = "rgba(14,17,23,0.88)" if dark else "rgba(255,255,255,0.86)"
+    veil = "rgba(14,17,23,0.72)" if dark else "rgba(255,255,255,0.86)"
     st.markdown(
         f"""
         <style>
         [data-testid="stAppViewContainer"] {{
             background-image: linear-gradient({veil}, {veil}), url("{uri}");
             background-size: cover;
-            background-position: center top;
-            background-attachment: fixed;
+            background-position: right top;
             background-repeat: no-repeat;
         }}
         </style>

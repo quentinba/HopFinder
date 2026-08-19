@@ -503,11 +503,23 @@ hopmatch). PNG fourni (~3,1 Mo, texture papier + hachures fines qui compresse ma
 reconverti en JPEG qualité 82 à l'ingestion GUI (`app._background_data_uri`, ~360 Ko) et
 inliné en base64 (`data:image/jpeg;base64,...`) via CSS injecté par `st.markdown(...,
 unsafe_allow_html=True)` — pas de serveur de fichiers statiques Streamlit à configurer.
-Voile semi-transparent COULEUR DU THÈME par-dessus (`rgba(14,17,23,0.88)` sombre /
+Voile semi-transparent COULEUR DU THÈME par-dessus (`rgba(14,17,23,0.72)` sombre /
 `rgba(255,255,255,0.86)` clair, `st.context.theme.type` — même mécanisme que
 `_aroma_wheel`) pour rester lisible dans les deux thèmes ; cible uniquement
 `[data-testid="stAppViewContainer"]`, pas la sidebar (garde son fond plein pour la
-navigation). Vérifié en direct dans les deux thèmes.
+navigation).
+**Deux problèmes corrigés juste après (même jour, retour utilisateur immédiat) :**
+(1) l'image (fond crème, trait noir) ne convenait qu'au thème clair — un voile sombre
+seul ne suffisait pas. Corrigé par un négatif couleur à la volée (`PIL.ImageOps.invert`,
+mis en cache comme le reste via `@st.cache_data`) plutôt qu'un second fichier statique :
+le négatif exact d'un trait noir sur fond crème donne un fond quasi-noir à trait clair,
+propre visuellement (vérifié, pas de dominante de teinte parasite malgré la sépia
+d'origine). (2) le fond restait bloqué sur la tranche du haut en défilant — cause :
+`background-attachment: fixed` calcule `background-size: cover` par rapport au VIEWPORT,
+pas au contenu réel (souvent bien plus haut) ; retiré au profit du comportement par
+défaut (l'image défile avec le contenu) + `background-position: right top` (partie droite
+jugée plus réussie par l'utilisateur). Vérifié en direct dans les deux thèmes, y compris
+en défilant.
 Reste :
 1. Jointure FooDB/hop_composition au-delà des ~734 composés Flavornet si le vocabulaire
    s'élargit beaucoup (crawl Yakima déjà réel, plus d'aliments FooDB).
