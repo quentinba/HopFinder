@@ -176,6 +176,24 @@ avec ce bouton).
   JSON déjà structuré (composition + roue d'arôme), pas de parsing HTML. Piège nommage :
   slugs `-brand` (`citra-brand`) à déprefixer pour fusionner avec BarthHaas (`citra`),
   SAUF collision avec un vrai doublon de SKU déjà existant (`perle`/`perle-per03`).
+  **Suffixe "Brand" retiré du nom affiché (2026-08-19, signalé par l'utilisateur : "Mosaic
+  Brand" au lieu de "Mosaic" en GUI).** Root cause à deux niveaux, vérifiée en direct :
+  (1) `imported_fields.display_name` côté Yakima porte littéralement le mot "Brand" pour
+  50/153 variétés (ex. "Mosaic® Brand"), un artefact de LEUR convention d'affichage
+  marketing (variétés déposées) — BarthHaas n'a jamais ce mot pour la même variété
+  (vérifié en direct sur leur `<h1>` réel : "Mosaic®", rien d'autre). Corrigé par
+  `parsers._strip_yakima_brand_suffix`, appliqué dans `parse_yakima_hit` : retire
+  uniquement le mot "Brand"/"(Brand)" (3 formes vues en direct : "X® Brand", "X™
+  (Brand)" — un seul cas, Galaxy —, et "X® Brand - NZ Hops"/"X™ Brand - MacHops"), en
+  gardant tout le reste intact (®/™, qualificatifs réels comme "- NZ Hops"/"Organic").
+  (2) Même après ce correctif, `_ingest_variety` n'écrivait `name` QU'à la création de la
+  ligne, jamais lors d'une fusion multi-sources (`UPDATE hops SET sources=?` seul) — un
+  houblon ingéré par Yakima PUIS BarthHaas gardait pour toujours le nom (avec "Brand") du
+  premier crawl, même une fois BarthHaas fusionné avec son nom plus propre. Corrigé :
+  BarthHaas (source primaire) l'emporte désormais toujours sur conflit de nom ; une
+  réingestion de la MÊME source (aucune autre n'a jamais touché la variété) peut aussi
+  rafraîchir le nom. Réingestion réelle (`crawl-barthhaas` + `crawl-yakima`) : 43 → 0
+  houblons avec "Brand" dans le nom affiché sur les 194 de la base.
   **Choix de forme produit corrigé (vérifié en direct, signalé par l'utilisateur)** :
   `parse_yakima_hit` préférait `brewing_values[code=ARO01]` ('HopAroma', supposée
   « l'analyse brute de la variété »). Faux sur le catalogue réel : ARO01 n'existe que
@@ -581,6 +599,14 @@ l'utilisateur, affiché tel quel (`background-position: center center`, plus de
 recadrage `right top` côté CSS, qui n'avait plus de sens sur un crop déjà cadré en
 amont). Vérifié en direct : le fond ne bouge plus du tout en défilant, dans les deux
 thèmes, sans changement de zoom d'une interaction à l'autre.
+
+**T51 — suffixe "Brand" retiré du nom affiché (2026-08-19, signalé par l'utilisateur —
+voir la section Yakima Chief ci-dessus pour le détail complet).** Root cause à deux
+niveaux : (1) `display_name` Yakima porte littéralement "Brand" pour 50/153 variétés
+(artefact marketing, jamais présent côté BarthHaas) — corrigé par
+`parsers._strip_yakima_brand_suffix`. (2) `_ingest_variety` ne mettait jamais `name` à
+jour lors d'une fusion multi-sources — corrigé, BarthHaas l'emporte désormais toujours
+sur conflit. Réingestion réelle : 43 → 0 houblons avec "Brand" dans le nom affiché.
 Reste :
 1. Jointure FooDB/hop_composition au-delà des ~734 composés Flavornet si le vocabulaire
    s'élargit beaucoup (crawl Yakima déjà réel, plus d'aliments FooDB).

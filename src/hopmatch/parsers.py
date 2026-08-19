@@ -314,6 +314,30 @@ def _select_sensory_items(imp: dict, bv_code: str | None) -> list[dict]:
     return imp.get("aroma_values") or []
 
 
+_YAKIMA_BRAND_SUFFIX_RE = re.compile(r"\(Brand\)|Brand", re.I)
+
+
+def _strip_yakima_brand_suffix(display_name: str | None) -> str | None:
+    """Retire le mot "Brand" (ou "(Brand)") du `display_name` Yakima — un
+    artefact de LEUR convention d'affichage marketing (variétés déposées),
+    PAS une partie du nom réel du houblon : signalé par l'utilisateur (2026-
+    08-19), "Mosaic® Brand" côté Yakima quand BarthHaas affiche juste
+    "Mosaic®" pour la même variété (vérifié en direct sur leur page réelle,
+    <h1>, aucun "Brand"). Confirmé sur l'API Algolia réelle : 50/153
+    variétés ont "Brand" dans `display_name`, toujours comme un mot à part
+    (jamais une sous-chaîne d'un autre mot), sous 3 formes vues en direct :
+    "X® Brand", "X™ (Brand)" (Galaxy, un seul cas), et "X® Brand - NZ Hops"/
+    "X™ Brand - MacHops" (variantes régionales, où "- NZ Hops"/"- MacHops"
+    est un vrai qualificatif à GARDER, seul "Brand" est retiré) ; un cas a
+    aussi un qualificatif avant "Brand" ("Nectaron® Organic Brand - NZ
+    Hops" -> "Organic" gardé). Ne retire QUE le mot "Brand" lui-même, jamais
+    ce qui l'entoure -- espaces multiples résultants recollapsés."""
+    if not display_name:
+        return display_name
+    cleaned = _YAKIMA_BRAND_SUFFIX_RE.sub("", display_name)
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
 def parse_yakima_hit(hit: dict) -> tuple[str, str, str, dict, list[str], dict[str, float]]:
     """
     Extrait (variety, name, region, comp, descriptors, aroma_intensity) d'un
@@ -338,7 +362,7 @@ def parse_yakima_hit(hit: dict) -> tuple[str, str, str, dict, list[str], dict[st
     """
     imp = hit.get("imported_fields") or {}
     variety = (hit.get("url") or "").rsplit("/", 1)[-1]
-    name = imp.get("display_name") or variety
+    name = _strip_yakima_brand_suffix(imp.get("display_name")) or variety
     region = imp.get("country_name") or ""
     descriptors = [d.strip().lower() for d in (imp.get("aromas") or []) if d and d.strip()]
 

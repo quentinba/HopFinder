@@ -159,6 +159,42 @@ def test_parse_yakima_hit():
     assert "total_oil" not in comp     # idem
     assert "selinene" not in comp  # low/high = None -> pas ingéré
 
+def test_strip_yakima_brand_suffix_removes_standalone_brand_word():
+    # signalé par l'utilisateur (2026-08-19) : "Mosaic® Brand" (Yakima)
+    # alors que BarthHaas affiche juste "Mosaic®" pour la même variété --
+    # "Brand" est un artefact marketing Yakima, pas le nom réel.
+    assert parsers._strip_yakima_brand_suffix("Mosaic® Brand") == "Mosaic®"
+    assert parsers._strip_yakima_brand_suffix("Citra® Brand") == "Citra®"
+    assert parsers._strip_yakima_brand_suffix("Bravo™ Brand") == "Bravo™"
+
+def test_strip_yakima_brand_suffix_handles_parenthesized_form():
+    # un seul cas vu en direct sur l'API réelle (Galaxy) : "(Brand)" au lieu
+    # de "Brand" tout court.
+    assert parsers._strip_yakima_brand_suffix("Galaxy™ (Brand)") == "Galaxy™"
+
+def test_strip_yakima_brand_suffix_keeps_real_qualifiers():
+    # "- NZ Hops"/"- MacHops"/"Organic" sont de VRAIS qualificatifs
+    # distinguant des variantes régionales -- seul le mot "Brand" doit
+    # disparaître, jamais ce qui l'entoure (vérifié sur l'API réelle).
+    assert (parsers._strip_yakima_brand_suffix("Kohatu® Brand - NZ Hops")
+           == "Kohatu® - NZ Hops")
+    assert (parsers._strip_yakima_brand_suffix("Nectaron® Organic Brand - NZ Hops")
+           == "Nectaron® Organic - NZ Hops")
+    assert (parsers._strip_yakima_brand_suffix("Waimea™ Brand - MacHops")
+           == "Waimea™ - MacHops")
+
+def test_strip_yakima_brand_suffix_leaves_names_without_brand_untouched():
+    assert parsers._strip_yakima_brand_suffix("Admiral") == "Admiral"
+    assert parsers._strip_yakima_brand_suffix(None) is None
+
+def test_parse_yakima_hit_strips_brand_suffix_from_display_name():
+    hit = {
+        "url": "/variety/mosaic-brand",
+        "imported_fields": {"display_name": "Mosaic® Brand", "country_name": "United States"},
+    }
+    _, name, _, _, _, _ = parsers.parse_yakima_hit(hit)
+    assert name == "Mosaic®"
+
 def test_parse_yakima_hit_prefers_pel02_over_everything():
     # vérifié sur les 152 variétés réelles de l'index Algolia YCH : PEL02
     # (Type 90 Pellets, la forme que le brasseur utilise réellement) existe

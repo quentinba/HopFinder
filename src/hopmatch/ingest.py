@@ -51,10 +51,29 @@ def _ingest_variety(con, variety, name, region, comp, descriptors, source, repai
     comp = {c: v for c, v in comp.items() if c not in DROP_COMPOUNDS}
     comp, confidence, notes = validate_and_repair(comp, repair=repair)
 
-    row = con.execute("SELECT sources FROM hops WHERE variety=?", (variety,)).fetchone()
+    row = con.execute("SELECT sources, name FROM hops WHERE variety=?", (variety,)).fetchone()
     if row:
-        srcs = sorted(set(row[0].split(",")) | {source})
-        con.execute("UPDATE hops SET sources=? WHERE variety=?", (",".join(srcs), variety))
+        existing_sources, existing_name = row
+        existing_source_set = set(existing_sources.split(","))
+        srcs = sorted(existing_source_set | {source})
+        # `name` n'était mis à jour QU'à la création (jamais sur fusion) --
+        # bug signalé par l'utilisateur (2026-08-19) : un houblon
+        # barthhaas+yakima gardait pour toujours le nom du premier crawl
+        # ingéré, ex. "Mosaic® Brand" (Yakima, avec son suffixe marketing
+        # "Brand", voir _strip_yakima_brand_suffix) même une fois BarthHaas
+        # fusionné, qui a le nom plus propre "Mosaic®" (vérifié en direct
+        # sur leur page réelle). Politique : BarthHaas (source primaire,
+        # cf. CLAUDE.md) l'emporte toujours sur conflit ; sinon, seule une
+        # RÉINGESTION DE LA MÊME SOURCE (`existing_source_set <= {source}`,
+        # aucune autre source n'a jamais touché cette variété) peut
+        # rafraîchir le nom -- jamais une source secondaire qui écraserait
+        # silencieusement un nom déjà posé par une autre source.
+        if source == "barthhaas" or existing_source_set <= {source}:
+            new_name = name
+        else:
+            new_name = existing_name
+        con.execute("UPDATE hops SET sources=?, name=? WHERE variety=?",
+                    (",".join(srcs), new_name, variety))
     else:
         # purpose=NULL à la création : seul ingest_beermaverick le renseigne
         # (via UPDATE, après coup) -- aucune autre source ne l'a.

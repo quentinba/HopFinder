@@ -81,6 +81,41 @@ def test_resolve_hop_variety_none_for_unknown_hop(tmp_path):
     con.commit()
     assert ingest._resolve_hop_variety(ingest._build_hop_name_index(con), "adeena") is None
 
+def test_ingest_variety_barthhaas_overwrites_yakima_name_on_merge(tmp_path):
+    # bug signalé par l'utilisateur (2026-08-19) : le nom n'était mis à jour
+    # qu'à la création, jamais sur fusion -- un houblon ingéré par Yakima
+    # PUIS BarthHaas gardait pour toujours le nom Yakima ("Mosaic® Brand"),
+    # même une fois BarthHaas fusionné avec son nom plus propre ("Mosaic®").
+    con = connect(str(tmp_path / "t.db"))
+    init_db(con)
+    ingest._ingest_variety(con, "mosaic", "Mosaic® Brand", "United States", {}, [], "yakima")
+    ingest._ingest_variety(con, "mosaic", "Mosaic®", "Germany", {}, [], "barthhaas")
+    row = con.execute("SELECT name, sources FROM hops WHERE variety='mosaic'").fetchone()
+    assert row[0] == "Mosaic®"
+    assert set(row[1].split(",")) == {"yakima", "barthhaas"}
+
+def test_ingest_variety_yakima_never_overwrites_barthhaas_name_on_merge(tmp_path):
+    # l'inverse : BarthHaas ingéré en premier, Yakima ensuite -- BarthHaas
+    # (source primaire) doit rester le nom affiché.
+    con = connect(str(tmp_path / "t.db"))
+    init_db(con)
+    ingest._ingest_variety(con, "mosaic", "Mosaic®", "Germany", {}, [], "barthhaas")
+    ingest._ingest_variety(con, "mosaic", "Mosaic® Brand", "United States", {}, [], "yakima")
+    row = con.execute("SELECT name FROM hops WHERE variety='mosaic'").fetchone()
+    assert row[0] == "Mosaic®"
+
+def test_ingest_variety_same_source_reingestion_refreshes_name(tmp_path):
+    # variété SANS BarthHaas : une réingestion Yakima (ex. après un correctif
+    # de parsing comme le retrait du suffixe "Brand") doit pouvoir rafraîchir
+    # le nom -- rien d'autre ne le protège puisqu'aucune autre source ne l'a
+    # jamais touché.
+    con = connect(str(tmp_path / "t.db"))
+    init_db(con)
+    ingest._ingest_variety(con, "kohatu", "Kohatu® Brand - NZ Hops", "New Zealand", {}, [], "yakima")
+    ingest._ingest_variety(con, "kohatu", "Kohatu® - NZ Hops", "New Zealand", {}, [], "yakima")
+    row = con.execute("SELECT name FROM hops WHERE variety='kohatu'").fetchone()
+    assert row[0] == "Kohatu® - NZ Hops"
+
 def test_normalize_beermaverick_tag_drops_non_aroma_quality_words():
     # "mild"/"clean"/"hoppy"... ne sont pas des descripteurs d'arôme (voir
     # _BEERMAVERICK_TAG_DROPLIST) -> None, jamais écrits dans hop_descriptors.

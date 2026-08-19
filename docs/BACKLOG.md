@@ -403,6 +403,22 @@ l'implémentation ([ ] à faire, [x] fait — voir le commit associé).
   `right top` côté CSS). Vérifié en direct : le fond ne bouge plus du tout
   en défilant, dans les deux thèmes.
 
+- [x] **T51 — Suffixe "Brand" dans le nom affiché ("Mosaic Brand")**
+  Signalé par l'utilisateur : "Mosaic Brand" en GUI côté Yakima alors que
+  BarthHaas affiche "Mosaic" pour la même variété. Root cause à deux
+  niveaux, vérifiée en direct : (1) `imported_fields.display_name` Yakima
+  porte littéralement "Brand" pour 50/153 variétés — un artefact de leur
+  convention d'affichage marketing, jamais présent côté BarthHaas pour la
+  même variété. Corrigé par `parsers._strip_yakima_brand_suffix` (retire
+  uniquement le mot "Brand"/"(Brand)", garde ®/™ et les vrais qualificatifs
+  comme "- NZ Hops"/"Organic"). (2) `_ingest_variety` n'écrivait `name` qu'à
+  la création, jamais sur fusion multi-sources — un houblon ingéré par
+  Yakima PUIS BarthHaas gardait pour toujours le nom (avec "Brand") du
+  premier crawl. Corrigé : BarthHaas (source primaire) l'emporte toujours
+  sur conflit ; une réingestion de la même source peut aussi rafraîchir le
+  nom. Réingestion réelle (`crawl-barthhaas` + `crawl-yakima`) : 43 → 0
+  houblons avec "Brand" dans le nom affiché.
+
 ## Sources de données additionnelles (recherche)
 
 - **Investigué à nouveau, PAS retenu — Hopsteiner (shop.hopsteiner.com)**.
