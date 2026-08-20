@@ -9,7 +9,7 @@ description = "Note olfactive → molécules → houblons : accorder un houblon 
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
-authors = [{name = "Quentin"}]
+authors = [{name = "Quentin", email = "quentin4313@gmail.com"}]
 dependencies = []
 
 [project.optional-dependencies]

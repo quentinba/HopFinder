@@ -886,3 +886,6 @@ Reste :
 commerciales**, TGSC restrictive. Tant que HopFinder reste personnel ou open-source non lucratif,
 c'est bon ; une distribution commerciale imposerait de retirer ou renégocier ces sources. Détail
 par source dans `docs/DATA_SOURCES.md`.
+
+**Question ou signalement lié à une licence** (code ou données tierces) :
+[quentin4313@gmail.com](mailto:quentin4313@gmail.com).
