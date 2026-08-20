@@ -81,10 +81,14 @@ def _print_amplify_blend(r):
     _print_blends(r["blends"])
 
 
-def _print_by_descriptor(ranked, selected):
+def _print_by_descriptor(r, selected):
+    ranked = r["ranked"]
     print(f"\n[BY-DESCRIPTOR] {', '.join(selected)}")
     if not ranked:
         print("  aucun houblon ne recoupe ces descripteurs.")
+    elif r["total_matches"] > len(ranked):
+        print(f"  ({len(ranked)} affichés sur {r['total_matches']} houblons recoupant ces "
+              "descripteurs — augmenter --top pour en voir plus)")
     for i, h in enumerate(ranked, 1):
         print(f"  {i:<2}{h['name']:<14}recoupe {', '.join(h['matched_descriptors'])}"
               f"  (tous : {', '.join(h['all_descriptors'])})  [{h['sources']}]")

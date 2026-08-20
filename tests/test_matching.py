@@ -161,7 +161,7 @@ def test_biotransform_removed_no_double_counting_path(db):
     assert not hasattr(reference, "BIOTRANSFORMATIONS")
 
 def test_by_descriptor_matches_and_ranks(db):
-    r = matching.by_descriptor(db, ["citrus", "tropical"])
+    r = matching.by_descriptor(db, ["citrus", "tropical"])["ranked"]
     varieties = [h["variety"] for h in r]
     assert set(varieties) == {"citra", "mosaic", "simcoe"}  # saazer n'a ni l'un ni l'autre
     for h in r:
@@ -171,14 +171,26 @@ def test_by_descriptor_matches_and_ranks(db):
     # (fixtures : simcoe 1.75 > citra 1.7 > mosaic 1.625 ml/100g)
     assert [h["variety"] for h in r] == ["simcoe", "citra", "mosaic"]
 
+def test_by_descriptor_total_matches_counts_before_truncation(db):
+    # 2026-08-20, revue de code -- `total_matches` (même principe que
+    # `contrast`, T56) doit refléter le compte AVANT troncature à `top`,
+    # jamais juste len(ranked).
+    full = matching.by_descriptor(db, ["citrus", "tropical"], top=10)
+    truncated = matching.by_descriptor(db, ["citrus", "tropical"], top=1)
+    assert full["total_matches"] == 3
+    assert truncated["total_matches"] == 3
+    assert len(truncated["ranked"]) == 1
+
 def test_by_descriptor_normalizes_aliases(db):
     # "stonefruit"/"citrus fruit" doivent se comporter comme leurs formes canoniques
-    r_alias = matching.by_descriptor(db, ["citrus fruit"])
-    r_canon = matching.by_descriptor(db, ["citrus"])
+    r_alias = matching.by_descriptor(db, ["citrus fruit"])["ranked"]
+    r_canon = matching.by_descriptor(db, ["citrus"])["ranked"]
     assert [h["variety"] for h in r_alias] == [h["variety"] for h in r_canon]
 
 def test_by_descriptor_no_match(db):
-    assert matching.by_descriptor(db, ["nonexistent-descriptor"]) == []
+    r = matching.by_descriptor(db, ["nonexistent-descriptor"])
+    assert r["ranked"] == []
+    assert r["total_matches"] == 0
 
 def _build_intensity_db(tmp_path):
     """Base isolée avec `hop_aroma_intensity` (T26, Yakima uniquement) --
@@ -206,7 +218,7 @@ def test_by_descriptor_quantitative_tier_sorts_by_intensity_within_categorical_t
     # "high" (90) avant "low" (10) avant "nodata" (aucune donnée, jamais
     # traité comme 0).
     con = _build_intensity_db(tmp_path)
-    r = matching.by_descriptor(con, ["citrus"], wheel_descriptors=["citrus"])
+    r = matching.by_descriptor(con, ["citrus"], wheel_descriptors=["citrus"])["ranked"]
     assert [h["variety"] for h in r] == ["high", "low", "nodata"]
     assert r[0]["quant_score"] == 90.0
     assert r[1]["quant_score"] == 10.0
@@ -217,7 +229,7 @@ def test_by_descriptor_without_wheel_descriptors_has_no_quant_score(tmp_path):
     # quantitatif -- comportement catégorique pur (pré-T54), même avec des
     # houblons ayant des données d'intensité disponibles.
     con = _build_intensity_db(tmp_path)
-    r = matching.by_descriptor(con, ["citrus"])
+    r = matching.by_descriptor(con, ["citrus"])["ranked"]
     assert all(h["quant_score"] is None for h in r)
 
 def test_by_descriptor_categorical_match_count_still_takes_priority(tmp_path):
@@ -227,7 +239,7 @@ def test_by_descriptor_categorical_match_count_still_takes_priority(tmp_path):
     con = _build_intensity_db(tmp_path)
     con.execute("INSERT INTO hop_descriptors VALUES (?,?,?)", ("low", "woody", "toy"))
     con.commit()
-    r = matching.by_descriptor(con, ["citrus", "woody"], wheel_descriptors=["citrus"])
+    r = matching.by_descriptor(con, ["citrus", "woody"], wheel_descriptors=["citrus"])["ranked"]
     assert r[0]["variety"] == "low"  # 2 descripteurs recoupés, même avec une intensité plus basse
     assert set(r[0]["matched_descriptors"]) == {"citrus", "woody"}
 
@@ -240,7 +252,7 @@ def test_by_descriptor_quant_score_only_averages_wheel_descriptors(tmp_path):
     con.execute("INSERT INTO hop_aroma_intensity VALUES (?,?,?,?)",
                ("high", "woody", 0.0, "yakima"))
     con.commit()
-    r = matching.by_descriptor(con, ["citrus"], wheel_descriptors=["citrus"])
+    r = matching.by_descriptor(con, ["citrus"], wheel_descriptors=["citrus"])["ranked"]
     high = next(h for h in r if h["variety"] == "high")
     assert high["quant_score"] == 90.0  # pas la moyenne avec "woody"=0
     assert high["quant_descriptors"] == ["citrus"]
@@ -257,7 +269,7 @@ def test_by_descriptor_text_descriptor_is_the_only_categorical_filter(tmp_path):
     con.execute("INSERT INTO hops VALUES (?,?,?,?,?)", ("papaya-hop", "PapayaHop", "test", "toy", None))
     con.execute("INSERT INTO hop_descriptors VALUES (?,?,?)", ("papaya-hop", "papaya", "toy"))
     con.commit()
-    r = matching.by_descriptor(con, ["papaya"], wheel_descriptors=["citrus", "tropical", "floral"])
+    r = matching.by_descriptor(con, ["papaya"], wheel_descriptors=["citrus", "tropical", "floral"])["ranked"]
     # SEUL "papaya-hop" recoupe le descripteur texte -- "high"/"low"/"nodata"
     # (qui ne recoupent que la roue, pas "papaya") sont exclus des résultats,
     # jamais mélangés dedans même avec une intensité "citrus" élevée.
@@ -268,7 +280,7 @@ def test_by_descriptor_falls_back_to_wheel_as_filter_when_no_text_descriptor(tmp
     # `wheel_descriptors` sert de repli pour filtrer -- sinon rien ne
     # filtrerait du tout.
     con = _build_intensity_db(tmp_path)
-    r = matching.by_descriptor(con, [], wheel_descriptors=["citrus"])
+    r = matching.by_descriptor(con, [], wheel_descriptors=["citrus"])["ranked"]
     assert {h["variety"] for h in r} == {"high", "low", "nodata"}
 
 def test_contrast_requires_note_or_descriptors(db):
@@ -548,8 +560,12 @@ def test_pairing_top_n_excludes_low_ranked_partners(db):
                                     base_variety="saazer", top_candidates=30)
         second = r["blends"][1]["hops"][1]
         # pairing_top_n par défaut (10) laisse largement passer ce seul
-        # partenaire -- vérifie explicitement qu'un top_n=0 l'exclut et
-        # retombe sur couverture/pertinence.
+        # partenaire -- vérifié explicitement ici (assertion manquante avant
+        # revue de code du 2026-08-20 : `second` était calculé mais jamais
+        # vérifié, laissant ce chemin par défaut non testé) -- puis qu'un
+        # top_n=0 l'exclut et retombe sur couverture/pertinence, ci-dessous.
+        assert second["variety"] == "mosaic"
+        assert second["via"] == "pairing"
         from hopmatch.matching import _pairing_grown_blends, contrast
         cr = contrast(db, descriptors=["citrus", "floral"], top=30)
         target = set(cr["affinity_target"])
@@ -826,6 +842,29 @@ def test_contrast_full_real_vocabulary_has_no_unmapped_descriptor():
            "resinous", "spicy", "dank", "earthy"}
     for targets in reference.CONTRAST_AFFINITY.values():
         assert set(targets) <= core
+
+def test_aroma_wheel_definitions_reexported_identically_from_reference():
+    # Même garde-fou que CONTRAST_CORE_CATEGORIES (T62, revue de code du
+    # 2026-08-20 : AROMA_WHEEL_DEFINITIONS n'avait aucun test avant) --
+    # vérifie que la chaîne de ré-export reference -> matching n'a pas
+    # divergé (app.py ne lit jamais `reference` directement, voir
+    # matching.py).
+    assert matching.AROMA_WHEEL_DEFINITIONS is reference.AROMA_WHEEL_DEFINITIONS
+
+def test_aroma_wheel_definitions_cover_exactly_the_15_intensity_categories():
+    # Vocabulaire fixe de `hop_aroma_intensity` (T26), tel que documenté dans
+    # reference.py -- si un futur re-crawl Yakima renomme/ajoute une
+    # catégorie sans mettre à jour AROMA_WHEEL_DEFINITIONS, ce test échoue
+    # plutôt que de laisser un label du radar sans tooltip en silence (voir
+    # `app._aroma_wheel`/`_aroma_wheel_compare`, `Definition` vide par
+    # défaut via `.get(d, "")`).
+    expected = {
+        "apple", "berry", "citrus", "dried fruit", "earthy", "floral",
+        "grassy", "herbal", "melon", "spicy", "stone fruit",
+        "sweet aromatic", "tropical", "vegetal", "woody",
+    }
+    assert set(reference.AROMA_WHEEL_DEFINITIONS) == expected
+    assert all(isinstance(v, str) and v.strip() for v in reference.AROMA_WHEEL_DEFINITIONS.values())
 
 def test_contrast_blend_propagates_unmapped(db):
     r = matching.contrast_blend(db, descriptors=["citrus", "nonexistent-descriptor"])

@@ -821,7 +821,12 @@ def amplify_blend(con, note: str, w_mol: float = 0.5, w_desc: float = 0.5, use_o
 # --------------------------------------------------------------------------- #
 # DÉCOUVERTE — by_descriptor (pas un cas A/B : pas de note requise)
 # --------------------------------------------------------------------------- #
-_NON_AROMA_DISPLAY = {"total_oil", "alpha_acid", "beta_acid", "co_humulone"}
+# Public (pas de underscore) : réutilisé tel quel par `app.py` (tableaux de
+# composition détaillée en Browse/`_hop_detail_expanders`) -- était dupliqué
+# à l'identique dans les deux modules (trouvé en revue de code, 2026-08-20),
+# à l'encontre du principe déjà suivi pour `CONTRAST_CORE_CATEGORIES`/
+# `AROMA_WHEEL_DEFINITIONS` : une seule définition ici, jamais recopiée.
+NON_AROMA_DISPLAY = {"total_oil", "alpha_acid", "beta_acid", "co_humulone"}
 
 
 def by_descriptor(con, selected: list[str], wheel_descriptors: list[str] | None = None,
@@ -870,7 +875,16 @@ def by_descriptor(con, selected: list[str], wheel_descriptors: list[str] | None 
     `intensity`/`quant_score`/`quant_descriptors` exposés dans chaque entrée
     retournée pour que la GUI affiche explicitement CE QUI a été utilisé
     (transparence -- jamais un réordonnancement silencieux).
-    """
+
+    Retourne `{"ranked": [...], "total_matches": N}` (2026-08-20, revue de
+    code -- avant ça, une liste nue tronquée à `top` sans aucun moyen de
+    savoir combien de houblons recoupaient RÉELLEMENT la sélection avant
+    troncature). Même besoin, même solution que `total_matches` sur
+    `contrast` (T56 : Saaz invisible au plafond sans ce compteur) --
+    `by_descriptor` départage déjà ses égalités de façon déterministe
+    (`_rank`), donc ce n'est pas un bug de classement comme pour `contrast`,
+    mais la GUI n'avait toujours aucun moyen d'afficher « showing N of M »
+    plutôt que de tronquer en silence."""
     hops, comp, hop_desc, _ = load(con)
     selected = {reference.DESCRIPTOR_ALIASES.get(d, d) for d in selected}
     wheel = {reference.DESCRIPTOR_ALIASES.get(d, d) for d in (wheel_descriptors or [])}
@@ -888,7 +902,7 @@ def by_descriptor(con, selected: list[str], wheel_descriptors: list[str] | None 
         total_oil = (hcomp.get("total_oil") or {}).get("mid") or 0.0
         compounds = sorted(
             ({"compound": c, "mid": v["mid"], "unit": v["unit"], "sources": v["sources"]}
-             for c, v in hcomp.items() if c not in _NON_AROMA_DISPLAY and v["mid"] is not None),
+             for c, v in hcomp.items() if c not in NON_AROMA_DISPLAY and v["mid"] is not None),
             key=lambda r: -r["mid"])
         intensity = intensity_by_variety.get(h, {})
         quant_descriptors = sorted(d for d in wheel if d in intensity)
@@ -904,4 +918,4 @@ def by_descriptor(con, selected: list[str], wheel_descriptors: list[str] | None 
     ranked.sort(key=lambda r: r["_rank"])
     for r in ranked:
         del r["_rank"]
-    return ranked[:top]
+    return {"ranked": ranked[:top], "total_matches": len(ranked)}

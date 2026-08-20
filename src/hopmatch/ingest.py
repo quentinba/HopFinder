@@ -1149,7 +1149,6 @@ def ingest_foodb(out_db: str, foodb_csv_dir: str | None = None,
             print(f"  !! {note!r} : aliment {food_name!r} introuvable dans Food.csv, ignoré")
             continue
         food_entries.append((int(m.iloc[0]["id"]), note, True))
-    n_curated = len(food_entries)
     if all_foods:
         for _, r in fdf.iterrows():
             food_entries.append((int(r["id"]), str(r["name"]).strip().lower(), False))

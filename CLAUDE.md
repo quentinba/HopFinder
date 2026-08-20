@@ -831,6 +831,29 @@ ajoutée sous les 4 rendus de roue de la GUI (Browse, Amplify, Contrast,
 By-descriptor, Compare Hops). Vérifié en direct sur Saaz (CZ et US, y
 compris un axe à intensité 0).
 
+**T63 — Revue de code complète, 6 défauts corrigés (2026-08-20, demande
+utilisateur : "do a massive review of the codebase", puis "fix all this",
+voir `docs/BACKLOG.md` pour le détail complet).** Relecture méthodique de
+tout `src/`+`tests/` (~7400 lignes) croisée avec `pyflakes`. Corrigés :
+(1) `_NON_AROMA_DISPLAY` dupliqué à l'identique dans `app.py` ET
+`matching.py` -- renommé `matching.NON_AROMA_DISPLAY` (public, ré-exporté,
+même principe que `CONTRAST_CORE_CATEGORIES`/`AROMA_WHEEL_DEFINITIONS`),
+copie `app.py` supprimée. (2) `ingest.py` : `n_curated` mort (pré-existant,
+juillet 2026) supprimé. (3) `tests/test_matching.py` : assertion manquante
+dans `test_pairing_top_n_excludes_low_ranked_partners` -- le chemin par
+défaut (`pairing_top_n=10`) n'était jamais vérifié malgré les apparences,
+corrigé. (4) `app._browse` : `hcomp` calculé deux fois, doublon mort
+supprimé. (5) `reference.AROMA_WHEEL_DEFINITIONS` (T62) sans aucun test --
+2 tests ajoutés (identité de ré-export, couverture exacte des 15
+catégories). (6) **`matching.by_descriptor` sans équivalent de
+`total_matches`** contrairement à `contrast` (T56) -- changement le plus
+large : `by_descriptor` retourne désormais `{"ranked": [...],
+"total_matches": N}` au lieu d'une liste nue, répercuté sur `cli.py`,
+`app.py` (+ caption de transparence), et les 12 sites d'appel direct dans
+les tests. Vérifié en direct : `pyflakes` propre sur tout le projet ;
+navigateur réel + CLI affichent tous deux "10 of 122" sur `by-descriptor
+citrus`. Suite pytest 197 -> 200, toutes vertes.
+
 Reste :
 1. Jointure FooDB/hop_composition au-delà des ~734 composés Flavornet si le vocabulaire
    s'élargit beaucoup (crawl Yakima déjà réel, plus d'aliments FooDB).

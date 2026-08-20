@@ -6,47 +6,174 @@ renommage mécanique du paquet/CLI/`pyproject.toml`).*
 
 **Note olfactive → molécules → houblons.** Un outil pour brasseur qui répond à une
 question concrète : *quel houblon accorder à un ajout* (yuzu, basilic…) — en le
-prolongeant (`amplify`) ou en le contrastant (`contrast`) ?
+prolongeant, en le contrastant, ou en explorant/comparant directement le catalogue.
 
-> État : `pytest` vert (107 tests). Toutes les sources tournent contre les sites externes :
+> État : `pytest` vert (200 tests). Toutes les sources tournent contre les sites externes :
 > `crawl_barthhaas`, `crawl_yakima`, `ingest_flavornet`, `ingest_foodb`, `ingest_flavordb2`,
-> `resolve_pubchem_cids`, `ingest_beermaverick`, `by-descriptor`,
-> `--oav` (prior de puissance olfactive, approximatif) — voir [Feuille de route](#feuille-de-route).
+> `resolve_pubchem_cids`, `ingest_beermaverick` — voir [Feuille de route](#feuille-de-route).
 
 ---
 
-## Table des matières
-1. [L'idée en une page](#lidée-en-une-page)
-2. [Le principe de conception : les données sont le goulot](#le-principe-de-conception--les-données-sont-le-goulot)
-3. [Les bases de données : pourquoi et comment chacune](#les-bases-de-données--pourquoi-et-comment-chacune)
-4. [Les modes, en détail](#les-modes-en-détail)
+## Aperçu
+
+HopFinder relie deux mondes : l'**arôme** — une note comme yuzu, basilic ou mangue, un
+ensemble de molécules volatiles et un vocabulaire de descripteurs — et le **houblon** —
+son profil d'huile essentielle et sa propre roue d'arôme. Cinq outils, disponibles en GUI
+(Streamlit) et pour la plupart en CLI :
+
+| Outil | Question à laquelle il répond |
+|---|---|
+| **Amplify** | Cet ajout est déjà dans ma bière — quel houblon *prolonge* son caractère ? |
+| **Contrast** | Quel houblon *contraste* bien avec cet ajout (accord complémentaire, pas similaire) ? |
+| **Compare Hops** | Comment se comparent 2 à 5 houblons précis, côte à côte (roue d'arôme, acides, composition détaillée) ? |
+| **By-descriptor** | Quels houblons portent tel(s) descripteur(s) (agrume, tropical, dank…), sans note de départ ? |
+| **Browse** | Que sait-on d'un houblon précis — composition, purpose (aromatique/amérisant), associations, roue d'arôme ? |
+
+`Amplify`/`Contrast` proposent aussi des **blends** (1 à 5 houblons), en priorisant les
+associations réellement utilisées ensemble en recette plutôt qu'une couverture purement
+théorique. Chaque résultat, partout dans l'outil, rapporte sa **couverture** et ce qu'il ne
+peut pas faire (molécules orphelines, données manquantes) — jamais un score affiché sans
+son contexte de fiabilité.
+
+Les données viennent de sources réelles tracées à la source (BarthHaas, Yakima Chief,
+BeerMaverick, FooDB, Flavornet, FlavorDB2, PubChem) — jamais d'une base inventée à la
+main. Le détail de chacune, et le raisonnement derrière chaque choix de conception, est
+dans la [partie méthodologie](#méthodologie--sources-de-données) plus bas.
+
+**Pour essayer tout de suite** : [Installation & usage](#installation--usage) juste en
+dessous suffit à construire une base et lancer l'outil. Le reste de ce document est une
+**plongée méthodologique** — comment chaque donnée est obtenue, pourquoi chaque choix de
+conception a été fait, quelles limites sont connues — utile pour comprendre ce que les
+résultats veulent vraiment dire, pas nécessaire pour simplement essayer l'outil.
+
+---
+
+## Installation & usage
+
+### Installation
+
+```bash
+git clone <ton-repo> hopmatch && cd hopmatch
+python3 --version           # nécessite 3.10+ — voir la note ci-dessous sinon
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .            # cœur (numpy, scipy)
+pip install -e ".[crawl]"   # + requests, beautifulsoup4 (crawl BarthHaas/Yakima)
+pip install -e ".[foodb]"   # + pandas (audit/ingest FooDB)
+pip install -e ".[ui]"      # + streamlit (GUI navigateur)
+pip install -e ".[dev]"     # + pytest
+```
+
+> Si `python3 --version` affiche moins que 3.10 (fréquent : le `python3` système
+> macOS/Linux est souvent plus ancien), installer une version récente séparément
+> (`brew install python@3.12` sur macOS, ou pyenv) et créer le venv avec ce binaire
+> précis, ex. `/opt/homebrew/opt/python@3.12/bin/python3.12 -m venv .venv`.
+
+Une fois le venv activé (`source .venv/bin/activate`), `hopmatch`, `streamlit` et
+`pytest` sont directement sur le `PATH`. Dans un nouveau terminal où il n'est pas
+activé, préfixer les commandes par `.venv/bin/` (`.venv/bin/hopmatch`,
+`.venv/bin/streamlit run ...`).
+
+### Construire une base
+
+`hopmatch build` construit **seulement la démo** — 3 fiches BarthHaas + 3 fiches
+Yakima figées dans `data/fixtures/`, avec citra/mosaic communs aux deux sources :
+**4 houblons, 0 note**. `build` ne peuple plus aucune note (il n'y a pas d'amorce
+littérature dans ce projet) : `amplify`/`contrast` ont besoin d'`ingest-foodb`
+en plus pour avoir des notes à interroger — `by-descriptor`/`browse`/`Compare Hops`
+fonctionnent dès `build`.
+
+```bash
+hopmatch build                    # démo : 4 houblons
+```
+
+Pour une base réelle, lancer les crawls/ingestions réseau — chacun écrit dans la
+même base (`aromahops.db` par défaut, pas besoin d'appeler `build` avant : ils
+l'initialisent si elle n'existe pas) et fusionne les variétés déjà présentes :
+
+```bash
+hopmatch crawl-barthhaas          # ~90 variétés BarthHaas
+hopmatch crawl-yakima             # ~152 variétés Yakima Chief (via Algolia) + hop_similar
+hopmatch ingest-flavornet         # whitelist odeur-active (~734 composés) — avant les deux suivants
+hopmatch resolve-pubchem-cids     # jointure structurale CAS->CID — avant les deux suivants
+hopmatch ingest-flavordb2         # seuils olfactifs, bornés à cette whitelist
+hopmatch ingest-foodb              # télécharge+extrait le dump FooDB si absent, puis ingère
+hopmatch ingest-beermaverick      # pairings/substitutions houblon<->houblon (agrégateur)
+```
+
+L'ordre ci-dessus est celui des dépendances réelles entre commandes (`ingest-flavornet`
+avant `resolve-pubchem-cids` avant `ingest-flavordb2`/`ingest-foodb`) ; les deux crawls
+houblon (`crawl-barthhaas`/`crawl-yakima`) sont indépendants et dans n'importe quel ordre.
+
+`ingest-foodb` n'exige plus de télécharger le dump FooDB à la main : sans argument, il
+télécharge et extrait automatiquement `foodb_2020_04_07_csv.tar.gz` (~950 Mo, licence
+CC BY-NC-SA non commerciale — voir [Licences](#licences)) dans `data/foodb_2020_04_07_csv/`
+s'il n'y est pas déjà (idempotent : ne retélécharge rien au run suivant). `hopmatch
+ingest-foodb <dossier>` reste possible pour pointer vers un dump déjà téléchargé
+ailleurs. Il ingère par défaut tout `Food.csv` (~1000 aliments, ~510 notes distinctes
+après le filtre de distinctivité — voir [FooDB](#côté-ingrédient--molécule)).
+
+### CLI
+
+```bash
+hopmatch list                     # notes et houblons disponibles
+
+hopmatch amplify mango                    # prolonger
+hopmatch amplify "sweet basil" --oav      # + prior de puissance olfactive
+hopmatch amplify mango --descriptors citrus,tropical  # + couche descripteurs (sélection manuelle)
+hopmatch amplify-blend mango --descriptors citrus,tropical --max-hops 5  # blends 1-5, priorité pairing réel
+hopmatch contrast --descriptors citrus,herbal        # contraster (sélection manuelle)
+hopmatch contrast-blend --descriptors citrus,herbal --max-hops 5   # blends 1-5, priorité pairing réel
+
+hopmatch descriptors              # vocabulaire de descripteurs disponible
+hopmatch by-descriptor citrus,tropical   # découverte, sans note requise
+
+pytest -q                         # 200 tests (nécessite l'extra [dev])
+```
+
+`Compare Hops` (comparer 2 à 5 houblons côte à côte) et `Browse` (consulter un houblon en
+détail) n'ont pas d'équivalent CLI — GUI uniquement.
+
+### GUI navigateur
+
+Lecture seule contre une base déjà construite (voir [Construire une base](#construire-une-base)
+ci-dessus) :
+
+```bash
+streamlit run src/hopmatch/app.py
+```
+
+La page d'accueil résume les 5 outils avec un bouton "Open" par outil pour y accéder
+directement. Chaque mode (Amplify/Contrast/By-descriptor/Browse/Compare Hops) et ses
+options propres (`--oav`, taille de blend, nombre de résultats…) vivent dans la barre
+latérale, qui affiche aussi le nombre de houblons/notes/descripteurs chargés et la date
+de dernière modification de la base, ainsi qu'un lien vers ce dépôt GitHub. Pour pointer
+vers une autre base : `streamlit run src/hopmatch/app.py -- --db chemin.db`.
+
+Le détail de ce que chaque mode affiche (roue d'arôme quantitative, associations
+houblon↔houblon, composition détaillée…) et pourquoi il est construit ainsi est décrit
+dans [Interface graphique : détails d'implémentation](#interface-graphique--détails-dimplémentation),
+plus bas dans la partie méthodologie.
+
+---
+
+# Méthodologie & sources de données
+
+Cette partie explique *comment* HopFinder obtient et traite chaque donnée, et *pourquoi*
+chaque choix de conception a été fait — utile pour juger la fiabilité d'un résultat, pas
+nécessaire pour simplement utiliser l'outil (voir [Installation & usage](#installation--usage)
+ci-dessus).
+
+**Sommaire**
+1. [Le principe de conception : les données sont le goulot](#le-principe-de-conception--les-données-sont-le-goulot)
+2. [Les bases de données : pourquoi et comment chacune](#les-bases-de-données--pourquoi-et-comment-chacune)
+3. [Les modes, en détail](#les-modes-en-détail)
+4. [Interface graphique : détails d'implémentation](#interface-graphique--détails-dimplémentation)
 5. [Architecture technique](#architecture-technique)
 6. [Ce qui est un prior, pas une donnée](#ce-qui-est-un-prior-pas-une-donnée)
-7. [Installation & usage](#installation--usage)
-8. [Structure du projet](#structure-du-projet)
-9. [Feuille de route](#feuille-de-route)
-10. [Licences](#licences)
-
----
-
-## L'idée en une page
-
-Un arôme (yuzu, basilic, mangue) est un ensemble de **molécules volatiles**. Un houblon,
-lui, a un **profil d'huile essentielle** (myrcène, linalol, géraniol, thiols…) et une
-**roue d'arôme** (descripteurs : agrume, tropical, résineux…). HopFinder relie les deux :
-tu mets un ajout dans ta bière et tu cherches le houblon qui va bien avec — soit en
-**amplifiant** (prolonger le caractère de l'ajout), soit en **contrastant**.
-
-> Une troisième approche — reproduire un goût *sans* ajout, en recomposant le profil par
-> combinaison de houblons (NNLS) — a été tentée puis retirée : mesurée sur les 506 notes
-> réelles de la base, aucune ne dépassait 20 % de couverture (max observé 12 %, médiane
-> 1,3 %). La chimie de l'huile de houblon ne recoupe simplement pas la plupart des arômes
-> alimentaires, et sur les notes à un seul composé « producible » (la majorité), le calcul
-> dégénère en un système à une seule équation où n'importe quel houblon porteur atteint un
-> résidu artificiel de 0 — une fausse confiance sans rapport avec la couverture réelle.
-> Décision utilisateur du 2026-08-12, voir l'historique git pour le détail.
-
----
+7. [Structure du projet](#structure-du-projet)
+8. [Feuille de route](#feuille-de-route)
+9. [Licences](#licences)
 
 ## Le principe de conception : les données sont le goulot
 
@@ -68,6 +195,15 @@ HopFinder fait donc trois choix assumés :
 3. **Honnêteté explicite.** Chaque résultat rapporte la *couverture* et les *molécules
    orphelines* — ce que le houblon ne peut pas faire. C'est souvent l'info la plus utile.
 
+> Une quatrième approche — reproduire un goût *sans* ajout, en recomposant le profil par
+> combinaison de houblons (NNLS) — a été tentée puis retirée : mesurée sur les 506 notes
+> réelles de la base, aucune ne dépassait 20 % de couverture (max observé 12 %, médiane
+> 1,3 %). La chimie de l'huile de houblon ne recoupe simplement pas la plupart des arômes
+> alimentaires, et sur les notes à un seul composé « producible » (la majorité), le calcul
+> dégénère en un système à une seule équation où n'importe quel houblon porteur atteint un
+> résidu artificiel de 0 — une fausse confiance sans rapport avec la couverture réelle.
+> Décision utilisateur du 2026-08-12, voir l'historique git pour le détail.
+
 ---
 
 ## Les bases de données : pourquoi et comment chacune
@@ -81,8 +217,8 @@ et *ce qu'elle vaut*.
 | Base | Monde | Rôle | Accès | Qualité / limite | Licence |
 |---|---|---|---|---|---|
 | **BarthHaas** | houblon | composition (dont thiols) | HTML servi | propre, producteur ; pas de descripteurs fiables | données producteur |
-| **Yakima Chief** | houblon | β-pinène, sélinène, roue d'arôme, variétés similaires | API Algolia (checkpoint devant le HTML) | propre, labo ASBC | données producteur |
-| **BeerMaverick** | houblon↔houblon + descripteurs | pairings/substitutions, roue d'arôme (104 termes) | HTML statique | agrégateur, pas une mesure de labo | non publiée |
+| **Yakima Chief** | houblon | β-pinène, sélinène, roue d'arôme (catégorique et quantitative), variétés similaires, purpose | API Algolia (checkpoint devant le HTML) | propre, labo ASBC | données producteur |
+| **BeerMaverick** | houblon↔houblon + descripteurs | pairings/substitutions, roue d'arôme (104 termes), purpose | HTML statique | agrégateur, pas une mesure de labo | non publiée |
 | **FooDB** | ingrédient→molécule | composition + concentration | dump bulk | lacunaire, bruitée, figée 2020 | **non commerciale** |
 | **Flavornet** | molécule | whitelist odeur-active | HTML statique | curée mais petite/ancienne | académique |
 | **FlavorDB2** | molécule | seuils olfactifs | scrape HTML (fiche par CID) | seuils utiles, texte libre, présence seule | **CC BY-NC-SA** |
@@ -110,11 +246,20 @@ et *ce qu'elle vaut*.
   source de composition ; les descripteurs viennent de Yakima et BeerMaverick (voir plus bas —
   BeerMaverick s'est révélé le vocabulaire le plus riche des deux, signalé en direct par
   l'utilisateur : "dank" n'était tagué que sur 1/203 houblons côté Yakima).
+- **Symboles commerciaux (®/™/©) et slugs déposés.** Le générateur de slug de BarthHaas
+  translittère ® en "r"/™ en "tm" collé sans séparateur ("Citra®" → `citrar`), ce qui créait
+  de faux doublons avec Yakima (`ingest._fix_barthhaas_trademark_slug`, ne déclenche que sur
+  un motif exact vérifié pour ne jamais tronquer un vrai nom finissant en "r" comme Saazer).
+  Les symboles eux-mêmes sont aussi retirés du nom AFFICHÉ (`parsers.strip_trademark_symbols`,
+  appliqué à l'ingestion, pas juste à l'affichage) pour permettre une fusion cross-source fiable
+  même quand un symbole diffère entre BarthHaas et Yakima.
 
 **Yakima Chief (YCH)** — *source secondaire, complémentaire.*
-- **Pourquoi.** Complète BarthHaas avec le **β-pinène** et le **sélinène**, et fournit une
-  **roue d'arôme** exploitable directement pour la couche descripteurs. Données issues de
-  leur labo qualité, conformes aux méthodes ASBC.
+- **Pourquoi.** Complète BarthHaas avec le **β-pinène** et le **sélinène**, et fournit deux
+  roues d'arôme exploitables pour la couche descripteurs : une liste éditoriale courte
+  (`aromas`) et une roue **quantitative** à 15 catégories fixes, 0-100 réelle
+  (`aroma_values`/`sensory_values` — voir [Compare Hops et Browse](#interface-graphique--détails-dimplémentation)
+  pour son usage GUI). Données issues de leur labo qualité, conformes aux méthodes ASBC.
 - **Comment.** Le site place un rempart anti-bot devant le HTML (Vercel Security Checkpoint) :
   une requête HTTP simple ne l'atteint pas, même avec un User-Agent de navigateur. Leur front
   s'appuie sur **Algolia** (recherche instantanée) avec une clé API **publique en lecture
@@ -129,7 +274,10 @@ et *ce qu'elle vaut*.
   catalogue YCH a aussi de vrais doublons de SKU sans rapport avec les marques (`perle` ET
   `perle-per03` coexistent, `saaz` ET `saaz-saz01`…). `crawl_yakima` déprefixe `-brand`
   uniquement lorsque ça ne rentre pas en collision avec un autre slug du même lot — sinon le
-  slug reste tel quel, pour ne jamais fusionner silencieusement deux fiches distinctes.
+  slug reste tel quel, pour ne jamais fusionner silencieusement deux fiches distinctes. Le mot
+  "Brand" présent dans le nom affiché de 50/153 variétés (artefact marketing Yakima, jamais côté
+  BarthHaas) est retiré à l'ingestion (`parsers._strip_yakima_brand_suffix`), de même que les
+  symboles ®/™/© (voir BarthHaas ci-dessus).
 - **Limite.** Pas de thiols. Complémentarité exacte avec BarthHaas.
 - **Forme produit.** Chaque variété expose plusieurs analyses selon la forme commerciale
   (`brewing_values[].code`) : pellets T90 (`PEL02`), feuille en balle/entière (`CON02`/`CON04`),
@@ -141,6 +289,16 @@ et *ce qu'elle vaut*.
   de plausibilité (acide alpha ≤30%, aucune variété commerciale connue ne dépasse ~25%) —
   découvert en vérifiant que la variété `admiral` avait une entrée corrompue côté YCH lui-même
   (voir `docs/DATA_SOURCES.md`).
+- **Deux crops distincts vs vrais doublons.** Un même nom de variété peut apparaître deux fois
+  pour deux raisons différentes, distinguées via `imported_fields.country_code`/`variety_code` :
+  soit un VRAI doublon (même variété, même région, juste un slug différent entre BarthHaas et
+  Yakima — ex. Challenger, Fuggle — fusionnés à l'ingestion via `ingest.merge_hop_varieties`),
+  soit deux CROPS réellement distincts du même cultivar cultivés dans des pays différents (ex.
+  Amarillo®, Perle, Saaz, Northern Brewer) — jamais fusionnés (perdrait la distinction de
+  terroir réelle), mais désambiguïsés par région dans le nom affiché dès qu'une collision existe
+  (`matching._disambiguate_hop_names`, ex. "Northern Brewer (United States)"/"Northern Brewer
+  (Germany)"), appliqué une seule fois à la source (`matching.load()`) pour tout le reste de
+  l'outil.
 
 > **Fusion.** Une variété peut recevoir des mesures des deux sources ; HopFinder les stocke
 > toutes (schéma EAV) et les *réconcilie à la lecture* (moyenne des milieux de fourchette,
@@ -306,6 +464,27 @@ résultat, si un poids vient d'une vraie source ou d'une estimation maison.
   composés de la whitelist Flavornet — cohérent avec le reste du pipeline. Respecte la limite
   d'usage PubChem (5 requêtes/s).
 
+### BeerMaverick et le purpose (aromatique / amérisant)
+
+**BeerMaverick** — *agrégateur d'usage réel, houblon↔houblon.*
+- **Pourquoi.** BarthHaas/Yakima ne donnent aucune association houblon↔houblon ni de
+  classement par usage. BeerMaverick, un agrégateur qui analyse des recettes publiées et des
+  choix éditoriaux de brasseurs expérimentés (**pas** une mesure de labo — affiché avec cette
+  réserve partout où c'est montré), comble ce manque : associations fréquentes en recette
+  (`hop_pairings`), substitutions suggérées (`hop_substitutions`), un vocabulaire de
+  descripteurs bien plus riche et sélectif que Yakima seul (104 termes au total une fois
+  fusionné, ex. "dank" correctement présent sur 6 houblons contre 1 seul côté Yakima), et le
+  **purpose** (aromatic/bittering/both — la seule des sources à classer un houblon par usage).
+- **Comment.** HTML statique servi normalement par chaque page `beermaverick.com/hop/{slug}/`
+  (`robots.txt` ouvert, sitemap public). Réconciliation par nom normalisé
+  (`ingest._resolve_hop_variety`, tolère ®/™/« Brand »/« NZ Hops »...) : 143/203 variétés du
+  catalogue ont une page BeerMaverick correspondante.
+- **Purpose inféré en repli.** Pour les variétés sans purpose BeerMaverick réel, l'acide alpha
+  moyen sert de repli (`matching.infer_purpose_from_alpha_acid`) : seuil de 7,0% **mesuré**
+  (scan de seuils sur les 142 houblons ayant à la fois un purpose réel et un acide alpha connu,
+  78% d'accord avec BeerMaverick) — toujours préfixé "Inferred:" dans la GUI, jamais confondu
+  avec une donnée mesurée, et jamais utilisé pour structurer les blends (voir plus bas).
+
 ---
 
 ## Les modes, en détail
@@ -324,7 +503,8 @@ et ne fait remonter que « les houblons les plus huileux ». La solution (analog
 3. **Spécificité** (inverse document frequency) : une molécule présente partout (myrcène) est
    peu discriminante et pèse moins ; une molécule rare (thiols, géraniol) caractérise fortement.
 4. **Poids de la note** : chaque molécule est pondérée par sa contribution au caractère de l'ajout.
-5. Optionnel `--oav` : × prior de seuil (1/seuil). Approximatif, désactivé par défaut.
+5. Optionnel `--oav` : × prior de seuil (1/seuil). Approximatif, désactivé par défaut en CLI
+   (activé par défaut en GUI, un effet réel mesuré, voir plus bas).
 
 Score moléculaire = somme de ces contributions, normalisée 0-100.
 
@@ -360,9 +540,9 @@ profil FooDB de "mango" (myrcène, terpinolène...).
 
 **Avertissement couverture moléculaire faible.** Signalé en direct par l'utilisateur (test de
 "strawberry") : sans descripteurs, la couche moléculaire seule dégénère exactement comme
-`combine()` (voir l'encadré ci-dessus) — 163/506 notes réelles n'ont QUE le géraniol comme
+`combine()` (voir l'encadré plus haut) — 163/506 notes réelles n'ont QUE le géraniol comme
 molécule productible, et le score se réduit alors à un simple tri par quantité brute de
-géraniol, sans rapport avec la note. Mesuré : Talus® Brand et Ekuanot® Brand (les 2 houblons
+géraniol, sans rapport avec la note. Mesuré : Talus® et Ekuanot® (les 2 houblons
 les plus riches en géraniol de la base) raflent #1 sur 44 % de toutes les notes classées quand
 aucun descripteur n'est fourni. La couche descripteurs corrige ça concrètement quand elle est
 alimentée (vérifié : Talus tombe de #1 à #6 sur "strawberry" avec `--descriptors fruity,berry`)
@@ -370,15 +550,18 @@ alimentée (vérifié : Talus tombe de #1 à #6 sur "strawberry" avec `--descrip
 dès que la couverture moléculaire passe sous 20 % (`matching.LOW_COVERAGE_WARNING_THRESHOLD`),
 pour encourager explicitement l'ajout du plus de descripteurs possible.
 
-**Proposer un blend (T31/T32 backlog).** `matching.amplify_blend` (CLI :
-`hopmatch amplify-blend`) — équivalent de `contrast_blend` ci-dessous pour `amplify`, même
-mécanisme partagé (`_pairing_grown_blends`, priorité à la fréquence réelle de pairing
-BeerMaverick). La cible du blend est le **descripteur** propre de la note (comme
-`contrast_blend`), jamais une reconstruction moléculaire — **pas de NNLS ici non plus** : ce
-serait recréer `combine()`, déjà retiré (voir l'encadré tout en haut). Le score moléculaire
-d'`amplify` sert seulement à classer les candidats, jamais à piloter la composition du blend.
-Nécessite des descripteurs pour la note (sinon rien à couvrir — `has_descriptors: False`,
-blend vide, pas d'erreur).
+**`--oav` en pratique.** Effet réel mesuré, pas négligeable : change le classement complet sur
+~18% des notes et le houblon #1 sur ~15% (échantillon de 40 notes). Activé par défaut en GUI
+(décision utilisateur), reste optionnel en CLI (`--oav`).
+
+**Proposer un blend.** `matching.amplify_blend` (CLI : `hopmatch amplify-blend`) — équivalent de
+`contrast_blend` ci-dessous pour `amplify`, même mécanisme partagé (`_pairing_grown_blends`,
+priorité à la fréquence réelle de pairing BeerMaverick). La cible du blend est le
+**descripteur** propre de la note (comme `contrast_blend`), jamais une reconstruction
+moléculaire — **pas de NNLS ici non plus** : ce serait recréer `combine()`, déjà retiré (voir
+l'encadré plus haut). Le score moléculaire d'`amplify` sert seulement à classer les candidats,
+jamais à piloter la composition du blend. Nécessite des descripteurs pour la note (sinon rien
+à couvrir — `has_descriptors: False`, blend vide, pas d'erreur).
 
 ### `contrast` : accorder par contraste
 
@@ -393,9 +576,14 @@ composés communs.
    `note_descriptors` a été peuplé pour une note précise (voir « Pourquoi la sélection
    manuelle » ci-dessous), via cette note.
 2. Pour chacun, chercher ses descripteurs **complémentaires** dans la carte d'affinités
-   (`reference.CONTRAST_AFFINITY` : ex. agrume ↔ résineux/boisé/herbacé).
-3. Cible = union des descripteurs complémentaires.
-4. Classer les houblons selon le nombre de descripteurs-cibles que leur roue d'arôme recoupe.
+   (`reference.CONTRAST_AFFINITY` : ex. agrume ↔ résineux/boisé/herbacé) — cette cible
+   PROPOSÉE reste modifiable : la GUI la pré-coche mais laisse l'utilisateur décocher/ajouter
+   librement (utile quand la cible auto-calculée est trop large — ex. ne garder que "spicy"
+   pour retrouver un houblon noble comme Saaz, noyé sous des houblons dank/resinous plus
+   nombreux).
+3. Cible = union des descripteurs complémentaires (retenus).
+4. Classer les houblons selon le nombre de descripteurs-cibles que leur roue d'arôme recoupe,
+   avec un filtre optionnel par **purpose** (aromatique/amérisant, pré-coché sur les deux).
 
 `hopmatch contrast --descriptors citrus,floral` → cible earthy/herbal/resinous/woody/spicy →
 les houblons noble/herbacés ressortent.
@@ -425,25 +613,35 @@ chemin normal : l'utilisateur décrit lui-même sa note avec le vocabulaire rée
 d'arôme — fonctionne pour n'importe quelle note sans rien inventer côté données, et sans
 note requise du tout.
 
-**Proposer un blend (T33 backlog, refondu 2026-08 — décision utilisateur).**
-`matching.contrast_blend` (CLI : `hopmatch contrast-blend`) propose **plusieurs tailles de
-blend (1 à 5)**, pas un seul blend "optimal" — l'utilisateur a jugé l'ancienne version
-(couverture ensembliste gloutonne pure) peu utile : rien ne garantissait que les houblons
-combinés soient réellement utilisés ensemble. Nouvelle priorité : à chaque taille >1, le
-houblon choisi est celui avec la fréquence **RÉELLE** de pairing la plus haute avec un houblon
-déjà dans le blend (BeerMaverick, `hop_pairings`) — la couverture reste calculée et rapportée
-mais ne pilote plus le choix en priorité. Repli explicite sur la couverture gloutonne
-classique quand aucune fréquence réelle n'existe (36/203 houblons seulement ont une donnée
-BeerMaverick, mesuré) — jamais un blend plus petit que possible par manque de données, mais
-chaque houblon signale sa provenance (`via`: meilleur candidat / pairing réel / repli
-couverture). Toujours pas de NNLS (le contraste reste non-moléculaire par design). Mécanisme
-partagé (`matching._pairing_grown_blends`) avec `amplify_blend` ci-dessous. Vérifié en direct
-sur les 10 catégories cœur : Amarillo (meilleur candidat) puis Simcoe/Citra/Mosaic/Chinook,
-4 houblons sur 5 ajoutés via une fréquence de pairing BeerMaverick réelle.
+**Tri déterministe et transparence sur la troncature.** Sur une cible de 3-4 descripteurs, le
+score (`100 × recoupés / cible`) ne prend que 3-4 valeurs possibles : des égalités massives
+entre houblons sont la norme, pas l'exception (signalé en direct : Saaz invisible même au
+plafond maximum de résultats sur "tropical"/"mango"). Résolu par un tri secondaire déterministe
+(`total_oil` réconcilié desc, puis `variety` asc) et par un champ `total_matches` qui permet à
+la GUI/CLI d'annoncer explicitement « showing N of M » plutôt que de tronquer en silence — même
+traitement appliqué à `by-descriptor` (voir plus bas).
+
+**Proposer un blend.** `matching.contrast_blend` (CLI : `hopmatch contrast-blend`) propose
+**plusieurs tailles de blend (1 à 5)**, pas un seul blend "optimal" — l'utilisateur a jugé
+l'ancienne version (couverture ensembliste gloutonne pure) peu utile : rien ne garantissait que
+les houblons combinés soient réellement utilisés ensemble. Le houblon de taille 1 est choisi
+**par l'utilisateur** (la GUI propose un sélecteur) plutôt qu'imposé — le score étant souvent
+homogène (plusieurs houblons ex-aequo "meilleur candidat"), le classement seul ne désigne pas
+un choix évident. À partir de là, si le purpose du houblon de base est connu, la taille 2
+garantit explicitement un houblon du rôle opposé (au moins 1 aromatique + 1 amérisant), puis la
+croissance se restreint aux houblons aromatiques ; à chaque taille >1, le houblon choisi
+mélange **pertinence ET fréquence RÉELLE de pairing** (BeerMaverick, `hop_pairings`, restreint
+au top-10 des partenaires d'un houblon déjà dans le blend) — jamais l'un puis l'autre en
+cascade. Repli explicite sur la pertinence/couverture pure quand aucune fréquence réelle
+n'existe (36/203 houblons seulement ont une donnée BeerMaverick, mesuré) — jamais un blend plus
+petit que possible par manque de données, mais chaque houblon signale sa provenance (`via`).
+Ne s'arrête pas dès couverture complète (voir un blend à 5 reste utile même quand 1 houblon
+couvre déjà toute la cible). Toujours pas de NNLS (le contraste reste non-moléculaire par
+design). Mécanisme partagé (`matching._pairing_grown_blends`) avec `amplify_blend` ci-dessus.
 
 > ⚠️ La carte d'affinités est un **prior heuristique**, pas une donnée sourcée (voir
-> [section dédiée](#ce-qui-est-un-prior-pas-une-donnée)). À ancrer sur un corpus de recettes
-> ou une référence d'accords (*The Flavor Bible*).
+> [Ce qui est un prior, pas une donnée](#ce-qui-est-un-prior-pas-une-donnée)). À ancrer sur un
+> corpus de recettes ou une référence d'accords (*The Flavor Bible*).
 
 ### Option `--biotransform` — implémentée puis retirée
 
@@ -472,24 +670,86 @@ plusieurs descripteurs dans le vocabulaire réel de la base (`hopmatch descripto
 liste les houblons qui les portent, avec leurs descripteurs **et** leurs molécules.
 
 **Grounded**, contrairement à `contrast` : le vocabulaire et les correspondances viennent des
-roues d'arôme réelles (`hop_descriptors`, BarthHaas/Yakima), pas de `CONTRAST_AFFINITY` (le
-prior heuristique). Ne dépend ni de FooDB ni de `crawl_yakima`.
+roues d'arôme réelles (`hop_descriptors`, BarthHaas/Yakima/BeerMaverick), pas de
+`CONTRAST_AFFINITY` (le prior heuristique). Ne dépend ni de FooDB ni de `crawl_yakima`.
 
-**Méthode.** Recoupement `hop_descriptors ∩ sélection`. Tri : (1) nombre de descripteurs
-recoupés (desc), (2) `total_oil` réconcilié (desc, proxy d'intensité en l'absence d'autre
-signal), (3) `variety` (asc, déterminisme en cas d'égalité totale). Les variantes de
-descripteurs entre sources (« stone fruit » vs « stonefruit », pluriels…) sont normalisées à
-l'ingestion via `reference.DESCRIPTOR_ALIASES`, appliqué dans `ingest._ingest_variety` — pas
-dans le parseur brut.
+**Méthode, à deux paliers.** (1) **Catégorique**, prioritaire : nombre de descripteurs texte
+recoupés (desc) — le filtre ET le tri principal ; un houblon doit recouper au moins un
+descripteur choisi pour apparaître. (2) **Quantitatif**, départage seulement à l'intérieur d'un
+même palier catégorique : intensité moyenne mesurée (`hop_aroma_intensity`, Yakima uniquement,
+0-100 réel, voir la roue d'arôme quantitative plus bas) sur les descripteurs de la roue choisis
+en plus — jamais un critère de présence/absence, jamais une moyenne comptant un descripteur
+manquant comme 0. (3) `total_oil` réconcilié desc puis `variety` asc en dernier recours
+(déterminisme total, même tri secondaire que `contrast`). En GUI, la roue quantitative (15
+catégories fixes) est proposée comme des pills à cocher séparément du texte libre : si aucun
+descripteur texte n'est choisi, elle sert aussi de filtre (repli), sinon elle ne fait plus que
+noter les résultats déjà filtrés par le texte.
+
+Les variantes de descripteurs entre sources (« stone fruit » vs « stonefruit », pluriels…) sont
+normalisées à l'ingestion via `reference.DESCRIPTOR_ALIASES`, appliqué dans
+`ingest._ingest_variety` — pas dans le parseur brut.
 
 `hopmatch by-descriptor citrus,tropical` → Simcoe, Citra, Mosaic (Saazer, sans aucun des deux,
 n'apparaît pas).
 
-**GUI uniquement** : dès que ≥2 houblons recoupent la sélection, une heatmap
-houblon x descripteur (présence/absence, jusqu'à 12 candidats triés par pertinence) compare
-visuellement leurs profils complets — pas seulement les descripteurs recherchés. Radar écarté
-volontairement (voir `docs/BACKLOG.md#T4`) : les descripteurs d'un houblon forment un ensemble
-binaire, pas une quantité — un radar déformerait par l'aire sans gain de lisibilité.
+**GUI uniquement** : dès que ≥2 houblons recoupent la sélection, une heatmap houblon ×
+descripteur compare visuellement leurs profils complets — pas seulement les descripteurs
+recherchés —, scindée en deux grilles (descripteurs de la roue quantitative, shadés par
+intensité mesurée ; autres descripteurs, catégoriques uniquement, jamais de nuance possible).
+Radar écarté volontairement pour CE cas précis (voir `docs/BACKLOG.md#T4`) : les descripteurs
+d'un houblon forment ici un ensemble binaire, pas une quantité — un radar déformerait par
+l'aire sans gain de lisibilité (à distinguer du radar utilisé pour la roue d'arôme
+*quantitative*, où l'aire a un sens — voir plus bas).
+
+---
+
+## Interface graphique : détails d'implémentation
+
+Cette section documente les choix propres à la GUI Streamlit (`app.py`) qui n'ont pas
+d'équivalent CLI — utile pour comprendre ce qu'affiche chaque mode et pourquoi, pas nécessaire
+pour simplement s'en servir (voir [GUI navigateur](#gui-navigateur) pour le lancement).
+
+**Page d'accueil.** Résume les 5 outils (carte avec icône/tagline/description) avec un bouton
+"Open" par outil pour y accéder directement — bascule le mode via une clé de relais
+(`st.session_state["_next_mode"]`, consommée en tout début de `main()` avant l'instanciation du
+widget radio ; Streamlit interdit de modifier `session_state["mode"]` une fois ce widget déjà
+créé dans le même run).
+
+**`browse` — consulter un houblon.** Sans équivalent CLI. Recherche par nom/variété, puis pour
+le houblon choisi : purpose (aromatique/amérisant/les deux, ou "Inferred: ..." en repli, voir
+BeerMaverick plus haut) affiché en information principale ; alpha/beta acides, co-humulone
+(Yakima uniquement), huile totale en `st.metric` ; descripteurs ; composition détaillée triée
+par valeur ; et, pour les variétés couvertes par la roue quantitative Yakima (94/151, voir
+`docs/DATA_SOURCES.md`), un radar/spider chart sur 15 axes fixes — intensité 0-100 réelle,
+**pas** une simple présence/absence (contrairement à la heatmap de `by-descriptor` ci-dessus,
+ce radar-ci porte une vraie quantité par axe, d'où le choix justifié d'un radar plutôt qu'une
+grille). Chaque label d'axe affiche sa définition au survol (tooltip Vega-Lite natif), sourcée
+sur le "Hop Sensory Ballot" officiel de Yakima Chief — utile car trois catégories voisines
+(grassy/herbal/vegetal) sont facilement perçues comme synonymes alors qu'elles désignent des
+notes réellement différentes (herbe fraîche coupée / thé-menthe-romarin / légume, ce dernier
+étant plutôt un signal de prudence en brassage). `browse` affiche enfin trois associations
+houblon↔houblon, chacune étiquetée avec sa propre source — trois questions différentes, jamais
+présentées comme interchangeables : **Variétés similaires** (Yakima, curé par YCH) ;
+**Associations fréquentes en recette** et **Substitutions suggérées** (BeerMaverick — un
+agrégateur, pas une mesure de labo).
+
+**`compare` — comparer 2 à 5 houblons côte à côte.** Sans équivalent CLI, inspiré de l'outil de
+comparaison de beermaverick.com (fonctionnalité de référence, pas le design). Une couleur fixe
+et cohérente par houblon sur les trois graphiques : le même radar d'arôme quantitatif que
+`browse` mais superposé pour plusieurs houblons à la fois (surlignage au survol d'un houblon —
+trait plus épais et opacité pleine — pour le distinguer quand plusieurs polygones se
+chevauchent ; note technique : Vega-Lite ne permet pas de passer un tracé visuellement devant
+les autres de façon réactive, le contraste fort en tient lieu) ; un barplot à double axe pour
+alpha/beta acides + co-humulone (converti en % absolu du houblon, pas en % des acides alpha) et
+huile totale ; puis un second barplot à double axe pour la composition détaillée (% d'huile
+d'un côté, thiols en µg/kg de l'autre — deux unités incompatibles sur le même graphique sinon).
+
+**`amplify`/`contrast`/`by-descriptor`.** Chaque ligne de résultat a un expander de détail
+directement sur place (composition, descripteurs, roue d'arôme si disponible) plutôt qu'un
+bouton de navigation vers `browse` — une version précédente perdait le contexte de la page en
+cours en y renvoyant. La taille de blend proposée est toujours fixée à 5 (pas de curseur) ; les
+tailles de blend sont chacune affichées dans leur propre encadré visuel pour rester lisibles
+côte à côte.
 
 ---
 
@@ -518,6 +778,12 @@ déjà connus des 14 entrées curées de `reference.MOLECULES`.
 Flavornet. Consommée par `ingest._canonical_compound` (fusion de synonymes par identité de CID)
 et `ingest_flavordb2` (accès direct à la fiche par CID).
 
+**Table `hop_aroma_intensity`** (`variety`, `descriptor`, `intensity`, `source`). Roue d'arôme
+QUANTITATIVE (0-100 réel), Yakima uniquement — distincte de `hop_descriptors` (présence/absence,
+toutes sources). Alimentée par `crawl_yakima` depuis `imported_fields.sensory_values`/
+`aroma_values`, consommée par `matching.by_descriptor` (tri quantitatif) et les radars GUI
+(`browse`/`compare`).
+
 ---
 
 ## Ce qui est un prior, pas une donnée
@@ -535,159 +801,26 @@ parseur et une provenance.
 
 ---
 
-## Installation & usage
-
-### Installation
-
-```bash
-git clone <ton-repo> hopmatch && cd hopmatch
-python3 --version           # nécessite 3.10+ — voir la note ci-dessous sinon
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e .            # cœur (numpy, scipy)
-pip install -e ".[crawl]"   # + requests, beautifulsoup4 (crawl BarthHaas/Yakima)
-pip install -e ".[foodb]"   # + pandas (audit/ingest FooDB)
-pip install -e ".[ui]"      # + streamlit (GUI navigateur)
-pip install -e ".[dev]"     # + pytest
-```
-
-> Si `python3 --version` affiche moins que 3.10 (fréquent : le `python3` système
-> macOS/Linux est souvent plus ancien), installer une version récente séparément
-> (`brew install python@3.12` sur macOS, ou pyenv) et créer le venv avec ce binaire
-> précis, ex. `/opt/homebrew/opt/python@3.12/bin/python3.12 -m venv .venv`.
-
-Une fois le venv activé (`source .venv/bin/activate`), `hopmatch`, `streamlit` et
-`pytest` sont directement sur le `PATH`. Dans un nouveau terminal où il n'est pas
-activé, préfixer les commandes par `.venv/bin/` (`.venv/bin/hopmatch`,
-`.venv/bin/streamlit run ...`).
-
-### Construire une base
-
-`hopmatch build` construit **seulement la démo** — 3 fiches BarthHaas + 3 fiches
-Yakima figées dans `data/fixtures/`, avec citra/mosaic communs aux deux sources :
-**4 houblons, 0 note**. `build` ne peuple plus aucune note (il n'y a pas d'amorce
-littérature dans ce projet) : `amplify`/`contrast` ont besoin d'`ingest-foodb`
-en plus pour avoir des notes à interroger — `by-descriptor` fonctionne dès `build`.
-
-```bash
-hopmatch build                    # démo : 4 houblons
-```
-
-Pour une base réelle, lancer les crawls/ingestions réseau — chacun écrit dans la
-même base (`aromahops.db` par défaut, pas besoin d'appeler `build` avant : ils
-l'initialisent si elle n'existe pas) et fusionne les variétés déjà présentes :
-
-```bash
-hopmatch crawl-barthhaas          # ~90 variétés BarthHaas
-hopmatch crawl-yakima             # ~152 variétés Yakima Chief (via Algolia) + hop_similar
-hopmatch ingest-flavornet         # whitelist odeur-active (~734 composés) — avant les deux suivants
-hopmatch resolve-pubchem-cids     # jointure structurale CAS->CID — avant les deux suivants
-hopmatch ingest-flavordb2         # seuils olfactifs, bornés à cette whitelist
-hopmatch ingest-foodb              # télécharge+extrait le dump FooDB si absent, puis ingère
-hopmatch ingest-beermaverick      # pairings/substitutions houblon<->houblon (agrégateur)
-```
-
-L'ordre ci-dessus est celui des dépendances réelles entre commandes (`ingest-flavornet`
-avant `resolve-pubchem-cids` avant `ingest-flavordb2`/`ingest-foodb`) ; les deux crawls
-houblon (`crawl-barthhaas`/`crawl-yakima`) sont indépendants et dans n'importe quel ordre.
-
-`ingest-foodb` n'exige plus de télécharger le dump FooDB à la main : sans argument, il
-télécharge et extrait automatiquement `foodb_2020_04_07_csv.tar.gz` (~950 Mo, licence
-CC BY-NC-SA non commerciale — voir plus haut) dans `data/foodb_2020_04_07_csv/` s'il n'y
-est pas déjà (idempotent : ne retélécharge rien au run suivant). `hopmatch ingest-foodb
-<dossier>` reste possible pour pointer vers un dump déjà téléchargé ailleurs. Il ingère par
-défaut tout `Food.csv` (~1000 aliments, ~510 notes distinctes après le filtre de
-distinctivité — voir la section FooDB plus haut).
-
-### CLI
-
-```bash
-hopmatch list                     # notes et houblons disponibles
-
-hopmatch amplify mango                    # prolonger
-hopmatch amplify "sweet basil" --oav      # + prior de puissance olfactive
-hopmatch amplify mango --descriptors citrus,tropical  # + couche descripteurs (sélection manuelle)
-hopmatch amplify-blend mango --descriptors citrus,tropical --max-hops 5  # blends 1-5, priorité pairing réel
-hopmatch contrast --descriptors citrus,herbal        # contraster (sélection manuelle)
-hopmatch contrast-blend --descriptors citrus,herbal --max-hops 5   # blends 1-5, priorité pairing réel
-
-hopmatch descriptors              # vocabulaire de descripteurs disponible
-hopmatch by-descriptor citrus,tropical   # découverte, sans note requise
-
-pytest -q                         # 107 tests (nécessite l'extra [dev])
-```
-
-### GUI navigateur
-
-Lecture seule contre une base déjà construite (voir [Construire une base](#construire-une-base)
-ci-dessus) :
-
-```bash
-streamlit run src/hopmatch/app.py
-```
-
-**Page d'accueil.** Mode par défaut (`app._home`, `MODE_LABELS["home"]`) : résume les 4
-outils (cartes avec icône/description/exemple) et propose un bouton "Ouvrir" par outil
-pour y accéder directement — bascule `app.MODE_LABELS`/le radio de mode via une clé de
-relais (`st.session_state["_next_mode"]`, consommée en tout début de `main()` avant
-l'instanciation du widget radio ; Streamlit interdit de modifier `session_state["mode"]`
-une fois ce widget déjà créé dans le même run).
-
-Les quatre modes (amplify/contrast/by-descriptor/browse) et les options
-(`--oav`, `max_hops`, nombre de résultats) sont dans la barre
-latérale ; `app.py` importe directement `matching`/`schema`, pas de couche API
-intermédiaire. Le mode `contrast` remplace le sélecteur de note habituel par une
-sélection de descripteurs (vocabulaire réel `hop_descriptors`), avec un blend
-proposé en dessous. Le mode `amplify` garde le sélecteur de note, avec en plus
-une sélection de descripteurs optionnelle (même vocabulaire) pour activer la
-couche descripteurs — sinon `note` seule donne un score 100% moléculaire. Le
-mode `browse` (sans équivalent CLI) permet de consulter un houblon directement —
-composition + descripteurs + sources, avec recherche par nom — sans passer par
-les autres modes. Pour les variétés Yakima couvertes (94/151, voir
-`docs/DATA_SOURCES.md`), `browse` affiche aussi une roue d'arôme QUANTITATIVE
-(rendue en radar/spider chart, un polygone sur 15 axes fixes — pas un
-camembert à rayon variable, voir le commentaire de `app._aroma_wheel`) —
-intensité 0-100 réelle (`hop_aroma_intensity`, table dédiée alimentée par
-`crawl_yakima` depuis `imported_fields.sensory_values`/`aroma_values`), pas
-une simple présence/absence. BarthHaas n'a pas cette donnée : rien n'est
-affiché pour les variétés non couvertes (pas de valeur inventée).
-
-`browse` affiche aussi trois associations houblon<->houblon (T25 backlog),
-chacune étiquetée avec sa propre source — trois questions différentes, jamais
-présentées comme interchangeables : **Variétés similaires** (Yakima,
-`imported_fields.similar_varieties`, curé par YCH) ; **Associations
-fréquentes en recette** (BeerMaverick, fréquence relative dans des recettes
-publiées analysées par eux — un agrégateur, pas une mesure de labo) ;
-**Substitutions suggérées** (BeerMaverick, choix éditorial de brasseurs
-expérimentés). Réconciliation par nom normalisé (`ingest._resolve_hop_variety`,
-tolère ®/™/« Brand »/« NZ Hops »...) : 143/203 de nos variétés ont une page
-BeerMaverick correspondante. Voir `docs/DATA_SOURCES.md` pour le détail complet.
-
-La barre latérale affiche aussi le nombre de houblons/notes/descripteurs chargés et la
-date de dernière modification de la base. Pour pointer vers une autre base :
-`streamlit run src/hopmatch/app.py -- --db chemin.db`.
-
----
-
 ## Structure du projet
 
 ```
 src/hopmatch/
   reference.py   propriétés molécule (MOLECULES) + alias/normalisation + carte d'affinités
-                 (⚠️ CONTRAST_AFFINITY = prior, à ancrer) — pas de note pré-remplie, voir
-                 le module pour l'historique de l'amorce littérature retirée
+                 (⚠️ CONTRAST_AFFINITY = prior, à ancrer) + définitions de la roue d'arôme —
+                 pas de note pré-remplie, voir le module pour l'historique de l'amorce
+                 littérature retirée
   parsers.py     parseurs label/valeur BarthHaas & Yakima, descripteurs, unités FooDB
   schema.py      schéma SQLite EAV (+ flavornet_compounds, flavordb2_thresholds, pubchem_cids) +
                  validation/réparation
   ingest.py      build fixtures / crawl BarthHaas / crawl Yakima (Algolia) / ingest_flavornet /
-                 resolve_pubchem_cids / ingest_flavordb2 / ingest_foodb
-  matching.py    load+réconciliation ; amplify / contrast / by_descriptor
+                 resolve_pubchem_cids / ingest_flavordb2 / ingest_foodb / ingest_beermaverick
+  matching.py    load+réconciliation ; amplify / contrast / by_descriptor + blends
   cli.py         CLI
   app.py         GUI Streamlit (lecture seule, importe matching/schema directement)
 data/fixtures/   pages réelles (démo) : barthhaas/{citra,mosaic,saazer}, yakima/{citra,mosaic,simcoe}
 tools/           audit_foodb.py, foodb_impact_check.py
 tests/           parsers, ingest, validation, réconciliation, modes
-docs/            ARCHITECTURE.md, DATA_SOURCES.md, FEATURE_NOTES.md
+docs/            ARCHITECTURE.md, DATA_SOURCES.md, FEATURE_NOTES.md, BACKLOG.md
 CLAUDE.md        contexte projet pour Claude Code
 ```
 
@@ -704,16 +837,16 @@ cf. `parsers.pubchem_name_fallbacks` — quand le CAS seul ne résout rien ; rem
 d'alias manuelle pour les synonymes purs et la recherche par nom exact de `ingest_flavordb2`),
 GUI Streamlit (`src/hopmatch/app.py`, lecture seule), `contrast`/`contrast_blend`
 généralisés par sélection manuelle de descripteurs, libellés de mode conviviaux
-(`app.MODE_LABELS`), roue d'arôme quantitative par houblon en `browse` (radar/spider
-chart, Yakima uniquement), associations houblon<->houblon en `browse` (`hop_similar`
-Yakima + `hop_pairings`/`hop_substitutions` BeerMaverick, `ingest.ingest_beermaverick`),
-avertissement de couverture moléculaire faible sur `amplify` (voir la section dédiée
-ci-dessus et [Sources de données](#les-bases-de-données--pourquoi-et-comment-chacune)
-pour BeerMaverick), vocabulaire de descripteurs élargi de 38 à 104 termes via les tags
-BeerMaverick (voir la section `contrast` ci-dessus — corrige la couverture "dank" quasi
-inexistante côté Yakima seul), `contrast_blend` refondu + `amplify_blend` ajouté (T33,
-plusieurs tailles de blend 1-5, priorité à la fréquence réelle de pairing BeerMaverick —
-voir les sections `amplify`/`contrast` ci-dessus pour le détail complet).
+(`app.MODE_LABELS`), roue d'arôme quantitative par houblon en `browse`/`compare` (radar/spider
+chart, Yakima uniquement, tooltip par catégorie), associations houblon<->houblon en `browse`
+(`hop_similar` Yakima + `hop_pairings`/`hop_substitutions` BeerMaverick,
+`ingest.ingest_beermaverick`), purpose (aromatique/amérisant, réel ou inféré), avertissement de
+couverture moléculaire faible sur `amplify`, vocabulaire de descripteurs élargi de 38 à 104
+termes via les tags BeerMaverick, `contrast_blend` refondu + `amplify_blend` ajouté (plusieurs
+tailles de blend 1-5, priorité à la fréquence réelle de pairing BeerMaverick, houblon de base
+choisi par l'utilisateur), outil **Compare Hops** (comparaison directe de 2 à 5 houblons),
+nettoyage des noms de houblon (®/™/©, suffixe "Brand", désambiguïsation régionale des vrais
+doublons de crop). Détail complet de chaque étape dans `docs/BACKLOG.md`/`CLAUDE.md`.
 
 **Résidu PubChem accepté, pas une piste ouverte.** 6/734 CAS restent sans CID (0,8%) après CAS
 + repli par nom : recherché aussi par CAS comme identifiant d'enregistrement PubChem (endpoint

@@ -1266,6 +1266,71 @@ l'implémentation ([ ] à faire, [x] fait — voir le commit associé).
   chacun des 15 labels sur Browse/Compare Hops. Suite pytest (197 tests)
   verte, aucune régression.
 
+- [x] **T63 — Revue de code complète post-T52/T62, 6 défauts corrigés
+  (demande utilisateur, 2026-08-20)**
+
+  "Do a massive review of the codebase to find any redundancies, errors or
+  inconsistencies after all these changes." Relecture méthodique des ~7400
+  lignes (`app.py`/`matching.py`/`reference.py`/`ingest.py`/`parsers.py`/
+  `schema.py`/`cli.py`/tests), croisée avec `pyflakes` pour la détection
+  mécanique de code mort. 6 défauts vérifiés (pas de spéculation, chacun
+  confirmé sur le code réel/git blame/DB en direct) :
+
+  1. **`_NON_AROMA_DISPLAY` dupliqué à l'identique dans `app.py` ET
+     `matching.py`** (même set, même usage dans 3 comprehensions) --
+     contraire au principe déjà suivi cette session pour
+     `CONTRAST_CORE_CATEGORIES`/`AROMA_WHEEL_DEFINITIONS` (une seule
+     définition, ré-exportée). Corrigé : renommé `matching.NON_AROMA_DISPLAY`
+     (public, sans underscore, cohérent avec les deux autres ré-exports),
+     copie `app.py` supprimée, 3 usages + 2 commentaires repointés vers
+     `matching.NON_AROMA_DISPLAY`.
+  2. **`ingest.py` : `n_curated` calculé mais jamais lu** dans
+     `ingest_foodb` (confirmé pré-existant, juillet 2026 -- un print qui le
+     consommait a été retiré sans retirer l'assignation). Ligne morte
+     supprimée.
+  3. **`tests/test_matching.py` : assertion manquante** dans
+     `test_pairing_top_n_excludes_low_ranked_partners` -- `second` calculé
+     depuis le premier appel `contrast_blend` (comportement par défaut,
+     `pairing_top_n=10`) mais jamais vérifié ; seule la variante manuelle
+     (`pairing_top_n=0`) était testée. Le chemin par défaut n'avait donc
+     aucune couverture malgré les apparences. Assertions ajoutées
+     (`second["variety"] == "mosaic"`, `second["via"] == "pairing"`),
+     vérifiées vertes.
+  4. **`app._browse` : `hcomp = comp.get(selected, {})` calculé deux fois**
+     (lignes ~897 et ~934) sans rien entre les deux qui puisse le faire
+     changer. Deuxième calcul, mort, supprimé.
+  5. **`reference.AROMA_WHEEL_DEFINITIONS` (T62, sans aucun test)** : rien
+     ne vérifiait la chaîne de ré-export `reference` -> `matching`, ni que
+     ses 15 clés restent synchronisées avec le vocabulaire réel de
+     `hop_aroma_intensity` (actuellement synchronisées, vérifié en direct
+     sur la base, mais sans garde-fou pour un futur re-crawl Yakima qui
+     renommerait/ajouterait une catégorie -- le tooltip se viderait alors en
+     silence, `matching.AROMA_WHEEL_DEFINITIONS.get(d, "")`). Deux tests
+     ajoutés : identité de ré-export (`is`), et couverture exacte des 15
+     catégories documentées.
+  6. **`matching.by_descriptor` sans équivalent de `total_matches`**,
+     contrairement à `contrast` (T56, qui l'a ajouté précisément pour ce
+     problème : Saaz invisible au plafond `top` sans compteur explicite).
+     `by_descriptor` départage déjà ses égalités de façon déterministe (pas
+     le même bug racine que T56), mais la GUI n'avait aucun moyen d'afficher
+     « showing N of M » plutôt que de tronquer en silence. Corrigé --
+     **changement de contrat le plus large de cette revue** : `by_descriptor`
+     retourne désormais `{"ranked": [...], "total_matches": N}` au lieu
+     d'une liste nue (même forme que `contrast`/`amplify`). Répercuté sur
+     TOUS les appelants : `cli._print_by_descriptor` (+ message de
+     troncature en CLI), `app._by_descriptor` (+ caption de transparence,
+     même libellé que `contrast`), et les 12 sites d'appel direct dans
+     `tests/test_matching.py` (`["ranked"]` ajouté partout, + 1 nouveau test
+     `test_by_descriptor_total_matches_counts_before_truncation`).
+
+  Vérifié en direct : `pyflakes` sur tout `src/`+`tests/` ne relève plus
+  rien (2 warnings avant, dont un seul pré-existant à cette session) ;
+  navigateur réel -- `by-descriptor` sur "citrus" affiche "Showing 10 of
+  122 hops overlapping these descriptors — raise..." ; CLI (`hopmatch
+  by-descriptor citrus --top 3`) affiche le même compte (122) en français.
+  Suite pytest : 197 -> 200 tests (3 nouveaux : total_matches, 2x
+  AROMA_WHEEL_DEFINITIONS), tous verts, aucune régression.
+
 ## Sources de données additionnelles (recherche)
 
 - **Investigué à nouveau, PAS retenu — Hopsteiner (shop.hopsteiner.com)**.

@@ -447,7 +447,7 @@ def _render_key_stats(hcomp: dict) -> None:
     "il manque un élément principal : les infos les plus importantes de
     yakima". Mises en avant en `st.metric` plutôt que noyées dans le
     tableau de composition générique trié par valeur (qui les exclut
-    désormais, voir `_NON_AROMA_DISPLAY`) -- ce ne sont pas juste des
+    désormais, voir `matching.NON_AROMA_DISPLAY`) -- ce ne sont pas juste des
     composés d'arôme comme les autres, ce sont les stats qu'un brasseur
     regarde en premier. Ces 3(4) valeurs étaient auparavant absentes de LA
     BASE ELLE-MÊME (pas juste filtrées à l'affichage) : `alpha_acid`/
@@ -511,7 +511,7 @@ def _hop_detail_expanders(con, hops: dict, comp: dict, hop_desc: dict, rows: lis
                 ({"Compound": c, "Value": round(cv["mid"], 3), "Unit": cv["unit"],
                   "Sources": ", ".join(cv["sources"])}
                  for c, cv in hcomp.items()
-                 if c not in _NON_AROMA_DISPLAY and cv["mid"] is not None),
+                 if c not in matching.NON_AROMA_DISPLAY and cv["mid"] is not None),
                 key=lambda r: -r["Value"])
             if crows:
                 st.dataframe(crows[:8], width="stretch", hide_index=True)
@@ -755,9 +755,6 @@ def _contrast(con):
     _render_blends(blend_r["blends"], hops, comp)
 
 
-_NON_AROMA_DISPLAY = {"total_oil", "alpha_acid", "beta_acid", "co_humulone"}
-
-
 def _aroma_wheel(intensity: dict[str, float], vocabulary: list[str]):
     """Roue d'arôme QUANTITATIVE pour UN houblon (T26 backlog, « comme
     BeerMaverick/Yakima »). Rayon = intensité 0-100 réelle
@@ -934,11 +931,10 @@ def _browse(con):
                    "only, variety not covered, or corrupted YCH entry as "
                    "with Admiral).")
 
-    hcomp = comp.get(selected, {})
     rows = sorted(
         ({"Compound": c, "Value": round(v["mid"], 3), "Unit": v["unit"],
           "Sources": ", ".join(v["sources"])}
-         for c, v in hcomp.items() if c not in _NON_AROMA_DISPLAY and v["mid"] is not None),
+         for c, v in hcomp.items() if c not in matching.NON_AROMA_DISPLAY and v["mid"] is not None),
         key=lambda r: -r["Value"])
     if rows:
         st.dataframe(rows, width="stretch", hide_index=True)
@@ -1130,10 +1126,17 @@ def _by_descriptor(con):
     if not text_selected and not wheel_selected:
         st.write("Choose at least one descriptor.")
         return
-    ranked = matching.by_descriptor(con, text_selected, wheel_descriptors=wheel_selected, top=top)
+    r = matching.by_descriptor(con, text_selected, wheel_descriptors=wheel_selected, top=top)
+    ranked = r["ranked"]
     if not ranked:
         st.write("No hop overlaps with these descriptors.")
         return
+    if r["total_matches"] > len(ranked):
+        # Transparence sur la troncature (2026-08-20, revue de code — même
+        # principe que `contrast`/T56 : jamais laisser croire que "Number of
+        # hops shown" couvre tout le recoupement réel).
+        st.caption(f"Showing {len(ranked)} of {r['total_matches']} hops overlapping these "
+                  "descriptors — raise \"Number of hops shown\" in the sidebar to see more.")
 
     _, comp, _, _ = matching.load(con)
 
@@ -1224,7 +1227,7 @@ _COMPARE_MAX_HOPS = 5
 _COMPARE_CHART_WIDTH = 700
 
 # Composés "détaillés" du barplot 2 = tout hop_composition SAUF les 4 champs
-# "principaux" du barplot 1 (_NON_AROMA_DISPLAY) -- ordre fixe pour rester
+# "principaux" du barplot 1 (`matching.NON_AROMA_DISPLAY`) -- ordre fixe pour rester
 # stable d'une sélection de houblons à l'autre plutôt qu'un tri alphabétique
 # qui changerait selon quels composés sont présents.
 _COMPARE_DETAIL_OIL_COMPOUNDS = ["myrcene", "humulene", "caryophyllene", "farnesene",
@@ -1587,6 +1590,16 @@ def main():
     # Contexte base (T6 backlog) : la construction se fait entièrement en CLI,
     # hors de la vue GUI — sans ça, rien n'indique si la base ouverte est la
     # démo (`hopmatch build`, 4 houblons) ou une base réelle, ni sa fraîcheur.
+    # Lien GitHub en tête de sidebar (demande utilisateur, 2026-08-20 : "add a
+    # link to the github on the app GUI (like top left)") -- `st.page_link`
+    # accepte une URL externe directement (pas seulement un `st.Page` interne,
+    # depuis Streamlit 1.31), rendu comme un lien cliquable classique plutôt
+    # qu'un `st.logo` (qui exige une image, aucun logo du projet n'existe).
+    # Premier élément de la sidebar, avant même les stats de base : c'est la
+    # zone "haut-gauche" de l'app, cohérent avec l'emplacement demandé.
+    st.sidebar.page_link("https://github.com/quentinba/hopmatch",
+                         label="GitHub", icon=":material/code:")
+
     stats = _stats(con)
     modified = datetime.fromtimestamp(_db_version(db_path)).strftime("%Y-%m-%d %H:%M")
     st.sidebar.caption(
