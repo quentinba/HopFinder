@@ -1597,7 +1597,11 @@ def main():
     # qu'un `st.logo` (qui exige une image, aucun logo du projet n'existe).
     # Premier élément de la sidebar, avant même les stats de base : c'est la
     # zone "haut-gauche" de l'app, cohérent avec l'emplacement demandé.
-    st.sidebar.page_link("https://github.com/quentinba/hopmatch",
+    # URL mise à jour le jour même : GitHub a redirigé le dépôt
+    # quentinba/hopmatch -> quentinba/HopFinder (renommage côté GitHub,
+    # détecté au push) -- URL canonique utilisée directement plutôt que de
+    # compter sur la redirection.
+    st.sidebar.page_link("https://github.com/quentinba/HopFinder",
                          label="GitHub", icon=":material/code:")
 
     stats = _stats(con)
