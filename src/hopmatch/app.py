@@ -655,7 +655,7 @@ def _amplify(con):
             f"Low molecular coverage ({r['coverage']*100:.0f}%): the molecular "
             "ranking alone risks being dominated by a single molecule common "
             "to many foods, not by this note's own signature (hop oil "
-            "chemistry rarely overlaps with food aromas, see CLAUDE.md). "
+            "chemistry rarely overlaps with food aromas). "
             "**Add as many descriptors as possible** above for a more "
             "reliable result.")
     if r["orphan"]:
