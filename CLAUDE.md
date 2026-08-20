@@ -875,9 +875,13 @@ dans l'extra `[ui]` (fonctionnait avant seulement par effet de bord
 transitif de `streamlit`), commentaire README stale "numpy, scipy"
 corrigé (aucun import numpy/scipy dans `src/`, scipy servait à l'ancien
 `combine()` retiré le 2026-08-12). Contact licence ajouté DANS l'app
-(caption sidebar sous le lien GitHub), pas seulement dans
-`README.md`/`LICENSE`. 4 tests ajoutés pour `_fetch_remote_db`. Suite
-pytest 200 -> 204.
+(caption en tête de sidebar), pas seulement dans `README.md`/`LICENSE`.
+4 tests ajoutés pour `_fetch_remote_db`. Suite pytest 200 -> 204.
+**Addendum (2026-08-20)** : le lien GitHub ajouté dans la sidebar
+(`st.sidebar.page_link`) a été retiré -- Streamlit Community Cloud
+affiche déjà sa propre icône GitHub en haut à droite de l'app déployée,
+rendant le lien ajouté à la main redondant. La caption licence/contact
+reste (pas d'équivalent natif Streamlit).
 
 **T65 — Inputs des outils centralisés sur la page principale, plus dans
 la sidebar (2026-08-20, demande utilisateur signalée après le déploiement

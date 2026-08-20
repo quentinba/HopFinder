@@ -1402,8 +1402,16 @@ l'implémentation ([ ] à faire, [x] fait — voir le commit associé).
   `README.md`/`LICENSE` (déploiement public sur des données en partie
   non-commerciales — la personne concernée par un signalement regarde
   l'app déployée, pas nécessairement le dépôt GitHub associé) : caption
-  sous le lien GitHub de la sidebar, "Code MIT · data licenses ·
-  quentin4313@gmail.com" (les deux derniers en lien cliquable).
+  en tête de sidebar, "Code MIT · data licenses · quentin4313@gmail.com"
+  (les deux derniers en lien cliquable).
+
+  **Addendum (2026-08-20, retour utilisateur après déploiement réel) :**
+  le `st.sidebar.page_link` GitHub ajouté ci-dessus est RETIRÉ -- une fois
+  déployée sur Streamlit Community Cloud, l'app affiche déjà sa propre
+  icône GitHub cliquable en haut à droite de sa barre d'outils (chrome
+  Streamlit natif), rendant le lien ajouté à la main redondant. La
+  caption licence/contact reste (aucun équivalent natif Streamlit pour
+  ça).
 
   **Ce qui reste à faire côté utilisateur** (hors de portée de l'outil --
   création de compte/dépôt/jeton) : créer le dépôt GitHub privé pour la

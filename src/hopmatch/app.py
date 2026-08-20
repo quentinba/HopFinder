@@ -1677,19 +1677,13 @@ def main():
     # Contexte base (T6 backlog) : la construction se fait entièrement en CLI,
     # hors de la vue GUI — sans ça, rien n'indique si la base ouverte est la
     # démo (`hopmatch build`, 4 houblons) ou une base réelle, ni sa fraîcheur.
-    # Lien GitHub en tête de sidebar (demande utilisateur, 2026-08-20 : "add a
-    # link to the github on the app GUI (like top left)") -- `st.page_link`
-    # accepte une URL externe directement (pas seulement un `st.Page` interne,
-    # depuis Streamlit 1.31), rendu comme un lien cliquable classique plutôt
-    # qu'un `st.logo` (qui exige une image, aucun logo du projet n'existe).
-    # Premier élément de la sidebar, avant même les stats de base : c'est la
-    # zone "haut-gauche" de l'app, cohérent avec l'emplacement demandé.
-    # URL mise à jour le jour même : GitHub a redirigé le dépôt
-    # quentinba/hopmatch -> quentinba/HopFinder (renommage côté GitHub,
-    # détecté au push) -- URL canonique utilisée directement plutôt que de
-    # compter sur la redirection.
-    st.sidebar.page_link("https://github.com/quentinba/HopFinder",
-                         label="GitHub", icon=":material/code:")
+    # Lien GitHub en tête de sidebar (`st.sidebar.page_link`) ajouté le
+    # 2026-08-19 puis RETIRÉ le 2026-08-20 (demande utilisateur, une fois le
+    # déploiement Streamlit Community Cloud en place) : Streamlit Cloud
+    # affiche déjà sa propre icône GitHub, cliquable, en haut à droite de la
+    # barre d'outils de l'app déployée -- redondant avec un second lien
+    # ajouté à la main. Licence/contact restent en sidebar (voir ci-dessous) :
+    # cette info-là n'a pas d'équivalent dans le chrome Streamlit.
     # Licence/contact visible dans l'app elle-même, pas seulement dans le
     # README du dépôt (2026-08-20, demande utilisateur -- déploiement public
     # sur des données en partie non-commerciales, FooDB/FlavorDB2 CC BY-NC-SA)
