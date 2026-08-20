@@ -1423,6 +1423,61 @@ l'implémentation ([ ] à faire, [x] fait — voir le commit associé).
   partiels, téléchargement réussi avec un `urlopen` simulé). Suite pytest
   200 -> 204, tous verts.
 
+- [x] **T65 — Inputs des outils centralisés sur la page principale, plus
+  dans la sidebar (2026-08-20, demande utilisateur, signalé après le
+  déploiement réel)**
+
+  Signalé après avoir utilisé l'app déployée sur téléphone : "The note for
+  amplify is in the panel, not the tool page. It's straightforward on PC
+  but not phone." Root cause : la sidebar Streamlit est repliée par
+  défaut sur mobile (accessible seulement via un menu hamburger) alors
+  qu'elle reste toujours visible sur bureau -- un input qui n'existe QUE
+  dans la sidebar est donc invisible sans un tap supplémentaire sur
+  mobile, jamais un problème remarqué en testant sur PC pendant tout le
+  reste de la session.
+
+  **Audit de tous les `st.sidebar.*` du fichier** avant de changer quoi
+  que ce soit : 4 étaient de vrais INPUTS d'outil (donc à déplacer), le
+  reste (lien GitHub, caption licence/contact, stats de base, radio de
+  NAVIGATION entre outils) est un chrome global de l'app, pas un input
+  d'un outil précis -- laissé dans la sidebar, cohérent avec un usage
+  standard "menu hamburger = navigation" sur mobile.
+
+  **Déplacés vers la page principale de leur outil respectif** :
+  1. `main()` : `note = st.sidebar.selectbox("Note", notes)` pour
+     `amplify` -- LE bug signalé. Refactorisé : la sélection de note (et
+     la garde `if not notes`) vit désormais DANS `app._amplify` (signature
+     changée de `_amplify(con, note)` à `_amplify(con)`), comme le fait
+     déjà chaque autre outil (`_contrast(con)`, `_by_descriptor(con)`,
+     `_browse(con)`, `_compare(con)`) -- `main()` traite maintenant
+     `amplify` de façon symétrique aux autres modes (`st.header(...)` puis
+     un seul appel `_outil(con)`), plus de cas spécial.
+  2. `_amplify` : `st.sidebar.subheader("Options")` +
+     `use_oav = st.sidebar.checkbox(...)` -- déplacés en haut de la page
+     (juste après le sélecteur de note), à côté des autres inputs de
+     l'outil (`selected_desc`, `top`) qui étaient déjà sur la page
+     principale.
+  3. `_contrast` : `top = st.sidebar.slider("Number of results", ...)` ->
+     `st.slider(...)`, à sa place logique existante dans le flux de la
+     fonction.
+  4. `_by_descriptor` : `top = st.sidebar.slider("Number of hops shown",
+     ...)` -> `st.slider(...)`, idem.
+
+  **Corrigé au passage** : deux captions de transparence sur la
+  troncature (`contrast`/`by-descriptor`, T56/T63) disaient encore
+  littéralement "raise ... in the sidebar to see more" -- devenu faux une
+  fois le curseur déplacé, corrigé en "... above ...".
+
+  **Tests** : 3 `at.sidebar.selectbox[0]`/`at.sidebar.slider[0]` (note
+  amplify x2, curseur contrast x1) repointés vers `at.selectbox[0]`/
+  `at.slider[0]` (page principale). Aucun autre test cassé par le
+  changement d'indices AppTest (vérifié en lançant la suite complète, pas
+  supposé). Suite pytest 204 -> 204 (aucun test ajouté/retiré, seulement
+  des chemins de sélection de widget mis à jour) — vérifié en direct dans
+  le navigateur pour les 3 outils : Note/`--oav`/descripteurs/curseur
+  d'Amplify, curseur de Contrast, curseur de By-descriptor tous visibles
+  sur la page de l'outil, sidebar réduite à la navigation + chrome global.
+
 ## Sources de données additionnelles (recherche)
 
 - **Investigué à nouveau, PAS retenu — Hopsteiner (shop.hopsteiner.com)**.

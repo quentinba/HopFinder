@@ -595,9 +595,24 @@ def _select_base_hop(ranked: list[dict], key: str) -> str:
                         format_func=lambda v: names[v], key=key)
 
 
-def _amplify(con, note):
-    st.sidebar.subheader("Options")
-    use_oav = st.sidebar.checkbox(
+def _amplify(con):
+    # Tous les inputs de l'outil (note incluse) sur la page principale, pas
+    # dans la sidebar (2026-08-20, signalé par l'utilisateur en testant sur
+    # téléphone : "the note for amplify is in the panel, not the tool page" --
+    # la sidebar Streamlit est repliée par défaut sur mobile, donc un input
+    # qui n'existe QUE là est invisible sans un tap supplémentaire sur le
+    # menu hamburger, contrairement au bureau où elle reste toujours visible.
+    # Même traitement pour `contrast`/`by-descriptor` (curseur "Number of
+    # results"/"Number of hops shown"), déjà passés de la sidebar à la page
+    # principale au même moment -- la sidebar ne garde plus que la
+    # NAVIGATION (choix de l'outil) et les infos globales de la base, jamais
+    # un input propre à un outil précis.
+    notes = _notes(con)
+    if not notes:
+        st.error("No notes in the database.")
+        st.stop()
+    note = st.selectbox("Note", notes)
+    use_oav = st.checkbox(
         "--oav (olfactory power prior)", value=True,
         help="Weights each molecule by 1/threshold when that threshold is "
              "known (~14 common hop oil molecules: myrcene, geraniol, "
@@ -775,8 +790,9 @@ def _contrast(con):
     # "un seul recoupement" comme Saaz d'une égalité de ~84 houblons sur une
     # base réelle. Voir aussi le tri secondaire par total_oil dans
     # `matching.contrast` (rend l'égalité déterministe, pas seulement le
-    # plafond relevé).
-    top = st.sidebar.slider("Number of results", 1, 100, 8)
+    # plafond relevé). Page principale, pas la sidebar (2026-08-20, voir le
+    # commentaire de `_amplify` -- même correctif mobile pour les 3 outils).
+    top = st.slider("Number of results", 1, 100, 8)
     if not selected:
         st.write("Choose at least one descriptor."); return
     r = matching.contrast(con, descriptors=selected, target_descriptors=target_selected,
@@ -795,7 +811,7 @@ def _contrast(con):
         # même principe que la couverture moléculaire faible ou les
         # molécules orphelines ailleurs dans la GUI.
         st.caption(f"Showing {len(r['ranked'])} of {r['total_matches']} hops overlapping "
-                  "this target — raise \"Number of results\" in the sidebar to see more "
+                  "this target — raise \"Number of results\" above to see more "
                   "(many hops often tie on score; see Contrasts via below for what each "
                   "one actually matches).")
     hops, comp, hop_desc, _ = matching.load(con)
@@ -1187,7 +1203,9 @@ def _by_descriptor(con):
         wheel_selected = st.pills("Aroma wheel flavors", intensity_vocab,
                                   selection_mode="multi", label_visibility="collapsed",
                                   key="by_descriptor_wheel_pills") or []
-    top = st.sidebar.slider("Number of hops shown", 1, 30, 10)
+    # Page principale, pas la sidebar (2026-08-20, voir le commentaire de
+    # `_amplify` -- même correctif mobile pour les 3 outils).
+    top = st.slider("Number of hops shown", 1, 30, 10)
     if not text_selected and not wheel_selected:
         st.write("Choose at least one descriptor.")
         return
@@ -1201,7 +1219,7 @@ def _by_descriptor(con):
         # principe que `contrast`/T56 : jamais laisser croire que "Number of
         # hops shown" couvre tout le recoupement réel).
         st.caption(f"Showing {len(ranked)} of {r['total_matches']} hops overlapping these "
-                  "descriptors — raise \"Number of hops shown\" in the sidebar to see more.")
+                  "descriptors — raise \"Number of hops shown\" above to see more.")
 
     _, comp, _, _ = matching.load(con)
 
@@ -1716,13 +1734,12 @@ def main():
         _compare(con)
         return
 
-    notes = _notes(con)
-    if not notes:
-        st.error("No notes in the database."); st.stop()
-    note = st.sidebar.selectbox("Note", notes)
-
-    st.header(f"{MODE_LABELS[mode]} — {note}")
-    _amplify(con, note)
+    # "amplify" : seul mode restant après les dispatches explicites
+    # ci-dessus -- la sélection de note vit désormais DANS `_amplify` (page
+    # principale, pas la sidebar, voir son commentaire), donc plus rien à
+    # faire ici que le header, comme les autres modes.
+    st.header(MODE_LABELS[mode])
+    _amplify(con)
 
 
 if __name__ == "__main__":

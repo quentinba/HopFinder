@@ -879,6 +879,26 @@ corrigé (aucun import numpy/scipy dans `src/`, scipy servait à l'ancien
 `README.md`/`LICENSE`. 4 tests ajoutés pour `_fetch_remote_db`. Suite
 pytest 200 -> 204.
 
+**T65 — Inputs des outils centralisés sur la page principale, plus dans
+la sidebar (2026-08-20, demande utilisateur signalée après le déploiement
+réel sur téléphone, voir `docs/BACKLOG.md` pour le détail complet).**
+"The note for amplify is in the panel, not the tool page... straightforward
+on PC but not phone" -- la sidebar Streamlit est repliée par défaut sur
+mobile (menu hamburger), invisible sans interaction supplémentaire,
+contrairement au bureau où elle reste toujours visible (jamais remarqué en
+testant sur PC tout le reste de la session). Audit de tous les
+`st.sidebar.*` : 4 vrais inputs d'outil déplacés vers la page principale
+(sélecteur de note d'`amplify`, `--oav`, curseurs "Number of results"/
+"Number of hops shown" de `contrast`/`by-descriptor`) ; le reste (lien
+GitHub, licence/contact, stats de base, radio de NAVIGATION entre outils)
+reste en sidebar -- chrome global de l'app, pas un input d'outil. `main()`
+traite désormais `amplify` de façon symétrique aux 4 autres modes
+(`_amplify(con, note)` -> `_amplify(con)`, sélection de note déplacée à
+l'intérieur). 2 captions de transparence corrigées ("in the sidebar" ->
+"above"). 3 tests AppTest repointés (`at.sidebar.selectbox`/`slider` ->
+`at.selectbox`/`slider`). Suite pytest 204, vérifié en direct dans le
+navigateur pour les 3 outils.
+
 Reste :
 1. Jointure FooDB/hop_composition au-delà des ~734 composés Flavornet si le vocabulaire
    s'élargit beaucoup (crawl Yakima déjà réel, plus d'aliments FooDB).

@@ -175,7 +175,9 @@ def test_home_open_button_switches_to_target_mode(toy_cwd):
     at.button(key="home_open_amplify").click().run()
     assert not at.exception
     assert at.sidebar.radio[0].value == "amplify"
-    assert "mynote" in [o for o in at.sidebar.selectbox[0].options]
+    # Note sur la page principale, pas la sidebar (2026-08-20, correctif
+    # mobile -- voir app._amplify).
+    assert "mynote" in [o for o in at.selectbox[0].options]
 
 def test_sidebar_shows_db_stats(toy_cwd):
     # T6 backlog : contexte base (nombre de houblons/notes/descripteurs)
@@ -269,7 +271,9 @@ def test_amplify_warns_on_low_molecular_coverage(toy_cwd):
     at = _app()
     at.run()
     at.sidebar.radio[0].set_value("amplify").run()
-    at.sidebar.selectbox[0].set_value("lownote").run()
+    # Note sur la page principale, pas la sidebar (2026-08-20, correctif
+    # mobile -- voir app._amplify).
+    at.selectbox[0].set_value("lownote").run()
     assert not at.exception
     assert any("Low molecular coverage" in w.value for w in at.warning)
 
@@ -279,7 +283,9 @@ def test_amplify_no_low_coverage_warning_when_coverage_high(toy_cwd):
     at = _app()
     at.run()
     at.sidebar.radio[0].set_value("amplify").run()
-    at.sidebar.selectbox[0].set_value("mynote").run()
+    # Note sur la page principale, pas la sidebar (2026-08-20, correctif
+    # mobile -- voir app._amplify).
+    at.selectbox[0].set_value("mynote").run()
     assert not at.exception
     assert not any("Low molecular coverage" in w.value for w in at.warning)
 
@@ -387,7 +393,9 @@ def test_contrast_shows_truncation_caption_when_more_matches_than_shown(toy_cwd)
     at.run()
     at.sidebar.radio[0].set_value("contrast").run()
     at.multiselect[0].select("citrus").run()
-    at.sidebar.slider[0].set_value(1).run()
+    # Curseur sur la page principale, pas la sidebar (2026-08-20, correctif
+    # mobile -- voir app._amplify).
+    at.slider[0].set_value(1).run()
     assert not at.exception
     assert any("Showing 1 of 2 hops" in c.value for c in at.caption)
 
