@@ -893,15 +893,39 @@ contrairement au bureau où elle reste toujours visible (jamais remarqué en
 testant sur PC tout le reste de la session). Audit de tous les
 `st.sidebar.*` : 4 vrais inputs d'outil déplacés vers la page principale
 (sélecteur de note d'`amplify`, `--oav`, curseurs "Number of results"/
-"Number of hops shown" de `contrast`/`by-descriptor`) ; le reste (lien
-GitHub, licence/contact, stats de base, radio de NAVIGATION entre outils)
-reste en sidebar -- chrome global de l'app, pas un input d'outil. `main()`
+"Number of hops shown" de `contrast`/`by-descriptor`) ; le reste
+(licence/contact, stats de base, radio de NAVIGATION entre outils) reste
+en sidebar -- chrome global de l'app, pas un input d'outil. `main()`
 traite désormais `amplify` de façon symétrique aux 4 autres modes
 (`_amplify(con, note)` -> `_amplify(con)`, sélection de note déplacée à
 l'intérieur). 2 captions de transparence corrigées ("in the sidebar" ->
 "above"). 3 tests AppTest repointés (`at.sidebar.selectbox`/`slider` ->
 `at.selectbox`/`slider`). Suite pytest 204, vérifié en direct dans le
-navigateur pour les 3 outils.
+navigateur pour les 3 outils. (Lien GitHub de la sidebar retiré juste
+après, même jour : redondant avec l'icône GitHub que Streamlit Community
+Cloud affiche déjà nativement en haut à droite de l'app déployée.)
+
+**T66 — Tableaux de résultats amplify/contrast/blends en `st.dataframe`
+(2026-08-20, demande utilisateur signalée juste après T65, voir
+`docs/BACKLOG.md` pour le détail complet).** Root cause différente de
+T65 : `app._render_hop_rows` (partagé par les tableaux de résultats
+amplify/contrast et les tableaux de blend) construisait chaque ligne à la
+main via `st.columns`, choisi à l'origine pour un `st.badge` Purpose
+coloré (un `st.dataframe` ne peut pas rendre un widget arbitraire par
+cellule) -- or Streamlit empile automatiquement les `st.columns` à la
+verticale sous une certaine largeur d'écran (comportement responsive
+natif, pas un bug de cette app), donc chaque ligne redescendait en pile
+sur mobile, plus du tout un tableau. Décision utilisateur explicite :
+"use plain text for the tables, but keep the badges for the browse and
+other places". `_render_hop_rows` réécrit en `st.dataframe` réel, Purpose
+en texte simple via un nouveau `_purpose_label` (factorisé hors de
+`_purpose_badge`, qui reste inchangé et coloré partout ailleurs --
+Browse, expanders de détail -- où un seul purpose s'affiche à la fois,
+jamais un tableau). 1 test réécrit pour lire `at.dataframe[0].value` (un
+vrai `pandas.DataFrame`) au lieu de chercher une signature `st.badge`.
+Suite pytest 204, vérifié en direct (Amplify "mango" + ses 5 tailles de
+blend en vrais tableaux bordés ; badge "Bittering" toujours coloré sur
+Browse).
 
 Reste :
 1. Jointure FooDB/hop_composition au-delà des ~734 composés Flavornet si le vocabulaire

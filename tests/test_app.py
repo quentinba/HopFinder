@@ -217,15 +217,20 @@ def test_amplify_mode_renders_ranked_table(toy_cwd):
 
 def test_amplify_results_table_includes_purpose_column(toy_cwd):
     # T-purpose backlog (demande utilisateur 2026-08-19) : colonne Purpose
-    # dans le tableau de résultats amplify/contrast -- rendu ligne par ligne
-    # (st.columns + st.badge, pas st.dataframe : seul st.badge s'adapte aux
-    # deux thèmes, voir _render_hop_rows/_purpose_badge).
+    # dans le tableau de résultats amplify/contrast. Rendu en vrai
+    # `st.dataframe` depuis le 2026-08-20 (signalé sur mobile : l'ancien
+    # rendu ligne par ligne via `st.columns` s'empilait verticalement sur
+    # petit écran, voir `_render_hop_rows`) -- texte simple ("Aromatic")
+    # plutôt qu'un `st.badge` coloré, qu'un tableau ne peut pas rendre par
+    # cellule. `_purpose_badge` reste utilisé (et testé) ailleurs, voir
+    # test_hop_detail_expander_includes_purpose_badge_and_aroma_wheel.
     at = _app()
     at.run()
     at.sidebar.radio[0].set_value("amplify").run()
     assert not at.exception
-    assert any(c.value == "Purpose" for c in at.caption)
-    assert any("-badge[" in m.value and "Aromatic" in m.value for m in at.markdown)
+    df = at.dataframe[0].value
+    assert "Purpose" in df.columns
+    assert "Aromatic" in df["Purpose"].tolist()
 
 def test_hop_detail_expander_includes_purpose_badge_and_aroma_wheel(toy_cwd):
     # T-purpose backlog : "include the aroma wheel as well, basically the

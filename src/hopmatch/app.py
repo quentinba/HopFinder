@@ -440,10 +440,12 @@ _PURPOSE_ICONS = {"aromatic": ":material/local_florist:", "bittering": ":materia
                   "both": ":material/join_full:"}
 
 
-def _purpose_badge(purpose: str | None, inferred: bool = False) -> None:
+def _purpose_label(purpose: str | None, inferred: bool = False) -> str:
+    """Libellé texte du purpose -- factorisé hors de `_purpose_badge`
+    (2026-08-20) pour être partagé avec `_render_hop_rows`, qui n'a plus de
+    rendu par cellule coloré (voir son commentaire)."""
     if purpose is None:
-        st.badge("Unknown", color="gray", icon=":material/help:")
-        return
+        return "Unknown"
     label = _PURPOSE_LABELS.get(purpose, purpose)
     if inferred:
         # demande utilisateur explicite (2026-08-19) : "instead of unknown
@@ -453,7 +455,15 @@ def _purpose_badge(purpose: str | None, inferred: bool = False) -> None:
         # une estimation (78% d'accord avec BeerMaverick, voir
         # matching.ALPHA_ACID_BITTERING_THRESHOLD_PCT) d'une donnée mesurée,
         # sans avoir besoin d'une palette de couleurs séparée.
-        label = f"Inferred: {label}"
+        return f"Inferred: {label}"
+    return label
+
+
+def _purpose_badge(purpose: str | None, inferred: bool = False) -> None:
+    if purpose is None:
+        st.badge("Unknown", color="gray", icon=":material/help:")
+        return
+    label = _purpose_label(purpose, inferred)
     st.badge(label, color=_PURPOSE_COLORS.get(purpose, "gray"), icon=_PURPOSE_ICONS.get(purpose))
 
 
@@ -470,39 +480,42 @@ def _row_with_purpose(entry: dict, hops: dict, comp: dict) -> dict:
 
 
 def _render_hop_rows(rows: list[dict], columns: list[tuple[str, str]]) -> None:
-    """Rendu ligne par ligne (pas `st.dataframe`) : nécessaire pour la colonne
-    Purpose colorée via `st.badge` (couleurs sémantiques Streamlit, seul
-    rendu par cellule qui s'adapte aux deux thèmes — voir `_purpose_badge`).
+    """Rendu en vrai tableau (`st.dataframe`) -- PAS `st.columns` par ligne
+    comme avant (2026-08-20, signalé par l'utilisateur sur téléphone : "the
+    table result of amplify and contrast does not render as table on mobile
+    phone"). Root cause vérifiée : Streamlit empile automatiquement
+    `st.columns` à la verticale sous une certaine largeur d'écran
+    (comportement responsive natif de Streamlit, pas un bug de cette app) --
+    chaque "ligne" de houblon redescendait alors en une pile de lignes
+    séparées (nom, puis score sur sa propre ligne, puis purpose...), plus du
+    tout un tableau une fois la sidebar/le contenu compressés sur mobile.
+    `st.dataframe` reste un vrai tableau HTML sur toutes les tailles d'écran
+    (défilement horizontal au lieu d'empilement vertical).
+
+    Contrepartie acceptée par l'utilisateur : la colonne Purpose perd son
+    `st.badge` coloré (un tableau ne peut pas rendre un widget arbitraire
+    par cellule, seulement du texte/nombre) au profit d'un texte simple
+    ("Aromatic"/"Inferred: Bittering"/...) via `_purpose_label` -- partagé
+    avec `_purpose_badge`, qui reste inchangé et utilisé partout ailleurs
+    (Browse, expanders de détail amplify/contrast/by-descriptor) : ces
+    emplacements affichent un SEUL purpose à la fois, pas un tableau, donc
+    le problème d'empilement mobile ne s'y pose pas.
+
     Réutilisé par les tableaux de résultats amplify/contrast ET les tableaux
     de blend. `rows` : dicts avec une clé "name" + les clés référencées par
-    `columns` ([(en-tête, clé)]) ; une colonne dont la clé est "purpose" se
-    rend en badge plutôt qu'en texte (utilise aussi "purpose_inferred" si
-    présent, voir `_row_with_purpose`).
-
-    Colonne Purpose délibérément plus LARGE que les autres (demande
-    utilisateur explicite, 2026-08-19) : le badge "Inferred: Aromatic"/
-    "Inferred: Bittering" est bien plus long que "Aromatic"/"Bittering"
-    seuls et débordait sinon (illisible, signalé en direct)."""
-    # 5, pas 3 : mesuré en direct dans le navigateur que "Inferred: Bittering"/
-    # "Inferred: Aromatic" restait tronqué en "Inferred: Bitt…" à 3 (demande
-    # utilisateur explicite de largeur suffisante pour lire ce texte).
-    _PURPOSE_COL_WIDTH = 5
-    _DEFAULT_COL_WIDTH = 2
-    widths = [3] + [_PURPOSE_COL_WIDTH if field == "purpose" else _DEFAULT_COL_WIDTH
-                    for _, field in columns]
-    header_cols = st.columns(widths)
-    header_cols[0].caption("Hop")
-    for col, (header, _) in zip(header_cols[1:], columns):
-        col.caption(header)
+    `columns` ([(en-tête, clé)]) ; une colonne dont la clé est "purpose" est
+    résolue en texte (utilise aussi "purpose_inferred" si présent, voir
+    `_row_with_purpose`)."""
+    table_rows = []
     for row in rows:
-        cols = st.columns(widths, vertical_alignment="center")
-        cols[0].write(row["name"])
-        for col, (_, field) in zip(cols[1:], columns):
+        entry = {"Hop": row["name"]}
+        for header, field in columns:
             if field == "purpose":
-                with col:
-                    _purpose_badge(row.get("purpose"), row.get("purpose_inferred", False))
+                entry[header] = _purpose_label(row.get("purpose"), row.get("purpose_inferred", False))
             else:
-                col.write(row.get(field, ""))
+                entry[header] = row.get(field, "")
+        table_rows.append(entry)
+    st.dataframe(table_rows, width="stretch", hide_index=True)
 
 
 def _render_key_stats(hcomp: dict) -> None:

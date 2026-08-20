@@ -1486,6 +1486,58 @@ l'implémentation ([ ] à faire, [x] fait — voir le commit associé).
   d'Amplify, curseur de Contrast, curseur de By-descriptor tous visibles
   sur la page de l'outil, sidebar réduite à la navigation + chrome global.
 
+- [x] **T66 — Tableaux de résultats amplify/contrast/blends en
+  `st.dataframe`, ne s'empilent plus verticalement sur mobile (2026-08-20,
+  demande utilisateur, signalé après le déploiement réel sur téléphone)**
+
+  Signalé juste après T65 : "the table result of amplify and contrast does
+  not render as table on mobile phone." Root cause DIFFÉRENTE de T65 (pas
+  un input dans la sidebar cette fois) : `app._render_hop_rows` (partagé
+  par les tableaux de résultats amplify/contrast ET les tableaux de blend,
+  voir `_render_blends`) n'était PAS un vrai tableau Streamlit -- construit
+  à la main via un `st.columns(widths)` par ligne, choisi à l'origine
+  spécifiquement pour que la colonne Purpose affiche un `st.badge` coloré
+  (`_purpose_badge`, seul rendu par cellule qui s'adapte aux deux thèmes --
+  un `st.dataframe` ne peut pas rendre un widget arbitraire par cellule,
+  seulement du texte/nombre). Or Streamlit empile automatiquement les
+  `st.columns` à la verticale sous une certaine largeur d'écran
+  (comportement responsive natif de Streamlit lui-même, pas un bug de
+  cette app) -- sur mobile, chaque "ligne" de houblon redescendait donc en
+  une pile de lignes séparées (nom, puis score sur sa propre ligne, puis
+  purpose...), plus du tout un tableau, même si toute la donnée restait
+  techniquement présente en scrollant.
+
+  **Décision utilisateur explicite sur le compromis** : "Let's use plain
+  text for the tables, but keep the badges for the browse and other places
+  where we can use it." Implémenté :
+  - `_render_hop_rows` réécrit pour construire une liste de dicts (une clé
+    par colonne, "Hop" + les en-têtes de `columns`) et l'afficher via
+    `st.dataframe(..., width="stretch", hide_index=True)` -- un vrai
+    tableau HTML sur toutes les tailles d'écran (défilement horizontal
+    plutôt qu'empilement).
+  - La colonne Purpose devient un texte simple ("Aromatic"/"Inferred:
+    Bittering"/...) via un nouveau `_purpose_label` (factorisé hors de
+    `_purpose_badge`, même logique de libellé -- "Inferred: " en préfixe,
+    "Unknown" si `None` -- réutilisée par les deux).
+  - `_purpose_badge` lui-même inchangé, toujours utilisé (et testé) à
+    `_hop_detail_expanders` (Amplify/Contrast), `_browse`, et les
+    expanders de détail `by-descriptor` -- ces emplacements affichent UN
+    SEUL purpose à la fois (pas un tableau), le problème d'empilement
+    mobile ne s'y posait pas, aucune raison d'y perdre la couleur.
+
+  **Test mis à jour** : `test_amplify_results_table_includes_purpose_column`
+  vérifiait l'ancien rendu (`st.caption` "Purpose" + une signature `st.badge`
+  dans `at.markdown`) -- réécrit pour lire `at.dataframe[0].value` (un vrai
+  `pandas.DataFrame`, AppTest expose la donnée sous-jacente) et vérifier
+  la colonne "Purpose"/la valeur "Aromatic" directement. Aucun autre test
+  cassé (suite complète relancée, pas supposée).
+
+  Vérifié en direct dans le navigateur : tableau de résultats Amplify
+  ("mango") et ses 5 tailles de blend rendus en vrais tableaux bordés,
+  Purpose en texte clair y compris "Inferred: Bittering"/"Aromatic +
+  Bittering" ; badge coloré "Bittering" toujours présent et inchangé sur
+  la page Browse (Admiral). Suite pytest 204, toutes vertes.
+
 ## Sources de données additionnelles (recherche)
 
 - **Investigué à nouveau, PAS retenu — Hopsteiner (shop.hopsteiner.com)**.
