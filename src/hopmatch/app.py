@@ -148,6 +148,71 @@ def _db_path() -> str:
     return DEFAULT_DB
 
 
+# Bootstrap de la base sur un déploiement distant (Streamlit Community Cloud,
+# 2026-08-20, demande utilisateur) : le système de fichiers d'un conteneur
+# Community Cloud est éphémère -- reconstruit à chaque réveil après mise en
+# veille -- donc `aromahops.db` n'existe jamais localement au premier lancement
+# d'une session. Reconstruire la base en direct sur ce réveil (crawl BarthHaas/
+# Yakima/BeerMaverick + dump FooDB ~950 Mo) est exclu : trop lent pour un
+# réveil utilisateur (minutes, pas secondes), et un scraping systématique
+# répété depuis une IP cloud partagée risque un blocage/rate-limit côté
+# sources. À la place, la base est construite UNE FOIS en local (`hopmatch
+# build`/`crawl-*`/`ingest-*`, inchangé) puis hébergée à part, dans un dépôt
+# GitHub PRIVÉ (pas le dépôt de code, public) -- ce module ne fait que la
+# télécharger si elle est absente, via l'API Contents de GitHub (accepte un
+# jeton en repli sur `raw.githubusercontent.com`, qui ne sert pas les dépôts
+# privés). Secrets lus depuis `st.secrets` (jamais commités, configurés dans
+# le tableau de bord Streamlit Cloud) -- absents en développement local sans
+# `.streamlit/secrets.toml`, où `st.secrets` lève une exception plutôt que de
+# se comporter comme un dict vide (vérifié en direct) : capturé largement,
+# ce n'est pas une erreur, juste "pas de source distante configurée ici".
+_DB_SOURCE_URL_SECRET = "DB_DOWNLOAD_URL"
+_DB_SOURCE_TOKEN_SECRET = "DB_DOWNLOAD_TOKEN"
+
+
+@st.cache_resource
+def _fetch_remote_db(db_path: str) -> bool:
+    """Télécharge `aromahops.db` depuis la source distante configurée
+    (`st.secrets`) si elle existe et que le fichier est absent localement.
+    `@st.cache_resource` (pas juste le test `os.path.exists` fait par
+    l'appelant) : plusieurs sessions utilisateur peuvent atteindre `main()`
+    en parallèle sur le même conteneur fraîchement réveillé, avant que le
+    premier téléchargement ait fini d'écrire le fichier -- le cache partagé
+    de `st.cache_resource` garantit un seul téléchargement réel, les autres
+    sessions attendent son résultat plutôt que de déclencher chacune leur
+    propre écriture concurrente. Retourne `True` si la base est présente
+    après cet appel (déjà là, ou téléchargée avec succès), `False` sinon
+    (rien de configuré, ou échec réseau -- jamais d'exception qui casserait
+    le rendu de la page)."""
+    if os.path.exists(db_path):
+        return True
+    try:
+        url = st.secrets.get(_DB_SOURCE_URL_SECRET)
+        token = st.secrets.get(_DB_SOURCE_TOKEN_SECRET)
+    except Exception:
+        # Pas de secrets.toml du tout (dev local) -- `st.secrets.get(...)`
+        # lève dans ce cas précis au lieu de renvoyer None, vérifié en
+        # direct (`StreamlitSecretNotFoundError`, sous-classe d'OSError).
+        return False
+    if not url or not token:
+        return False
+    import urllib.error
+    import urllib.request
+    req = urllib.request.Request(url, headers={
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github.v3.raw",
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            data = resp.read()
+    except (urllib.error.URLError, urllib.error.HTTPError) as e:
+        st.error(f"Failed to download the database from the configured source: {e}")
+        return False
+    with open(db_path, "wb") as f:
+        f.write(data)
+    return True
+
+
 def _connection(db_path: str):
     # Pas de @st.cache_resource : sqlite3 refuse d'utiliser une connexion hors
     # de son thread d'origine, or Streamlit peut réexécuter le script dans un
@@ -1581,9 +1646,13 @@ def main():
 
     db_path = _db_path()
     if not os.path.exists(db_path):
+        _fetch_remote_db(db_path)
+    if not os.path.exists(db_path):
         st.error(f"Database not found: `{db_path}`. Build the database on the "
                  f"CLI side first (`hopmatch build`, or "
-                 f"`crawl-barthhaas`/`crawl-yakima`/`ingest-*`).")
+                 f"`crawl-barthhaas`/`crawl-yakima`/`ingest-*`), or configure "
+                 f"`{_DB_SOURCE_URL_SECRET}`/`{_DB_SOURCE_TOKEN_SECRET}` in "
+                 f"`st.secrets` to fetch a pre-built one.")
         st.stop()
     con = _connection(db_path)
 
@@ -1603,6 +1672,14 @@ def main():
     # compter sur la redirection.
     st.sidebar.page_link("https://github.com/quentinba/HopFinder",
                          label="GitHub", icon=":material/code:")
+    # Licence/contact visible dans l'app elle-même, pas seulement dans le
+    # README du dépôt (2026-08-20, demande utilisateur -- déploiement public
+    # sur des données en partie non-commerciales, FooDB/FlavorDB2 CC BY-NC-SA)
+    # : la personne concernée par un signalement de licence regarde l'app
+    # déployée, pas nécessairement le dépôt GitHub associé.
+    st.sidebar.caption(
+        "Code MIT · [data licenses](https://github.com/quentinba/HopFinder"
+        "#licences) · [quentin4313@gmail.com](mailto:quentin4313@gmail.com)")
 
     stats = _stats(con)
     modified = datetime.fromtimestamp(_db_version(db_path)).strftime("%Y-%m-%d %H:%M")

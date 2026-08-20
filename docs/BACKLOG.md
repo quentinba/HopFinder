@@ -1331,6 +1331,98 @@ l'implémentation ([ ] à faire, [x] fait — voir le commit associé).
   Suite pytest : 197 -> 200 tests (3 nouveaux : total_matches, 2x
   AROMA_WHEEL_DEFINITIONS), tous verts, aucune régression.
 
+- [x] **T64 — Déploiement Streamlit Community Cloud : bootstrap de la base
+  distante, dépendances de déploiement, contact licence dans l'app
+  (2026-08-20, demande utilisateur)**
+
+  Point de départ : l'utilisateur veut déployer sur Streamlit Community
+  Cloud (gratuit), sans que l'app re-télécharge/reconstruise la base à
+  chaque réveil, tout en réduisant l'exposition légale liée aux données
+  non-commerciales (FooDB/FlavorDB2, CC BY-NC-SA). Signalé au passage que
+  "these DB are build by the app on the fly" -- **vérifié FAUX** :
+  `app.py` est en lecture seule contre une base déjà construite (aucun
+  chemin de code ne construit/télécharge quoi que ce soit avant ce
+  ticket) ; sur un conteneur Community Cloud frais (système de fichiers
+  éphémère, reconstruit à chaque réveil après veille), l'app échouait
+  simplement avec "Database not found".
+
+  **Vérifié avant tout changement** : `git ls-files | grep -Ei
+  '\.(db|sqlite3?|json|csv|tsv|parquet)$'` renvoie déjà vide -- aucun
+  fichier de données n'est commité dans le dépôt public (`.gitignore`
+  exclut déjà `*.db`, `data/foodb_*/`, `data/*.csv`), donc rien à corriger
+  de ce côté.
+
+  **Mécanisme retenu** (voir aussi la réponse détaillée donnée à
+  l'utilisateur dans la conversation) : construire la base UNE FOIS en
+  local (pipeline CLI existant, inchangé), l'héberger à part dans un dépôt
+  GitHub PRIVÉ (pas le dépôt de code, public), et faire télécharger CE
+  seul fichier par l'app à son démarrage si absent -- jamais de
+  re-scraping BarthHaas/Yakima/BeerMaverick ni de re-téléchargement du
+  dump FooDB (~950 Mo) depuis le conteneur déployé (trop lent pour un
+  réveil utilisateur, et un scraping systématique répété depuis une IP
+  cloud partagée risquerait un blocage/rate-limit côté sources).
+
+  **Implémenté (`app.py`)** : `_fetch_remote_db(db_path)`, décoré
+  `@st.cache_resource` (pas juste le test `os.path.exists` de l'appelant :
+  plusieurs sessions utilisateur peuvent atteindre `main()` en parallèle
+  sur un conteneur fraîchement réveillé, le cache partagé garantit un seul
+  téléchargement réel). Lit `DB_DOWNLOAD_URL`/`DB_DOWNLOAD_TOKEN` depuis
+  `st.secrets` (jamais commités, configurés dans le tableau de bord
+  Streamlit Cloud), interroge l'API Contents de GitHub (`Authorization:
+  Bearer <token>`, `Accept: application/vnd.github.v3.raw` -- fonctionne
+  sur un dépôt privé, contrairement à `raw.githubusercontent.com`).
+  **Piège découvert en testant en direct** : `st.secrets.get(clé)` NE SE
+  COMPORTE PAS comme un dict -- sans AUCUN `secrets.toml` du tout (cas du
+  développement local), il **lève** `StreamlitSecretNotFoundError`
+  (sous-classe d'`OSError`) plutôt que de renvoyer `None` ; capturé
+  largement (`except Exception`) pour que l'absence de configuration
+  distante reste un simple "rien à faire ici", jamais une exception qui
+  casserait le rendu de la page. Câblé dans `main()` : tentative de
+  téléchargement seulement si le fichier est absent, message d'erreur
+  existant conservé en dernier repli (mentionne désormais aussi les deux
+  clés de secrets attendues).
+
+  **Dépendances de déploiement corrigées au passage** (nécessaires pour
+  que le déploiement fonctionne du tout, pas juste pour ce mécanisme) :
+  `pyproject.toml` `dependencies = []` (base) signifie qu'un simple `pip
+  install .` n'installe RIEN, pas même streamlit -- ajout d'un
+  `requirements.txt` à la racine (`-e .[ui]`, détecté automatiquement par
+  Streamlit Cloud) qui réutilise l'extra `[ui]` existant plutôt que de
+  dupliquer des bornes de version. `pillow` (utilisé directement par
+  `app.py` via `from PIL import Image` pour l'image de fond) manquait de
+  l'extra `[ui]` -- fonctionnait en local uniquement parce que `streamlit`
+  le tire lui-même en dépendance transitive (vérifié via `pip show
+  streamlit`), corrigé en le déclarant explicitement plutôt que de
+  compter sur cet effet de bord. Commentaire d'installation du README
+  ("cœur (numpy, scipy)") était stale -- aucun import numpy/scipy nulle
+  part dans `src/` (scipy servait à l'ancien `combine()`/NNLS, retiré le
+  2026-08-12) -- corrigé.
+
+  **Contact licence visible dans l'app elle-même**, pas seulement dans
+  `README.md`/`LICENSE` (déploiement public sur des données en partie
+  non-commerciales — la personne concernée par un signalement regarde
+  l'app déployée, pas nécessairement le dépôt GitHub associé) : caption
+  sous le lien GitHub de la sidebar, "Code MIT · data licenses ·
+  quentin4313@gmail.com" (les deux derniers en lien cliquable).
+
+  **Ce qui reste à faire côté utilisateur** (hors de portée de l'outil --
+  création de compte/dépôt/jeton) : créer le dépôt GitHub privé pour la
+  base, y pousser `aromahops.db`, générer un jeton d'accès personnel
+  fine-grained en lecture seule sur ce seul dépôt, déployer le dépôt de
+  code (public) sur Streamlit Community Cloud, et configurer
+  `DB_DOWNLOAD_URL`/`DB_DOWNLOAD_TOKEN` dans les secrets de l'app
+  déployée. Voir le message à l'utilisateur pour les étapes détaillées.
+
+  Vérifié en direct : (1) chemin d'échec -- base absente + secrets
+  configurés vers une URL invalide -- affiche l'erreur réseau proprement
+  puis retombe sur le message "Database not found" existant, aucune
+  exception non gérée ; (2) chemin normal (base déjà présente en local)
+  inchangé, vérifié sur la vraie base (189 houblons) ; (3) lien
+  GitHub + caption licence visibles en tête de sidebar. 4 tests unitaires
+  ajoutés pour `_fetch_remote_db` (déjà présent, secrets absents, secrets
+  partiels, téléchargement réussi avec un `urlopen` simulé). Suite pytest
+  200 -> 204, tous verts.
+
 ## Sources de données additionnelles (recherche)
 
 - **Investigué à nouveau, PAS retenu — Hopsteiner (shop.hopsteiner.com)**.

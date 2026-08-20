@@ -854,6 +854,31 @@ les tests. Vérifié en direct : `pyflakes` propre sur tout le projet ;
 navigateur réel + CLI affichent tous deux "10 of 122" sur `by-descriptor
 citrus`. Suite pytest 197 -> 200, toutes vertes.
 
+**T64 — Déploiement Streamlit Community Cloud (2026-08-20, demande
+utilisateur, voir `docs/BACKLOG.md` pour le détail complet).** Corrigé un
+malentendu au passage : `app.py` NE construit/télécharge PAS la base "à la
+volée" comme supposé -- lecture seule contre une base déjà là, échouait
+simplement sur un conteneur Community Cloud frais (système de fichiers
+éphémère). Vérifié avant tout changement : aucun fichier de données n'est
+commité dans le dépôt public (`.gitignore` déjà correct). Mécanisme
+retenu : base construite une fois en local, hébergée dans un dépôt GitHub
+PRIVÉ séparé, téléchargée par l'app à son démarrage si absente
+(`app._fetch_remote_db`, `@st.cache_resource`, API Contents GitHub via
+`st.secrets["DB_DOWNLOAD_URL"/"DB_DOWNLOAD_TOKEN"]`) -- jamais de
+re-scraping des sources depuis le conteneur déployé. Piège découvert en
+testant en direct : `st.secrets.get(clé)` LÈVE (pas de `secrets.toml` du
+tout) au lieu de renvoyer `None` comme un dict -- capturé largement.
+Dépendances de déploiement corrigées au passage (nécessaires, pas
+optionnelles) : `requirements.txt` ajouté à la racine (`pyproject.toml`
+seul n'installe rien, `dependencies = []`), `pillow` déclaré explicitement
+dans l'extra `[ui]` (fonctionnait avant seulement par effet de bord
+transitif de `streamlit`), commentaire README stale "numpy, scipy"
+corrigé (aucun import numpy/scipy dans `src/`, scipy servait à l'ancien
+`combine()` retiré le 2026-08-12). Contact licence ajouté DANS l'app
+(caption sidebar sous le lien GitHub), pas seulement dans
+`README.md`/`LICENSE`. 4 tests ajoutés pour `_fetch_remote_db`. Suite
+pytest 200 -> 204.
+
 Reste :
 1. Jointure FooDB/hop_composition au-delà des ~734 composés Flavornet si le vocabulaire
    s'élargit beaucoup (crawl Yakima déjà réel, plus d'aliments FooDB).

@@ -1,0 +1,8 @@
+# Utilisé par Streamlit Community Cloud pour installer les dépendances du
+# déploiement (détecté automatiquement à la racine du dépôt) -- réutilise
+# l'extra [ui] de pyproject.toml (streamlit/altair/pillow) plutôt que de
+# dupliquer des bornes de version ici. Le déploiement ne lance que la GUI
+# (src/hopmatch/app.py), jamais le CLI/crawl/ingest -- les extras [crawl]/
+# [foodb]/[dev] (requests, beautifulsoup4, pandas, pytest) ne sont pas
+# nécessaires sur le conteneur déployé.
+-e .[ui]

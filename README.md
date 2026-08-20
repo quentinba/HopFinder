@@ -57,10 +57,10 @@ git clone <ton-repo> hopmatch && cd hopmatch
 python3 --version           # nécessite 3.10+ — voir la note ci-dessous sinon
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -e .            # cœur (numpy, scipy)
+pip install -e .            # cœur (aucune dépendance externe — stdlib seule)
 pip install -e ".[crawl]"   # + requests, beautifulsoup4 (crawl BarthHaas/Yakima)
 pip install -e ".[foodb]"   # + pandas (audit/ingest FooDB)
-pip install -e ".[ui]"      # + streamlit (GUI navigateur)
+pip install -e ".[ui]"      # + streamlit, altair, pillow (GUI navigateur)
 pip install -e ".[dev]"     # + pytest
 ```
 
@@ -154,6 +154,29 @@ Le détail de ce que chaque mode affiche (roue d'arôme quantitative, associatio
 houblon↔houblon, composition détaillée…) et pourquoi il est construit ainsi est décrit
 dans [Interface graphique : détails d'implémentation](#interface-graphique--détails-dimplémentation),
 plus bas dans la partie méthodologie.
+
+### Déploiement (Streamlit Community Cloud)
+
+L'app se déploie gratuitement sur [Streamlit Community Cloud](https://streamlit.io/cloud),
+mais le système de fichiers d'un conteneur y est **éphémère** (reconstruit à chaque réveil
+après mise en veille) : re-scraper BarthHaas/Yakima/BeerMaverick et retélécharger le dump
+FooDB (~950 Mo) à chaque réveil serait trop lent et risquerait un blocage côté sources. À la
+place :
+
+1. Construire la base en local comme d'habitude (voir [Construire une base](#construire-une-base)).
+2. L'héberger dans un dépôt GitHub **privé** séparé du dépôt de code (pas de données non
+   commerciales dans le dépôt public).
+3. Dans les secrets de l'app déployée (tableau de bord Streamlit Cloud), configurer :
+   ```toml
+   DB_DOWNLOAD_URL = "https://api.github.com/repos/<user>/<repo-privé>/contents/aromahops.db"
+   DB_DOWNLOAD_TOKEN = "<jeton fine-grained, lecture seule, limité à ce dépôt>"
+   ```
+   L'app télécharge ce fichier une seule fois par réveil (`app._fetch_remote_db`,
+   `@st.cache_resource`) au lieu de le reconstruire. Fichier principal à indiquer à
+   Streamlit Cloud : `src/hopmatch/app.py`.
+
+Sans ces secrets configurés (développement local, base déjà présente), rien ne change —
+ce mécanisme ne se déclenche que si `aromahops.db` est absent.
 
 ---
 

@@ -99,6 +99,65 @@ def _app():
     return AppTest.from_file(APP_PATH, default_timeout=20)
 
 
+from hopmatch import app  # noqa: E402 -- après le skip conditionnel sur [ui], voir plus haut
+
+
+def test_fetch_remote_db_returns_true_if_already_present(tmp_path):
+    db = tmp_path / "already-there.db"
+    db.write_bytes(b"x")
+    assert app._fetch_remote_db(str(db)) is True
+
+
+def test_fetch_remote_db_returns_false_when_secrets_unavailable(tmp_path, monkeypatch):
+    # Reproduit `StreamlitSecretNotFoundError` (dev local sans secrets.toml,
+    # vérifié en direct que `st.secrets.get(...)` lève dans ce cas précis
+    # plutôt que de renvoyer None comme un dict normal) -- capturé largement
+    # dans `_fetch_remote_db`, jamais une exception qui casserait la page.
+    db = tmp_path / "missing-no-secrets.db"
+
+    class RaisingSecrets:
+        def get(self, key):
+            raise RuntimeError("no secrets.toml")
+
+    monkeypatch.setattr(app.st, "secrets", RaisingSecrets())
+    assert app._fetch_remote_db(str(db)) is False
+    assert not db.exists()
+
+
+def test_fetch_remote_db_returns_false_when_url_or_token_missing(tmp_path, monkeypatch):
+    db = tmp_path / "missing-partial-secrets.db"
+    monkeypatch.setattr(app.st, "secrets", {"DB_DOWNLOAD_URL": "https://example.invalid/db"})
+    assert app._fetch_remote_db(str(db)) is False
+    assert not db.exists()
+
+
+def test_fetch_remote_db_downloads_and_writes_file_on_success(tmp_path, monkeypatch):
+    db = tmp_path / "downloaded.db"
+    monkeypatch.setattr(app.st, "secrets", {
+        "DB_DOWNLOAD_URL": "https://example.invalid/repos/x/y/contents/aromahops.db",
+        "DB_DOWNLOAD_TOKEN": "fake-token",
+    })
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return b"fake-db-bytes"
+
+    def fake_urlopen(req, timeout=60):
+        assert req.get_header("Authorization") == "Bearer fake-token"
+        return FakeResponse()
+
+    import urllib.request
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    assert app._fetch_remote_db(str(db)) is True
+    assert db.read_bytes() == b"fake-db-bytes"
+
+
 def test_app_loads_with_no_exception_default_home_mode(toy_cwd):
     # "home" (Accueil) est le mode par défaut (premier de la liste du radio) —
     # front page résumant les 5 outils (T58 : "Compare Hops" ajouté le
