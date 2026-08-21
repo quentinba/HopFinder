@@ -135,6 +135,10 @@ _TOOL_SUMMARIES = [
 # un `git log` en direct exigerait aussi que `.git` soit présent dans le
 # conteneur déployé, ce qui n'est pas garanti.
 _RECENT_UPDATES = [
+    ("2026-08-21", "Compound odor descriptors cross-checked against Scott "
+                   "Janish's The New IPA flavor-category table; missing "
+                   "categories added and clearly cited — e.g. thiols now "
+                   "shows \"berry & currant\", previously blank."),
     ("2026-08-21", "Flavornet odor descriptors ('Smells like') now also shown "
                    "in the compound tables on Browse, and in the per-hop "
                    "details under Amplify/Contrast/HopFinder from Descriptors "

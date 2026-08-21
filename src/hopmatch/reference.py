@@ -48,6 +48,55 @@ ALIASES: dict[str, str] = {
     "3-mercaptohexanol": "thiols", "4mmp": "thiols",
 }
 
+# Catégories aromatiques par composé, croisées à la main contre le tableau
+# "Compound Descriptions" de Scott Janish, The New IPA (p.22 -- image fournie
+# par l'utilisateur, 2026-08-21, T73 : "double check that the description of
+# molecules is completed by this figure... if some smell or taste is missing
+# from the infobox of each compound, add them"). Source DISTINCTE de
+# Flavornet (livre de brassage, pas une mesure GC-O) -- jamais fusionnée
+# silencieusement : `matching.compound_descriptors` l'ajoute à part, citée
+# ("Janish, The New IPA"), uniquement quand la catégorie n'est pas DÉJÀ
+# représentée par un mot Flavornet existant (même racine -- ex. Flavornet
+# "wood" == "Woody" du livre, pas de doublon ajouté).
+#
+# Vérifié composé par composé contre le tableau du livre, restreint aux
+# composés RÉELLEMENT mesurés dans `hop_composition` actuellement (les
+# molécules `MOLECULES` sans CID ou jamais présentes dans les données
+# houblon réelles, ex. limonene/terpinolene/citronellol/geranial/methyl-
+# chavicol, n'ont pas d'entrée ici -- ajouter une catégorie qui ne
+# s'affichera jamais serait une entrée morte) :
+#   - geraniol -> Floral (le livre liste "geraniol" littéralement)
+#   - linalool -> Citrus (idem, "linalool" littéral)
+#   - myrcene -> Herbal (idem, "myrcene" littéral)
+#   - humulene, beta-pinene, farnesene -> Woody (le livre liste "humulene",
+#     "β-pinene", "farnesene" littéralement sous Woody)
+#   - caryophyllene -> Woody ET Spicy (le livre liste "β-caryophyllene" dans
+#     LES DEUX catégories -- déjà entièrement couvert par Flavornet "wood,
+#     spice" dans notre base, aucun ajout visible n'en résulte, mais gardé
+#     ici comme fait de référence exact, pas une supposition)
+#   - thiols -> Berry & Currant (le livre liste "4-mercapto-4-methylpentan-
+#     2-one", soit 4MMP -- déjà agrégé sous "thiols" par `ALIASES` ci-dessus,
+#     donc l'association s'applique de plein droit à notre composé agrégé ;
+#     seul cas où Flavornet ne résout RIEN pour ce composé -- voir
+#     `compound_descriptors` -- donc le premier et unique descripteur visible)
+# Explicitement PAS ajoutés faute de correspondance vérifiable dans le
+# tableau du livre : "isobutyrate"/"ketones" (composés agrégés BarthHaas,
+# aucune entrée nominative dans le livre -- leur assigner "raspberry ketone"
+# / Berry & Currant serait une supposition non vérifiable sur QUELLE cétone
+# précise BarthHaas mesure réellement, même principe que le refus déjà
+# documenté de deviner un CID PubChem) ; "selinene" (absent du tableau du
+# livre, aucune des 12 catégories ne le cite).
+JANISH_COMPOUND_CATEGORIES: dict[str, list[str]] = {
+    "geraniol": ["floral"],
+    "linalool": ["citrus"],
+    "myrcene": ["herbal"],
+    "humulene": ["woody"],
+    "beta-pinene": ["woody"],
+    "farnesene": ["woody"],
+    "caryophyllene": ["woody", "spicy"],
+    "thiols": ["berry & currant"],
+}
+
 # Option --biotransform (redirection géraniol->citronellol / linalol->
 # alpha-terpinéol via une table BIOTRANSFORMATIONS) IMPLÉMENTÉE PUIS RETIRÉE
 # le 2026-08-12 (décision utilisateur). La science derrière restait solide

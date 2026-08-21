@@ -222,24 +222,44 @@ def compound_descriptors(con, compounds: list[str]) -> dict[str, str]:
     que `ingest._canonical_compound`/`_build_cas_to_hop_name` à
     l'ingestion, jamais un rapprochement par nom de chaîne.
 
-    Composé absent de `reference.MOLECULES` (ex. "thiols", "isobutyrate",
-    "ketones" -- agrégations/composés non individuellement curés), CID
-    inconnu, ou CAS sans entrée Flavornet -> ABSENT du dict retourné
-    (jamais une entrée vide/inventée -- vérifié en direct sur les 11
-    composés du barplot "Detailed composition" de Compare Hops : 8/11
-    résolus, thiols/isobutyrate/ketones correctement absents)."""
+    Composé absent de `reference.MOLECULES` (ex. "isobutyrate", "ketones"
+    -- agrégations non individuellement curées), CID inconnu, ou CAS sans
+    entrée Flavornet -> Flavornet n'apporte rien pour ce composé (pas une
+    entrée vide/inventée), mais voir ci-dessous pour un second repli.
+
+    **Complété par `reference.JANISH_COMPOUND_CATEGORIES`** (T73,
+    2026-08-21, demande utilisateur explicite : croiser chaque composé
+    contre le tableau "Compound Descriptions" de Scott Janish, The New IPA,
+    et ajouter ce qui manque). Source DISTINCTE de Flavornet (livre de
+    brassage, pas une mesure GC-O) -- jamais fusionnée sans attribution :
+    ajoutée à la fin de la chaîne, séparée par "; ", explicitement citée
+    "(Janish, The New IPA)". N'ajoute une catégorie QUE si elle n'est pas
+    déjà représentée par un mot Flavornet existant (comparaison par racine
+    de 4 lettres, ex. "wood" (Flavornet) couvre déjà "Woody" (livre) --
+    évite un doublon plutôt qu'une simple vérification d'égalité stricte,
+    qui laisserait passer des quasi-synonymes). Seul répondant de dernier
+    recours pour un composé sans AUCUNE résolution Flavornet (ex. "thiols",
+    qui n'a pas de CID propre -- voir `reference.ALIASES` -- et qui obtient
+    ici sa toute première étiquette, "berry & currant", via le composé
+    4MMP explicitement listé dans cette catégorie par le livre)."""
     out = {}
     for c in compounds:
+        parts = []
         cid = reference.MOLECULES.get(c, (None, None, None))[2]
-        if not cid:
-            continue
-        cas_row = con.execute("SELECT cas FROM pubchem_cids WHERE cid=?", (cid,)).fetchone()
-        if not cas_row:
-            continue
-        desc_row = con.execute(
-            "SELECT descriptors FROM flavornet_compounds WHERE cas=?", (cas_row[0],)).fetchone()
-        if desc_row and desc_row[0]:
-            out[c] = desc_row[0]
+        if cid:
+            cas_row = con.execute("SELECT cas FROM pubchem_cids WHERE cid=?", (cid,)).fetchone()
+            if cas_row:
+                desc_row = con.execute(
+                    "SELECT descriptors FROM flavornet_compounds WHERE cas=?", (cas_row[0],)).fetchone()
+                if desc_row and desc_row[0]:
+                    parts.append(desc_row[0])
+        existing = parts[0].lower() if parts else ""
+        missing_categories = [cat for cat in reference.JANISH_COMPOUND_CATEGORIES.get(c, [])
+                              if cat[:4].lower() not in existing]
+        if missing_categories:
+            parts.append(", ".join(missing_categories) + " (Janish, The New IPA)")
+        if parts:
+            out[c] = "; ".join(parts)
     return out
 
 

@@ -196,36 +196,68 @@ def test_compound_descriptors_resolves_via_cid_cas_chain(db):
     # reference.MOLECULES -> CAS pubchem_cids -> descripteurs
     # flavornet_compounds), pas par nom de chaîne -- reproduit ici avec le
     # vrai CID myrcène (31253, reference.MOLECULES) sur un CAS de test.
+    # "herbal (Janish, The New IPA)" ajouté en plus (T73) : "herb" absent de
+    # "balsamic, must, spice" -> pas déjà couvert, catégorie ajoutée et citée.
     db.executemany("INSERT INTO pubchem_cids VALUES (?,?)", [("123-35-3", 31253)])
     db.executemany("INSERT INTO flavornet_compounds VALUES (?,?,?)",
                    [("123-35-3", "myrcene", "balsamic, must, spice")])
     db.commit()
     try:
-        # myrcene résolu ; thiols absent de reference.MOLECULES (agrégation,
-        # pas une molécule individuelle) -> jamais résolu, quelle que soit
-        # la base ; "nonexistent" absent du vocabulaire houblon.
-        assert matching.compound_descriptors(db, ["myrcene", "thiols", "nonexistent"]) == {
-            "myrcene": "balsamic, must, spice"}
+        # "nonexistent" absent du vocabulaire houblon -> absent du résultat.
+        assert matching.compound_descriptors(db, ["myrcene", "nonexistent"]) == {
+            "myrcene": "balsamic, must, spice; herbal (Janish, The New IPA)"}
     finally:
         db.execute("DELETE FROM pubchem_cids WHERE cas='123-35-3'")
         db.execute("DELETE FROM flavornet_compounds WHERE cas='123-35-3'")
         db.commit()
 
-def test_compound_descriptors_absent_without_cas_resolution(db):
-    # CID connu (reference.MOLECULES) mais aucune ligne pubchem_cids pour ce
-    # CID (resolve_pubchem_cids pas lancé/CAS introuvable) -> absent, pas
-    # d'erreur ni de valeur inventée.
-    assert matching.compound_descriptors(db, ["myrcene"]) == {}
+def test_compound_descriptors_falls_back_to_janish_without_cas_resolution(db):
+    # T73 (2026-08-21, "The New IPA" de Scott Janish, p.22) : CID connu
+    # (reference.MOLECULES) mais aucune ligne pubchem_cids pour ce CID
+    # (resolve_pubchem_cids pas lancé/CAS introuvable) -> Flavornet ne
+    # répond rien, mais reference.JANISH_COMPOUND_CATEGORIES a une entrée
+    # pour myrcene ("herbal") -> repli, toujours cité explicitement, jamais
+    # confondu avec une donnée Flavornet.
+    assert matching.compound_descriptors(db, ["myrcene"]) == {
+        "myrcene": "herbal (Janish, The New IPA)"}
 
-def test_compound_descriptors_absent_without_flavornet_entry(db):
-    # CAS résolu (pubchem_cids) mais aucune entrée flavornet_compounds pour
-    # ce CAS précis -> absent.
+def test_compound_descriptors_absent_without_any_resolution(db):
+    # selinene : CID connu mais ni CAS résolu (pubchem_cids vide) ni entrée
+    # reference.JANISH_COMPOUND_CATEGORIES (absent du tableau du livre,
+    # vérifié en direct sur les 12 catégories) -> absent des deux sources,
+    # pas de valeur inventée.
+    assert matching.compound_descriptors(db, ["selinene"]) == {}
+
+def test_compound_descriptors_thiols_resolves_only_via_janish(db):
+    # T73 : thiols n'a pas de CID propre (agrégation, reference.ALIASES) --
+    # ne peut donc JAMAIS passer par Flavornet, quelle que soit la base.
+    # reference.JANISH_COMPOUND_CATEGORIES a une entrée sourcée sur le 4MMP
+    # (composé listé "Berry & Currant" dans le livre, déjà agrégé sous
+    # "thiols" par ALIASES) -- seule résolution possible pour ce composé,
+    # jamais silencieusement absent.
+    assert matching.compound_descriptors(db, ["thiols"]) == {
+        "thiols": "berry & currant (Janish, The New IPA)"}
+
+def test_compound_descriptors_dedups_janish_category_already_covered(db):
+    # T73 : si le descripteur Flavornet couvre DÉJÀ la catégorie du livre
+    # (comparaison par racine de 4 lettres -- "herb"), la catégorie Janish
+    # n'est PAS ajoutée en double -- même mécanisme vérifié en production
+    # sur caryophyllene/humulene/farnesene (déjà couverts par "wood"/
+    # "spice" Flavornet, aucun ajout visible). "FIXTURE-herbXX" : chaîne
+    # délibérément synthétique/imprononçable (PAS une vraie donnée
+    # Flavornet, pour ne jamais pouvoir être confondue avec une vraie
+    # valeur produit -- signalé par l'utilisateur sur un choix précédent,
+    # "herbal, minty", qui pouvait à tort ressembler à une donnée réelle),
+    # ne contient QUE la racine "herb" nécessaire pour exercer le dédoublonnage.
     db.executemany("INSERT INTO pubchem_cids VALUES (?,?)", [("123-35-3", 31253)])
+    db.executemany("INSERT INTO flavornet_compounds VALUES (?,?,?)",
+                   [("123-35-3", "myrcene", "FIXTURE-herbXX")])
     db.commit()
     try:
-        assert matching.compound_descriptors(db, ["myrcene"]) == {}
+        assert matching.compound_descriptors(db, ["myrcene"]) == {"myrcene": "FIXTURE-herbXX"}
     finally:
         db.execute("DELETE FROM pubchem_cids WHERE cas='123-35-3'")
+        db.execute("DELETE FROM flavornet_compounds WHERE cas='123-35-3'")
         db.commit()
 
 def test_amplify_ranks(db):

@@ -1164,6 +1164,57 @@ must, spice" identique aux trois endroits. Aucun test AppTest ajouté
 unitairement en T71 ; `_all_compound_descriptors` ne fait qu'agréger
 l'univers de composés et déléguer).
 
+**T73 — Descripteurs de composé complétés contre Scott Janish, The New IPA
+(2026-08-21, demande utilisateur explicite, photo du tableau "Compound
+Descriptions" p.22 fournie).** "Double check that the description of
+molecules is completed by this figure... if some smell or taste is missing
+from the infobox of each compound, add them." `reference.
+JANISH_COMPOUND_CATEGORIES` (nouveau) : catégorie(s) par composé, croisées
+À LA MAIN contre les 12 catégories du tableau du livre, restreintes aux
+composés RÉELLEMENT mesurés dans `hop_composition` (pas d'entrée pour les
+molécules `MOLECULES` jamais présentes dans les données houblon réelles,
+ex. limonene/citronellol -- une entrée qui ne s'afficherait jamais serait
+morte). Résultat de la vérification composé par composé (voir le
+commentaire de `JANISH_COMPOUND_CATEGORIES` pour le détail complet) :
+geraniol->Floral, linalool->Citrus, myrcene->Herbal, humulene/beta-pinene/
+farnesene->Woody, caryophyllene->Woody+Spicy, thiols->Berry & Currant (via
+le composé 4-mercapto-4-methylpentan-2-one/4MMP listé dans cette catégorie
+par le livre -- déjà agrégé sous "thiols" par `reference.ALIASES`, donc
+l'association s'applique de plein droit). Explicitement PAS mappés faute de
+correspondance vérifiable : isobutyrate/ketones (composés agrégés BarthHaas
+sans entrée nominative dans le livre -- leur assigner "raspberry ketone" au
+hasard serait une supposition non vérifiable sur QUELLE cétone précise est
+mesurée, même principe que le refus déjà documenté de deviner un CID
+PubChem) ; selinene (absent des 12 catégories du tableau).
+
+`matching.compound_descriptors` complété (pas remplacé) : la catégorie
+Janish n'est ajoutée QUE si elle n'est pas déjà représentée par un mot
+Flavornet existant (comparaison par racine de 4 lettres, ex. Flavornet
+"wood" couvre déjà "Woody" -- pas de doublon), et TOUJOURS distinctement
+citée `"(Janish, The New IPA)"` dans la chaîne retournée, jamais fusionnée
+sans attribution à la mesure GC-O Flavornet. Vérifié en direct sur les 11
+composés réels : myrcene/linalool/geraniol/beta-pinene gagnent une
+catégorie manquante (ex. myrcene : "balsamic, must, spice; herbal (Janish,
+The New IPA)") ; humulene/caryophyllene/farnesene/selinene inchangés (déjà
+couverts, ou absents du livre) ; **thiols, qui n'avait AUCUNE résolution
+Flavornet possible (pas de CID propre) et affichait "—" partout, obtient
+désormais sa première étiquette : "berry & currant (Janish, The New IPA)"**
+-- seul repli utile de ce ticket qui comble un vrai trou plutôt qu'un
+doublon. Vérifié en direct dans le navigateur (Compare Hops, Citra) :
+tooltip myrcène et thiols corrects avec citation visible.
+
+5 tests réécrits/ajoutés dans `test_matching.py` (résolution combinée
+Flavornet+Janish, repli Janish seul sans CAS, absence totale sans aucune
+des deux sources, thiols via Janish seul, dédoublonnage quand déjà couvert).
+**Chaîne de test corrigée en cours de route (signalé par l'utilisateur en
+direct)** : le premier jet utilisait `"herbal, minty"` comme donnée
+Flavornet FACTICE pour tester le dédoublonnage -- l'utilisateur a
+légitimement demandé si "minty" venait de l'image (non, jamais) ; remplacée
+par `"FIXTURE-herbXX"`, délibérément imprononçable/non-anglais pour ne
+jamais pouvoir être confondue avec une vraie donnée produit, même
+principe que documenté ailleurs pour ne jamais laisser une valeur de test
+ressembler à une donnée réelle. Suite pytest 214 -> 216.
+
 Reste :
 1. Jointure FooDB/hop_composition au-delà des ~734 composés Flavornet si le vocabulaire
    s'élargit beaucoup (crawl Yakima déjà réel, plus d'aliments FooDB).
