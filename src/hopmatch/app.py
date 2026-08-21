@@ -135,6 +135,10 @@ _TOOL_SUMMARIES = [
 # un `git log` en direct exigerait aussi que `.git` soit présent dans le
 # conteneur déployé, ce qui n'est pas garanti.
 _RECENT_UPDATES = [
+    ("2026-08-21", "Flavornet odor descriptors ('Smells like') now also shown "
+                   "in the compound tables on Browse, and in the per-hop "
+                   "details under Amplify/Contrast/HopFinder from Descriptors "
+                   "— not just the Compare Hops chart."),
     ("2026-08-21", "Compare Hops: hover a compound (or its bar) in the "
                    "detailed composition chart for its Flavornet odor "
                    "descriptors — e.g. myrcene doesn't automatically mean "
@@ -602,6 +606,22 @@ def _render_key_stats(hcomp: dict) -> None:
     cols[3].metric("Total oil (ml/100g)", f"{oil:.1f}" if oil is not None else "—")
 
 
+def _all_compound_descriptors(con, comp: dict) -> dict[str, str]:
+    """Descripteurs Flavornet par composé (T72, 2026-08-21, demande
+    utilisateur explicite : le tooltip "Smells like" ajouté sur le barplot
+    Compare Hops (T71) doit AUSSI apparaître dans les tableaux de
+    composition texte -- Browse, `_hop_detail_expanders`
+    (amplify/contrast), `_by_descriptor` -- pas seulement le barplot).
+    Calculé UNE FOIS par rendu de page sur TOUS les composés présents dans
+    `comp` (la table compound -> descripteurs ne dépend pas du houblon
+    affiché) plutôt qu'une requête par houblon dans chaque boucle
+    d'expander. `matching.compound_descriptors` réutilisé tel quel (même
+    jointure CID PubChem -> CAS -> `flavornet_compounds`, voir sa
+    docstring) -- pas une deuxième implémentation."""
+    all_compounds = sorted({c for h in comp.values() for c in h if c not in matching.NON_AROMA_DISPLAY})
+    return matching.compound_descriptors(con, all_compounds)
+
+
 def _hop_detail_expanders(con, hops: dict, comp: dict, hop_desc: dict, rows: list[dict]) -> None:
     """Détail par houblon en expander, sous le tableau de résultats.
     Remplace l'ancien bouton de navigation directe vers Browse hop
@@ -619,8 +639,12 @@ def _hop_detail_expanders(con, hops: dict, comp: dict, hop_desc: dict, rows: lis
     page") : purpose, sources, descripteurs, roue d'arôme quantitative
     (identique à `_browse`, via `con` — d'où le nouveau paramètre) et
     composition — même contenu que la page Browse, en sous-section plutôt
-    que par navigation."""
+    que par navigation.
+
+    Colonne "Smells like" (T72, 2026-08-21) : voir `_all_compound_descriptors`
+    -- calculée UNE FOIS ici (pas par houblon dans la boucle)."""
     st.subheader("Hop details")
+    compound_smells = _all_compound_descriptors(con, comp)
     for row in rows:
         v = row["variety"]
         with st.expander(f"{row['name']} — {row['caption']}"):
@@ -639,7 +663,8 @@ def _hop_detail_expanders(con, hops: dict, comp: dict, hop_desc: dict, rows: lis
             hcomp = comp.get(v, {})
             crows = sorted(
                 ({"Compound": c, "Value": round(cv["mid"], 3), "Unit": cv["unit"],
-                  "Sources": ", ".join(cv["sources"])}
+                  "Sources": ", ".join(cv["sources"]),
+                  "Smells like": compound_smells.get(c, "—")}
                  for c, cv in hcomp.items()
                  if c not in matching.NON_AROMA_DISPLAY and cv["mid"] is not None),
                 key=lambda r: -r["Value"])
@@ -1077,9 +1102,13 @@ def _browse(con):
                    "only, variety not covered, or corrupted YCH entry as "
                    "with Admiral).")
 
+    # "Smells like" (T72, 2026-08-21, demande utilisateur explicite : le
+    # tooltip Flavornet ajouté sur le barplot Compare Hops (T71) doit AUSSI
+    # apparaître ici -- voir `_all_compound_descriptors`).
+    compound_smells = _all_compound_descriptors(con, comp)
     rows = sorted(
         ({"Compound": c, "Value": round(v["mid"], 3), "Unit": v["unit"],
-          "Sources": ", ".join(v["sources"])}
+          "Sources": ", ".join(v["sources"]), "Smells like": compound_smells.get(c, "—")}
          for c, v in hcomp.items() if c not in matching.NON_AROMA_DISPLAY and v["mid"] is not None),
         key=lambda r: -r["Value"])
     if rows:
@@ -1388,6 +1417,7 @@ def _by_descriptor(con):
                   "descriptors — raise \"Number of hops shown\" above to see more.")
 
     _, comp, _, _ = matching.load(con)
+    compound_smells = _all_compound_descriptors(con, comp)
 
     heatmap = _descriptor_heatmap(ranked, intensity_vocab)
     if heatmap is not None:
@@ -1441,7 +1471,8 @@ def _by_descriptor(con):
             if h["compounds"]:
                 st.dataframe(
                     [{"Compound": c["compound"], "Value": round(c["mid"], 2),
-                      "Unit": c["unit"], "Sources": ", ".join(c["sources"])}
+                      "Unit": c["unit"], "Sources": ", ".join(c["sources"]),
+                      "Smells like": compound_smells.get(c["compound"], "—")}
                      for c in h["compounds"][:8]],
                     width="stretch", hide_index=True)
 

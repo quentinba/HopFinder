@@ -1137,6 +1137,33 @@ des composés odeur-actifs Flavornet. 3 tests ajoutés (`test_matching.py`,
 chaîne CID->CAS->descripteurs, absence si CAS non résolu, absence si pas
 d'entrée Flavornet). Suite pytest 211 -> 214.
 
+**T72 — "Smells like" étendu aux tableaux de composition texte (2026-08-21,
+demande utilisateur explicite, suite directe de T71) : "this was implemented
+when mousovering a bar of the barplot but the information should be also in
+the compounds table of the browse results".** T71 n'avait câblé
+`matching.compound_descriptors` que dans le barplot Compare Hops -- or le
+même défaut (composé "nu", sans indication de ce qu'il sent) existe dans
+TROIS tableaux de composition texte distincts, chacun déjà documenté comme
+devant reproduire le même contenu que Browse : `app._browse` (table
+principale), `app._hop_detail_expanders` (expanders sous les résultats
+amplify/contrast, T39/T53 -- "same content than what is on the browse
+page") et `app._by_descriptor` (expanders sous la heatmap, implémentation
+séparée avec sa propre structure `h["compounds"]`). Plutôt que de câbler
+`compound_descriptors` séparément à chaque site (et refaire des requêtes
+CID->CAS->Flavornet par houblon dans une boucle), `app._all_compound_
+descriptors(con, comp)` calcule le dict compound->descripteurs UNE SEULE
+FOIS par rendu de page sur l'univers complet des composés présents dans
+`comp` (indépendant du houblon affiché), réutilisé par les 3 sites avec
+une colonne "Smells like" ajoutée à chacun (valeur "—" si non résolu,
+même convention que les colonnes de score des couches calculées T67/T68).
+Vérifié en direct dans le navigateur sur les 3 emplacements (Browse/
+Admiral, Amplify "mango" détail Sabro, By-descriptor "citrus" détail
+Sorachi Ace) : colonne présente et cohérente partout, myrcene -> "balsamic,
+must, spice" identique aux trois endroits. Aucun test AppTest ajouté
+(wrapper trivial autour de `matching.compound_descriptors`, déjà testé
+unitairement en T71 ; `_all_compound_descriptors` ne fait qu'agréger
+l'univers de composés et déléguer).
+
 Reste :
 1. Jointure FooDB/hop_composition au-delà des ~734 composés Flavornet si le vocabulaire
    s'élargit beaucoup (crawl Yakima déjà réel, plus d'aliments FooDB).
