@@ -204,6 +204,45 @@ def hop_aroma_intensity(con, variety: str) -> dict[str, float]:
         "SELECT descriptor, intensity FROM hop_aroma_intensity WHERE variety=?", (variety,))}
 
 
+def compound_descriptors(con, compounds: list[str]) -> dict[str, str]:
+    """{composé (vocabulaire houblon, ex. "myrcene") : descripteurs odeur
+    Flavornet (GC-O, anglais, ex. "balsamic, must, spice")} pour un tooltip
+    par composé (T70, 2026-08-21, demande utilisateur explicite -- "myrcene
+    est une chaîne nue... rien ne dit qu'elle couvre vert, herbacé,
+    résineux et pin", même pattern que les tooltips de la roue d'arôme
+    Yakima sur `AROMA_WHEEL_DEFINITIONS`).
+
+    Jointure par IDENTITÉ STRUCTURALE (CID PubChem -> CAS -> `flavornet_
+    compounds`), PAS par nom : `reference.MOLECULES[c][2]` donne le CID
+    PubChem du composé (curé, ~14 molécules d'huile de houblon courantes) ;
+    `pubchem_cids` (déjà peuplée par `ingest.resolve_pubchem_cids`, table
+    cas<->cid) résout ce CID vers son CAS ; `flavornet_compounds` (734
+    composés odeur-actifs GC-O, `ingest.ingest_flavornet`) donne enfin les
+    descripteurs pour ce CAS -- même principe d'identité chimique (CID/CAS)
+    que `ingest._canonical_compound`/`_build_cas_to_hop_name` à
+    l'ingestion, jamais un rapprochement par nom de chaîne.
+
+    Composé absent de `reference.MOLECULES` (ex. "thiols", "isobutyrate",
+    "ketones" -- agrégations/composés non individuellement curés), CID
+    inconnu, ou CAS sans entrée Flavornet -> ABSENT du dict retourné
+    (jamais une entrée vide/inventée -- vérifié en direct sur les 11
+    composés du barplot "Detailed composition" de Compare Hops : 8/11
+    résolus, thiols/isobutyrate/ketones correctement absents)."""
+    out = {}
+    for c in compounds:
+        cid = reference.MOLECULES.get(c, (None, None, None))[2]
+        if not cid:
+            continue
+        cas_row = con.execute("SELECT cas FROM pubchem_cids WHERE cid=?", (cid,)).fetchone()
+        if not cas_row:
+            continue
+        desc_row = con.execute(
+            "SELECT descriptors FROM flavornet_compounds WHERE cas=?", (cas_row[0],)).fetchone()
+        if desc_row and desc_row[0]:
+            out[c] = desc_row[0]
+    return out
+
+
 def hop_similar_varieties(con, variety: str) -> list[str]:
     """Variétés similaires/substituts curées par Yakima (T25 backlog,
     `hop_similar`) — toujours une `variety` de notre propre catalogue (résolue

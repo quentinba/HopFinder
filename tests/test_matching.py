@@ -191,6 +191,43 @@ def test_similar_hops_combines_layers_averaging_only_available_ones(db):
         db.execute("DELETE FROM hop_aroma_intensity WHERE variety IN ('citra','mosaic')")
         db.commit()
 
+def test_compound_descriptors_resolves_via_cid_cas_chain(db):
+    # T70 (2026-08-21) : jointure par IDENTITÉ STRUCTURALE (CID PubChem
+    # reference.MOLECULES -> CAS pubchem_cids -> descripteurs
+    # flavornet_compounds), pas par nom de chaîne -- reproduit ici avec le
+    # vrai CID myrcène (31253, reference.MOLECULES) sur un CAS de test.
+    db.executemany("INSERT INTO pubchem_cids VALUES (?,?)", [("123-35-3", 31253)])
+    db.executemany("INSERT INTO flavornet_compounds VALUES (?,?,?)",
+                   [("123-35-3", "myrcene", "balsamic, must, spice")])
+    db.commit()
+    try:
+        # myrcene résolu ; thiols absent de reference.MOLECULES (agrégation,
+        # pas une molécule individuelle) -> jamais résolu, quelle que soit
+        # la base ; "nonexistent" absent du vocabulaire houblon.
+        assert matching.compound_descriptors(db, ["myrcene", "thiols", "nonexistent"]) == {
+            "myrcene": "balsamic, must, spice"}
+    finally:
+        db.execute("DELETE FROM pubchem_cids WHERE cas='123-35-3'")
+        db.execute("DELETE FROM flavornet_compounds WHERE cas='123-35-3'")
+        db.commit()
+
+def test_compound_descriptors_absent_without_cas_resolution(db):
+    # CID connu (reference.MOLECULES) mais aucune ligne pubchem_cids pour ce
+    # CID (resolve_pubchem_cids pas lancé/CAS introuvable) -> absent, pas
+    # d'erreur ni de valeur inventée.
+    assert matching.compound_descriptors(db, ["myrcene"]) == {}
+
+def test_compound_descriptors_absent_without_flavornet_entry(db):
+    # CAS résolu (pubchem_cids) mais aucune entrée flavornet_compounds pour
+    # ce CAS précis -> absent.
+    db.executemany("INSERT INTO pubchem_cids VALUES (?,?)", [("123-35-3", 31253)])
+    db.commit()
+    try:
+        assert matching.compound_descriptors(db, ["myrcene"]) == {}
+    finally:
+        db.execute("DELETE FROM pubchem_cids WHERE cas='123-35-3'")
+        db.commit()
+
 def test_amplify_ranks(db):
     r = matching.amplify(db, "_citrus")
     assert r["ranked"], "au moins un houblon"

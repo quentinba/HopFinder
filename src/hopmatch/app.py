@@ -135,6 +135,10 @@ _TOOL_SUMMARIES = [
 # un `git log` en direct exigerait aussi que `.git` soit présent dans le
 # conteneur déployé, ce qui n'est pas garanti.
 _RECENT_UPDATES = [
+    ("2026-08-21", "Compare Hops: hover a compound (or its bar) in the "
+                   "detailed composition chart for its Flavornet odor "
+                   "descriptors — e.g. myrcene doesn't automatically mean "
+                   "\"green\", see what it actually smells like."),
     ("2026-08-21", "Compare Hops: toggle to show the detailed composition "
                    "barplot as an absolute amount (ml/100g) instead of % of "
                    "oil, so two hops can't silently swap rank just because "
@@ -1542,7 +1546,8 @@ _COMPARE_LABEL_ANGLE = -45
 
 def _compare_dual_axis_barplot(rows: list[dict], primary_fields: list[str], primary_title: str,
                                secondary_fields: list[str], secondary_title: str,
-                               colors: dict[str, str]):
+                               colors: dict[str, str],
+                               descriptors: dict[str, str] | None = None):
     """Barplot groupé par houblon (`xOffset`) sur un axe "Field" catégoriel
     partagé, à DOUBLE ÉCHELLE Y : `primary_fields` sur l'axe gauche,
     `secondary_fields` sur l'axe droit (2026-08-19, T58 -- demande
@@ -1578,9 +1583,31 @@ def _compare_dual_axis_barplot(rows: list[dict], primary_fields: list[str], prim
     `labelBaseline="middle"` : sans ça, un label pivoté reste ancré en son
     CENTRE plutôt qu'en son extrémité proche du tick, donc visuellement
     désaligné de la graduation qu'il annote (piège Vega-Lite connu sur les
-    labels pivotés)."""
+    labels pivotés).
+
+    `descriptors` (T70, 2026-08-21, demande utilisateur explicite -- "sur le
+    barplot, myrcene est une chaîne nue... un tooltip sur chaque label de
+    composé", `matching.compound_descriptors`) : optionnel, {Field:
+    descripteurs Flavornet}. Deux effets si fourni : (1) ajouté à la fin du
+    tooltip existant des BARRES elles-mêmes ("—" si ce composé précis n'a
+    pas d'entrée -- jamais omis pour ne pas laisser croire à un champ
+    absent du schéma, mais jamais une valeur inventée non plus) ; (2) une
+    couche RECT invisible (`opacity` quasi nulle, PAS exactement 0 --
+    certains moteurs Vega n'attachent pas d'écouteur de survol à une
+    opacité strictement nulle) couvrant toute la hauteur du graphique pour
+    CHAQUE composé résolu, posée EN PREMIER (donc sous les barres dans
+    l'empilement SVG) : survoler une barre déclenche son tooltip habituel
+    (Hop/Field/Value, inchangé), survoler l'espace autour (y compris près
+    du label d'axe en bas, hors de portée d'une barre précise) déclenche
+    le tooltip "Smells like" -- pas de survol dédié sur le LABEL D'AXE lui-
+    même (Vega-Lite n'expose aucun canal d'encodage sur le texte d'axe
+    natif, contrairement à la roue d'arôme qui dessine ses propres labels
+    en `mark_text` avec coordonnées calculées à la main) : cette colonne
+    invisible pleine hauteur est le substitut robuste retenu, une cible de
+    survol plus large que le seul label, pas plus fragile à positionner."""
     if not rows:
         return None
+    descriptors = descriptors or {}
     field_order = primary_fields + secondary_fields
     axis_kwargs = {
         "labelAngle": _COMPARE_LABEL_ANGLE,
@@ -1602,10 +1629,23 @@ def _compare_dual_axis_barplot(rows: list[dict], primary_fields: list[str], prim
     color_enc = alt.Color("Hop:N", scale=alt.Scale(domain=list(colors.keys()),
                                                    range=list(colors.values())))
     tooltip = ["Hop:N", "Field:N", alt.Tooltip("Value:Q", format=".2f")]
+    if any(f in descriptors for f in field_order):
+        tooltip.append(alt.Tooltip("Descriptors:N", title="Smells like"))
+        rows = [dict(r, Descriptors=descriptors.get(r["Field"], "—")) for r in rows]
 
     primary_rows = [r for r in rows if r["Field"] in primary_fields]
     secondary_rows = [r for r in rows if r["Field"] in secondary_fields]
     layers = []
+    resolved_fields = [f for f in field_order if f in descriptors]
+    if resolved_fields:
+        # Couche invisible EN PREMIER (sous les barres, voir docstring) :
+        # une colonne pleine hauteur par composé résolu, cible de survol
+        # pour "Smells like" en dehors d'une barre précise.
+        layers.append(
+            alt.Chart(alt.Data(values=[{"Field": f, "Descriptors": descriptors[f]}
+                                       for f in resolved_fields]))
+            .mark_rect(opacity=0.001)
+            .encode(x=x_enc, tooltip=["Field:N", alt.Tooltip("Descriptors:N", title="Smells like")]))
     if primary_rows:
         layers.append(
             alt.Chart(alt.Data(values=primary_rows)).mark_bar()
@@ -1843,11 +1883,23 @@ def _compare(con):
     thiols_fields = [_COMPARE_THIOLS_COMPOUND] if any(
         r["Field"] == _COMPARE_THIOLS_COMPOUND for r in detail_rows) else []
     primary_title = "Amount (ml/100g)" if show_absolute else "Percent of oil (%)"
+    # Tooltip descripteurs par composé (T70, 2026-08-21, demande utilisateur
+    # explicite -- "myrcene est une chaîne nue, rien ne dit qu'elle couvre
+    # vert, herbacé, résineux et pin", même pattern que la roue d'arôme) :
+    # jointure CAS via `matching.compound_descriptors`, jamais par nom de
+    # chaîne. Pas tous les composés n'ont une entrée Flavornet (734 composés
+    # -- voir sa docstring) : `_compare_dual_axis_barplot` affiche "—" pour
+    # ceux non résolus, jamais une valeur inventée.
+    descriptors = matching.compound_descriptors(con, present_oil_compounds + thiols_fields)
     detail_chart = _compare_dual_axis_barplot(
         detail_rows, present_oil_compounds, primary_title,
-        thiols_fields, "Thiols (µg/kg)", colors)
+        thiols_fields, "Thiols (µg/kg)", colors, descriptors=descriptors)
     if detail_chart is not None:
         st.altair_chart(detail_chart, width="content")
+        if descriptors:
+            st.caption(":material/info: Hover a bar, or the space near/below "
+                      "a compound's label, for its Flavornet odor descriptors "
+                      "(not every compound has an entry).")
     else:
         st.write("No detailed composition data for the selected hops.")
     if missing_oil:

@@ -1078,6 +1078,65 @@ boîtes d'outils existantes (`app._home`, après le `st.columns` de
 liste markdown. Vérifié en direct dans le navigateur. Aucun test ajouté
 (contenu statique, pas de logique).
 
+**T70 — Compare Hops : bascule relatif/absolu (% d'huile <-> ml/100g) sur le
+barplot "Detailed composition" (2026-08-21, suggestion reprise telle quelle,
+committé sans passer par ce journal sur le moment -- rattrapé ici).** "Compare
+Hops separates total oil... from composition (% of oil)... the reader has both
+numbers in front of them but in two different charts, and has to do the
+multiplication in their head." `app._compare_detail_value(hcomp, compound,
+absolute)` convertit chaque composé `pct_oil` en quantité absolue via
+`total_oil` déjà réconcilié par `matching.load()` (`% × huile_totale / 100`,
+EXACTEMENT ce que `matching.amount()` fait déjà côté scoring, réappliqué ici
+pour l'affichage) -- toggle `st.toggle`, ON par défaut (demande explicite),
+réponds directement à l'écran à "deux houblons à 48%/35% de myrcène peuvent-
+ils s'inverser en absolu si leur huile totale diffère ?" sans calcul mental.
+Thiols (déjà en µg/kg) jamais convertis (vérifié via `rec["unit"] !=
+"pct_oil"`). Houblon sans `total_oil` connu : composé exclu du graphique
+plutôt qu'une valeur fabriquée à partir d'une huile devinée, signalé
+explicitement en caption -- vérifié en direct qu'aucun houblon réel n'est
+concerné (tous les houblons avec un composé `pct_oil` ont un `total_oil`
+connu dans la base actuelle).
+
+**T71 — Tooltip descripteurs par composé sur le barplot "Detailed
+composition" (2026-08-21, demande utilisateur explicite, suggestion reprise
+telle quelle).** "Sur le barplot, myrcene est une chaîne nue. Rien ne dit
+qu'elle couvre vert, herbacé, résineux et pin. C'est précisément ce qui m'a
+permis de croire... que myrcène élevé impliquait bière verte." `matching.
+compound_descriptors(con, compounds)` : jointure par IDENTITÉ STRUCTURALE
+(CID PubChem `reference.MOLECULES[c][2]` -> CAS via `pubchem_cids` -> `flavornet_
+compounds.descriptors`), PAS par nom de chaîne -- même principe que
+`ingest._canonical_compound`/`_build_cas_to_hop_name` à l'ingestion, jamais
+réinventé. Vérifié en direct sur les 11 composés du barplot : 8/11 résolus
+(myrcene -> "balsamic, must, spice" -- confirme au passage que le lien
+myrcène=vert de l'utilisateur n'était pas dans la donnée elle-même ; humulene,
+caryophyllene, farnesene, linalool, geraniol, beta-pinene, selinene), thiols/
+isobutyrate/ketones correctement absents (agrégations sans entrée `reference.
+MOLECULES` individuelle, jamais une valeur inventée).
+
+Pas de tooltip natif possible sur le LABEL D'AXE lui-même (contrairement à la
+roue d'arôme qui dessine ses propres labels en `mark_text` avec coordonnées
+calculées à la main -- Vega-Lite n'expose aucun canal d'encodage sur le texte
+d'un axe standard `alt.Axis`) : substitut retenu, une colonne RECT invisible
+(`opacity=0.001`, pas exactement 0 -- certains moteurs Vega n'attachent pas
+d'écouteur de survol à une opacité strictement nulle) couvrant toute la
+hauteur du graphique par composé résolu, posée EN PREMIER dans l'empilement
+de couches (donc sous les barres) : survoler une barre garde son tooltip
+habituel (Hop/Field/Value + "Smells like" ajouté) ; survoler l'espace autour
+(y compris juste au-dessus de bâtonnets trop courts pour être visés) déclenche
+le même tooltip "Smells like" via la couche rect -- une cible de survol PLUS
+LARGE que le seul label, pas plus fragile à positionner. Vérifié en direct
+dans le navigateur (Citra vs Cluster) : survol direct d'une barre myrcène ->
+tooltip complet avec "Smells like: balsamic, must, spice" ; survol de
+l'espace vide au-dessus des bâtonnets géraniol (aucune barre sous le
+curseur) -> "Field: geraniol / Smells like: rose, geranium" via la couche
+rect ; colonnes ketones/isobutyrate/thiols (non résolues) correctement
+sans aucun tooltip descripteur. Barplot "Principal info" (alpha/beta/co-
+humulone/oil) non affecté : `descriptors` n'est passé qu'à l'appel du
+barplot "Detailed composition", ces 4 grandeurs ne sont de toute façon pas
+des composés odeur-actifs Flavornet. 3 tests ajoutés (`test_matching.py`,
+chaîne CID->CAS->descripteurs, absence si CAS non résolu, absence si pas
+d'entrée Flavornet). Suite pytest 211 -> 214.
+
 Reste :
 1. Jointure FooDB/hop_composition au-delà des ~734 composés Flavornet si le vocabulaire
    s'élargit beaucoup (crawl Yakima déjà réel, plus d'aliments FooDB).
