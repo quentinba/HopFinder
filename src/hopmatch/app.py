@@ -121,6 +121,44 @@ _TOOL_SUMMARIES = [
     },
 ]
 
+# "Recent updates" en bas de la page d'accueil (2026-08-21, demande
+# utilisateur explicite : "add ... a summary of last implemented features
+# from the most recent to the oldest ... rely on github commit for that").
+# Le plus récent en tête ; chaque résumé écrit à partir de l'HISTORIQUE GIT
+# RÉEL (`git log`, voir CLAUDE.md pour le détail complet de chaque ticket
+# T-numéroté cité) -- PAS une traduction automatique des messages de commit
+# à l'exécution : ceux-ci sont en français (convention CLI/commit, voir
+# Conventions dans CLAUDE.md), incompatible avec le texte GUI qui doit rester
+# en anglais, et une traduction automatique en direct ne serait pas fiable.
+# Curée à la main, comme le journal CLAUDE.md, mise à jour manuellement à
+# chaque nouvelle fonctionnalité livrée (pas régénérée dynamiquement) --
+# un `git log` en direct exigerait aussi que `.git` soit présent dans le
+# conteneur déployé, ce qui n'est pas garanti.
+_RECENT_UPDATES = [
+    ("2026-08-21", "Browse: new \"Similar hops\" section ranks hops by molecular "
+                   "composition and/or quantitative aroma wheel intensity, with "
+                   "each layer independently toggleable."),
+    ("2026-08-20", "Amplify/Contrast/blend result tables render as real "
+                   "scrollable tables instead of stacking vertically on mobile."),
+    ("2026-08-20", "Tool inputs (note selector, sliders) moved from the sidebar "
+                   "to the main page — the sidebar is collapsed by default on "
+                   "mobile."),
+    ("2026-08-20", "Deployed on Streamlit Community Cloud."),
+    ("2026-08-19", "New \"Compare Hops\" tool: overlaid aroma-wheel radar and "
+                   "composition bar charts for up to 5 hops side by side."),
+    ("2026-08-19", "Purpose (aromatic/bittering) shown for every hop, inferred "
+                   "from alpha acid when not directly known from BeerMaverick."),
+    ("2026-08-19", "Contrast: the complementary target descriptors and purpose "
+                   "filter are now user-editable, not just auto-computed."),
+    ("2026-08-19", "GUI translated to English; hop engraving background image "
+                   "added."),
+    ("2026-08-18", "Multi-size blend suggestions (1 to 5 hops) for Amplify and "
+                   "Contrast, prioritizing real recipe pairing frequency "
+                   "(BeerMaverick)."),
+    ("2026-08-18", "Descriptor vocabulary expanded from 38 to 104 terms via "
+                   "BeerMaverick tags."),
+]
+
 
 def _home(con) -> None:
     stats = _stats(con)
@@ -140,6 +178,12 @@ def _home(con) -> None:
                 # création du radio, sur le run suivant.
                 st.session_state["_next_mode"] = tool["mode"]
                 st.rerun()
+
+    st.divider()
+    st.subheader("Recent updates")
+    st.caption("Most recent first.")
+    st.markdown("\n\n".join(f"**{date}** — {summary}"
+                            for date, summary in _RECENT_UPDATES))
 
 
 def _db_path() -> str:
@@ -1036,7 +1080,108 @@ def _browse(con):
         st.write("No composition recorded.")
 
     st.divider()
+    # Titre commun aux 3 relations éditoriales (2026-08-21, demande
+    # utilisateur explicite : "the 'Similar varieties (Yakima)' is not a
+    # main title as compared with 'Similar hops (by molecular
+    # composition)'... add a title 'Database similarity and
+    # substitution'") -- ce titre couvre `_hop_associations` (3 sous-titres
+    # de poids égal, `st.write("**...**")`, inchangé).
+    st.subheader("Database similarity and substitution")
     _hop_associations(con, hops, selected)
+
+    # Section calculée à PART, même niveau de titre que ci-dessus (T68
+    # addendum, 2026-08-21, demande utilisateur explicite : "'Similar hops
+    # (computed from measured data)' should be the same title level than
+    # 'Database similarity and substitution' with a separator just
+    # before") -- un `st.divider()` marque la frontière entre les relations
+    # ÉDITORIALES (Yakima/BeerMaverick, ci-dessus) et cette relation
+    # CALCULÉE (`similar_hops`), toutes deux `st.subheader` désormais :
+    # deux sections soeurs plutôt qu'une section unique où la calculée
+    # ressortait comme un sous-item parmi les éditoriales.
+    st.divider()
+    _similar_hops_section(con, hops, comp, selected)
+
+
+# Libellés GUI -> clés `matching.similar_hops(use_molecular=/use_aroma_wheel=)`.
+_SIMILARITY_LAYER_OPTIONS = {"Molecular composition": "molecular",
+                             "Aroma wheel intensity": "aroma_wheel"}
+
+
+def _similar_hops_section(con, hops: dict, comp: dict, selected: str) -> None:
+    """Section "Similar hops" en bas de Browse (T67, 2026-08-21, demande
+    utilisateur explicite), ORDONNÉE de la plus proche à la moins proche —
+    calculée depuis les données mesurées, distincte des trois relations
+    éditoriales/recette déjà affichées par `_hop_associations` juste
+    au-dessus (jamais fusionnées).
+
+    **Deux couches indépendantes, activables séparément (T68, 2026-08-21,
+    demande utilisateur explicite : "we also could use the quantitative
+    aroma wheel scores right?... allow the used to toogle molecular and/or
+    aroma_wheel layers").** Molecular composition (`hop_composition`,
+    `matching.similar_hops_by_composition`) et Aroma wheel intensity
+    (`hop_aroma_intensity`, T26, Yakima uniquement,
+    `matching.similar_hops_by_aroma_wheel`) — même méthode
+    (`matching._coverage_penalized_cosine`) appliquée à deux jeux de
+    données différents (chimie mesurée vs perception sensorielle Yakima),
+    jamais mélangées en un seul vecteur : `matching.similar_hops` les
+    combine par MOYENNE des couches actives ayant une donnée pour chaque
+    candidat, jamais une moyenne qui compte silencieusement une couche
+    manquante comme 0. Les deux actives par défaut (`st.pills`, comme le
+    filtre Purpose de `contrast` — même widget, même raison : peu
+    d'options, tiennent sur une ligne)."""
+    st.subheader("Similar hops (computed from measured data)")
+    st.caption("Cosine similarity, per-compound/per-category normalized and "
+              "specificity-weighted, then scaled by data Coverage (the "
+              "fraction of this hop's own measured axes the candidate also "
+              "has data for, so a partially-measured hop can't outrank a "
+              "fully-measured one just because cosine ignores what's "
+              "missing). Not an editorial/recipe relation like the "
+              "associations above.")
+    layer_labels = st.pills(
+        "Similarity layers", list(_SIMILARITY_LAYER_OPTIONS), selection_mode="multi",
+        default=list(_SIMILARITY_LAYER_OPTIONS), label_visibility="collapsed",
+        key="similar_hops_layers") or []
+    layers = {_SIMILARITY_LAYER_OPTIONS[label] for label in layer_labels}
+    if not layers:
+        st.caption("Select at least one layer above.")
+        return
+    similar = matching.similar_hops(con, selected, use_molecular="molecular" in layers,
+                                    use_aroma_wheel="aroma_wheel" in layers)
+    if not similar:
+        st.caption("No comparable data for this variety in the selected layer(s).")
+        return
+
+    # En-têtes de colonne EXPLICITES par couche (2026-08-21, signalé par
+    # l'utilisateur en direct : avec une seule couche active, la colonne de
+    # score restait titrée génériquement "Similarity" sans dire laquelle --
+    # ambigu, à tort lisible comme un mismatch entre le score affiché et le
+    # nom de la couche sélectionnée). Aucune ambiguïté possible désormais :
+    # le nom de la couche est TOUJOURS dans le libellé de sa propre colonne.
+    if len(layers) == 2:
+        columns = [("Combined similarity", "similarity"),
+                  ("Molecular similarity", "mol_str"), ("Aroma wheel similarity", "wheel_str")]
+    elif layers == {"molecular"}:
+        columns = [("Molecular similarity", "similarity")]
+    else:
+        columns = [("Aroma wheel similarity", "similarity")]
+    columns.append(("Purpose", "purpose"))
+    if "molecular" in layers:
+        columns.append(("Shared signature compounds", "shared_compounds_str"))
+    if "aroma_wheel" in layers:
+        columns.append(("Shared aroma categories", "shared_descriptors_str"))
+    columns.append(("Sources", "sources"))
+
+    rows = []
+    for h in similar:
+        row = dict(_row_with_purpose(h, hops, comp))
+        row["mol_str"] = ("—" if h["molecular_similarity"] is None
+                          else str(h["molecular_similarity"]))
+        row["wheel_str"] = ("—" if h["aroma_wheel_similarity"] is None
+                            else str(h["aroma_wheel_similarity"]))
+        row["shared_compounds_str"] = ", ".join(h["shared_compounds"]) or "—"
+        row["shared_descriptors_str"] = ", ".join(h["shared_descriptors"]) or "—"
+        rows.append(row)
+    _render_hop_rows(rows, columns)
 
 
 def _hop_associations(con, hops: dict, selected: str) -> None:

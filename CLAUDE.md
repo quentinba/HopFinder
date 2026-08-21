@@ -927,6 +927,157 @@ Suite pytest 204, vérifié en direct (Amplify "mango" + ses 5 tailles de
 blend en vrais tableaux bordés ; badge "Bittering" toujours coloré sur
 Browse).
 
+**T67 — "Similar hops" en bas de Browse, par composition moléculaire (2026-08-21,
+demande utilisateur explicite, faisant suite à un brainstorm de features : parmi 3
+idées proposées (substitute finder, filtre "my hop stock", amplify multi-notes),
+l'utilisateur a retenu la première mais reformulée -- pas les associations
+éditoriales `hop_similar`/`hop_pairings`/`hop_substitutions` (T25, déjà affichées
+par `_hop_associations`), une section calculée depuis `hop_composition`, "ordering
+hops from the most similar to the least based on the molecular composition we
+already have in house").** `matching.similar_hops_by_composition(con, variety,
+top=10)` : RÉUTILISE la méthode déjà établie pour la couche moléculaire d'`amplify`
+(`molecular_scores` -- cosinus sur vecteurs normalisés-par-composé/pondérés par
+`specificity`, voir "similarité normalisée-par-composé (TF-IDF)" en tête de
+`matching.py`), appliquée houblon<->houblon au lieu de note<->houblon, plutôt que
+d'inventer une nouvelle méthode -- pas de nouvelle source de données, tout vient de
+`hop_composition` déjà en base. Exclut `NON_AROMA_DISPLAY` du vecteur (pas des
+molécules d'arôme). Houblon absent de `comp`, sans aucun composé aromatique mesuré,
+ou sans AUCUN composé partagé avec un candidat -> exclu (pas un faux score 0),
+même principe honnêteté-d'abord que les molécules orphelines -- vérifié en direct
+sur 3 vraies variétés BarthHaas-only sans aucun composé hors alpha/beta/oil (Huell
+Classic Hops, Relax, Sticklebract) : liste vide, caption explicite en GUI plutôt
+qu'un tableau vide silencieux. Rendu en `app._similar_hops_section` (nouvelle
+fonction, `_render_hop_rows` réutilisé tel quel) tout en bas de `_browse`, sous
+`_hop_associations` -- une QUATRIÈME relation houblon<->houblon, jamais fusionnée
+avec les trois éditoriales/recette déjà affichées juste au-dessus. 3 tests ajoutés
+(`test_matching.py`). Vérifié en direct dans le navigateur sur la base réelle (189
+houblons) : Relax (BarthHaas seul, aucun composé d'arôme mesuré au-delà
+alpha/beta/oil) -> liste vide avec message explicite. Suite pytest 204 -> 207.
+
+**Addendum T67, même jour (2026-08-21, signalé par l'utilisateur en direct) --
+Callista ressortait #1 pour Citra devant Mosaic, un vrai défaut de méthode, pas
+une confusion utilisateur.** Callista a des descripteurs berry/stone fruit très
+différents de Citra citrus/tropical, et le comparatif visuel Compare Hops ne
+montrait rien de tel -- creusé en direct sur les valeurs réelles (`hop_composition`)
+plutôt que supposé. Root cause : le cosinus pur est invariant d'échelle. Callista
+(BarthHaas seul, 8/10 composés de Citra, aucune donnée beta-pinène/géraniol
+Yakima) a des valeurs uniformément DILUÉES (~20-50% de celles de Citra sur les
+composés partagés, cohérent avec son alpha/huile totale plus faibles) mais
+PROPORTIONNELLEMENT alignées -> cosinus élevé (89.1%) simplement parce que la
+direction du vecteur, tronqué à ses 8 dimensions, reste proche de celle de
+Citra. Mosaic, qui a pourtant la MÊME couverture complète que Citra (10/10
+composés, aucune donnée manquante -- et figure d'ailleurs dans le
+`hop_similar` Yakima RÉEL de Citra, confirmation indépendante), scorait plus
+bas (88.2%) à cause d'UN SEUL composé (`ketones`, poids de spécificité élevé
+car rare dans la base) où sa valeur diverge fortement -- un désaccord
+directionnel sur un axe pesait plus, dans un cosinus pur, qu'une incomplétude
+systématique sur deux axes entiers. C'est l'inverse de ce que la confiance
+dans la donnée devrait donner : un houblon moins mesuré ne devrait jamais
+pouvoir dépasser un houblon à couverture complète sur la même cible. Corrigé
+par une pénalité de COUVERTURE (rappel des composés de la variété requêtée que
+le candidat a aussi, `len(shared) / len(target_vec)`, asymétrique -- aucune
+pénalité si le candidat a des composés EN PLUS, déjà pénalisé par la norme du
+cosinus) multipliée au cosinus, exposée en GUI (nouvelle colonne "Coverage",
+transparence). Résultat vérifié en direct après correctif : Mosaic repasse #1
+(88.2%, couverture 100%), Callista retombe #4 (71.3% = 89.1% * 0.8 couverture).
+1 test ajouté (`test_similar_hops_by_composition_penalizes_incomplete_coverage`).
+Suite pytest 207 -> 208.
+
+**T68 — Deuxième couche de similarité (roue d'arôme quantitative), combinaison
+activable par couche, titre commun "Database similarity and substitution"
+(2026-08-21, demande utilisateur explicite, même jour que T67).** "We also
+could use the quantitative aroma wheel scores right? ... allow the used to
+toogle molecular and/or aroma_wheel layers." Root du refactor : la méthode de
+`similar_hops_by_composition` (cosinus normalisé-par-axe/pondéré-spécificité +
+pénalité de couverture, T67 addendum) ne dépend en réalité d'aucune notion
+propre à `hop_composition` -- factorisée en `matching._coverage_penalized_
+cosine(raw_by_variety, variety)`, générique sur {variety: {axe: valeur}}.
+`similar_hops_by_composition` et le nouveau `similar_hops_by_aroma_wheel`
+(sur `hop_aroma_intensity`, T26, Yakima uniquement) l'appellent chacun avec
+leur propre univers d'axes -- aucune duplication de la méthode. `matching.
+similar_hops(con, variety, use_molecular=, use_aroma_wheel=, top=)` combine
+les deux : MOYENNE des couches actives ayant réellement une donnée pour
+CHAQUE candidat (jamais une couche manquante comptée comme 0 -- un houblon
+BarthHaas seul, sans `hop_aroma_intensity`, reste comparable via la seule
+couche moléculaire même si les deux sont activées), `layers_used` exposé par
+ligne pour la transparence. Point d'entrée GUI unique
+(`app._similar_hops_section`), toggle `st.pills` (même widget que le filtre
+Purpose de `contrast` -- 2 options, tiennent sur une ligne), les deux actives
+par défaut ; tableau : colonnes Molecular/Aroma wheel affichées seulement
+quand les deux couches sont actives (sinon redondantes avec Similarity).
+**Titre "Database similarity and substitution" ajouté** (signalé : "the
+'Similar varieties (Yakima)' is not a main title as compared with 'Similar
+hops (by molecular composition)'") -- l'ancien `st.subheader` propre à la
+section calculée (T67) la faisait paraître plus importante que les 3
+relations éditoriales de `_hop_associations` (simples `st.write("**...**")`)
+juste au-dessus ; un seul `st.subheader` commun ajouté, les 5 relations
+(3 éditoriales + 2 couches calculées) redescendues au même poids visuel
+(`st.write("**...**")`) en-dessous.
+**Observation notée pendant la vérification, pas un bug corrigé** : la
+couche roue d'arôme seule produit des scores très resserrés en haut de
+classement pour Citra (Simcoe 99.7%, Cascade 99.6%, Ekuanot 99.3%...,
+`shared_descriptors` quasi identiques). Cohérent avec la donnée elle-même
+(taxonomie à 15 catégories seulement, 12-15/15 couvertes pour la plupart des
+houblons Yakima, donc peu de pouvoir discriminant par rapport aux 8-10 axes
+bien plus variables de `hop_composition`) plutôt qu'un défaut de méthode
+comme Callista/T67 -- pas de contre-exemple démontrant une erreur, donc rien
+changé ; à surveiller si l'utilisateur trouve un cas concret qui semble
+faux. 7 tests ajoutés (`test_matching.py`). Suite pytest 208 -> 211.
+
+**Addendum T68, même jour (2026-08-21, signalé par l'utilisateur en direct) --
+en-têtes de colonne ambigus avec une seule couche active.** "Toogling
+molecular add the 'Similarity' column and toogling the aroma wheel shows
+'Molecular'." Vérifié en direct : AUCUN mismatch de données (le score avec
+une seule couche active est bien celui de cette couche, confirmé en
+comparant `similar_hops(use_aroma_wheel=False)` à `similar_hops_by_
+composition` seule, valeurs identiques au décimal près) -- le vrai défaut
+était que `app._similar_hops_section` titrait la colonne de score
+génériquement "Similarity" quel que soit le nombre de couches actives (1 ou
+2), sans jamais dire LAQUELLE avec une seule couche -- lisible à tort comme
+un mismatch. Corrigé : en-tête toujours explicite selon l'état des pills --
+"Molecular similarity" (molecular seul), "Aroma wheel similarity" (aroma
+wheel seul), ou "Combined similarity"/"Molecular similarity"/"Aroma wheel
+similarity" (les trois colonnes, deux couches actives). Vérifié en direct
+dans le navigateur sur les 3 états (Admiral molecular-seul, Citra aroma
+wheel-seul, Citra deux couches) : aucune ambiguïté restante, valeurs
+identiques entre vue combinée-un-seul-actif et vue couche seule. Aucun test
+ajouté (changement de libellé GUI pur, pas de logique nouvelle).
+
+**Second addendum T68, même jour (2026-08-21, signalé par l'utilisateur en
+direct) -- "Similar hops (computed from measured data)" au même niveau de
+titre que "Database similarity and substitution", séparateur avant.** Le
+premier passage T68 avait mis les 5 relations (3 éditoriales +
+2 couches calculées) sous UN SEUL `st.subheader` commun, la section calculée
+redescendue en `st.write("**...**")` -- l'utilisateur a précisé vouloir
+plutôt DEUX sections soeurs de même poids, pas une hiérarchie à un niveau.
+`app._similar_hops_section` repasse en `st.subheader` (comme avant le
+premier passage T68) ; `app._browse` insère un `st.divider()` entre la fin
+de `_hop_associations` et l'appel à `_similar_hops_section`, marquant la
+frontière entre "Database similarity and substitution" (titre couvrant
+seulement les 3 relations éditoriales désormais) et "Similar hops (computed
+from measured data)" (sa propre section, même niveau `st.subheader`).
+Vérifié en direct dans le navigateur : séparateur visible juste avant le
+second subheader, les deux rendus avec la même taille de police. Aucun test
+ajouté (changement de structure GUI pur).
+
+**T69 — Section "Recent updates" en bas de la page d'accueil (2026-08-21,
+demande utilisateur explicite : "add ... a summary of last implemented
+features from the most recent to the oldest ... rely on github commit for
+that").** `app._RECENT_UPDATES` : liste statique de 10 entrées (date +
+résumé en anglais), la plus récente en tête, écrites à partir de
+`git log` RÉEL (pas inventées) -- décision explicite de NE PAS lire `git
+log` en direct dans la GUI : les messages de commit sont en français
+(convention CLI/commit, voir Conventions plus bas) donc incompatibles avec
+le texte GUI anglais sans traduction automatique non fiable, et `.git`
+n'est pas garanti présent dans le conteneur Streamlit Community Cloud
+déployé (T64). Curée à la main comme ce journal CLAUDE.md, à MAINTENIR
+MANUELLEMENT (ajouter une entrée) à chaque nouvelle fonctionnalité
+utilisateur livrée -- pas régénérée automatiquement. Rendue sous les
+boîtes d'outils existantes (`app._home`, après le `st.columns` de
+`_TOOL_SUMMARIES`), `st.divider()` + `st.subheader("Recent updates")` +
+liste markdown. Vérifié en direct dans le navigateur. Aucun test ajouté
+(contenu statique, pas de logique).
+
 Reste :
 1. Jointure FooDB/hop_composition au-delà des ~734 composés Flavornet si le vocabulaire
    s'élargit beaucoup (crawl Yakima déjà réel, plus d'aliments FooDB).

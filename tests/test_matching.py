@@ -80,6 +80,117 @@ def test_merge_multisource(db):
     assert comp["citra"]["thiols"]["sources"] == ["barthhaas"]
     assert set(comp["citra"]["myrcene"]["sources"]) == {"barthhaas", "yakima"}
 
+def test_similar_hops_by_composition_ranks_closest_first(db):
+    # T67 (2026-08-21) : Mosaic partage plus de composés-signature avec Citra
+    # (thiols, isobutyrate, beta-pinene -- via la fusion barthhaas/yakima) que
+    # Simcoe/Saazer -> doit ressortir premier, jamais le houblon requêté
+    # lui-même.
+    ranked = matching.similar_hops_by_composition(db, "citra")
+    varieties = [r["variety"] for r in ranked]
+    assert "citra" not in varieties
+    assert varieties[0] == "mosaic"
+    assert varieties == sorted(varieties, key=lambda v: -next(
+        r["similarity"] for r in ranked if r["variety"] == v))
+    for r in ranked:
+        assert 0 < r["similarity"] <= 100
+        assert r["shared_compounds"]
+
+def test_similar_hops_by_composition_penalizes_incomplete_coverage(db):
+    # T67 addendum (2026-08-21, signalé par l'utilisateur en direct sur
+    # données réelles : Callista, BarthHaas seul et donc partiellement
+    # mesuré, ressortait #1 pour Citra devant Mosaic malgré une couverture
+    # complète -- le cosinus pur ignore les dimensions manquantes, un
+    # houblon moins mesuré ne devrait jamais dépasser un houblon à
+    # couverture complète). Simcoe (yakima seul, sans thiols/isobutyrate/
+    # ketones -- composés BarthHaas) a un cosinus brut élevé avec Citra
+    # (mêmes proportions sur les composés partagés) mais une couverture
+    # incomplète -- le score final doit refléter cette pénalité, pas
+    # seulement le cosinus.
+    ranked = {r["variety"]: r for r in matching.similar_hops_by_composition(db, "citra")}
+    assert ranked["mosaic"]["coverage"] == 100.0
+    assert ranked["simcoe"]["coverage"] < 100.0
+    # similarity == cosinus * coverage : jamais plus élevée qu'une
+    # couverture à 100% ne le permettrait pour un cosinus équivalent ou
+    # inférieur.
+    assert ranked["simcoe"]["similarity"] < ranked["mosaic"]["similarity"]
+
+def test_similar_hops_by_composition_unknown_variety_returns_empty(db):
+    assert matching.similar_hops_by_composition(db, "does-not-exist") == []
+
+def test_similar_hops_by_composition_no_composition_returns_empty(tmp_path):
+    # Houblon en base mais sans aucune ligne hop_composition -- rien à
+    # comparer, pas d'erreur (repli honnête, même principe que amplify()
+    # sur une note sans molécule productible).
+    con = connect(str(tmp_path / "t.db"))
+    init_db(con)
+    ingest._ingest_variety(con, "empty", "Empty Hop", "Nowhere", {}, [], "test")
+    con.commit()
+    assert matching.similar_hops_by_composition(con, "empty") == []
+
+def test_similar_hops_by_aroma_wheel_ranks_and_penalizes_coverage(db):
+    # T68 (2026-08-21, demande utilisateur : "we also could use the
+    # quantitative aroma wheel scores right?"). Mosaic (3/3 catégories,
+    # valeurs proches de citra) doit dominer Simcoe (2/3, tropical très
+    # différent) -- même principe de pénalité de couverture que la couche
+    # moléculaire (T67 addendum).
+    db.executemany("INSERT INTO hop_aroma_intensity VALUES (?,?,?,?)", [
+        ("citra", "citrus", 80.0, "yakima"), ("citra", "tropical", 70.0, "yakima"),
+        ("citra", "floral", 20.0, "yakima"),
+        ("mosaic", "citrus", 75.0, "yakima"), ("mosaic", "tropical", 65.0, "yakima"),
+        ("mosaic", "floral", 25.0, "yakima"),
+        ("simcoe", "citrus", 80.0, "yakima"), ("simcoe", "tropical", 10.0, "yakima"),
+    ])
+    db.commit()
+    try:
+        ranked = matching.similar_hops_by_aroma_wheel(db, "citra")
+        varieties = [r["variety"] for r in ranked]
+        assert "citra" not in varieties
+        assert varieties[0] == "mosaic"
+        assert "saazer" not in varieties  # aucune donnée hop_aroma_intensity
+        ranked_by_v = {r["variety"]: r for r in ranked}
+        assert ranked_by_v["mosaic"]["coverage"] == 100.0
+        assert ranked_by_v["simcoe"]["coverage"] < 100.0
+        assert ranked_by_v["simcoe"]["similarity"] < ranked_by_v["mosaic"]["similarity"]
+    finally:
+        db.execute("DELETE FROM hop_aroma_intensity WHERE variety IN ('citra','mosaic','simcoe')")
+        db.commit()
+
+def test_similar_hops_by_aroma_wheel_empty_without_data(db):
+    assert matching.similar_hops_by_aroma_wheel(db, "citra") == []
+
+def test_similar_hops_combines_layers_averaging_only_available_ones(db):
+    # T68 : combinaison = moyenne des couches actives ayant une donnée pour
+    # CE candidat -- Saazer n'a que la couche moléculaire (aucune ligne
+    # hop_aroma_intensity) et doit quand même apparaître, `layers_used`
+    # honnête, similarité combinée == similarité moléculaire seule (moyenne
+    # à un seul terme), jamais un score pénalisé pour une donnée absente.
+    db.executemany("INSERT INTO hop_aroma_intensity VALUES (?,?,?,?)", [
+        ("citra", "citrus", 80.0, "yakima"), ("citra", "tropical", 70.0, "yakima"),
+        ("citra", "floral", 20.0, "yakima"),
+        ("mosaic", "citrus", 75.0, "yakima"), ("mosaic", "tropical", 65.0, "yakima"),
+        ("mosaic", "floral", 25.0, "yakima"),
+    ])
+    db.commit()
+    try:
+        both = {r["variety"]: r for r in matching.similar_hops(db, "citra")}
+        assert both["mosaic"]["layers_used"] == ["aroma_wheel", "molecular"]
+        assert both["mosaic"]["similarity"] == round(
+            (both["mosaic"]["molecular_similarity"] + both["mosaic"]["aroma_wheel_similarity"]) / 2, 1)
+        assert both["saazer"]["layers_used"] == ["molecular"]
+        assert both["saazer"]["aroma_wheel_similarity"] is None
+        assert both["saazer"]["similarity"] == both["saazer"]["molecular_similarity"]
+
+        mol_only = {r["variety"]: r for r in
+                   matching.similar_hops(db, "citra", use_aroma_wheel=False)}
+        assert mol_only["mosaic"]["layers_used"] == ["molecular"]
+        assert mol_only["mosaic"]["similarity"] == mol_only["mosaic"]["molecular_similarity"]
+
+        assert matching.similar_hops(db, "citra", use_molecular=False,
+                                     use_aroma_wheel=False) == []
+    finally:
+        db.execute("DELETE FROM hop_aroma_intensity WHERE variety IN ('citra','mosaic')")
+        db.commit()
+
 def test_amplify_ranks(db):
     r = matching.amplify(db, "_citrus")
     assert r["ranked"], "au moins un houblon"

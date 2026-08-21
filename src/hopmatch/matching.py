@@ -919,3 +919,221 @@ def by_descriptor(con, selected: list[str], wheel_descriptors: list[str] | None 
     for r in ranked:
         del r["_rank"]
     return {"ranked": ranked[:top], "total_matches": len(ranked)}
+
+
+# --------------------------------------------------------------------------- #
+# DÉCOUVERTE — similarité houblon<->houblon, calculée (Browse, T67/T68 backlog)
+# --------------------------------------------------------------------------- #
+def _coverage_penalized_cosine(raw_by_variety: dict[str, dict[str, float]],
+                               variety: str) -> dict[str, dict]:
+    """Cœur partagé de `similar_hops_by_composition`/`similar_hops_by_aroma_wheel`
+    (T68, 2026-08-21, demande utilisateur : "we also could use the quantitative
+    aroma wheel scores... implement this other layer") -- factorisé pour ne
+    pas dupliquer deux fois la même méthode (cosinus normalisé-par-axe/pondéré-
+    spécificité + pénalité de couverture, voir docstring de
+    `similar_hops_by_composition` pour le détail complet de pourquoi la
+    pénalité de couverture existe -- même raisonnement, quel que soit l'axe
+    (composé chimique ou catégorie de roue d'arôme) : un houblon moins mesuré
+    ne doit jamais dépasser un houblon à couverture complète juste parce que
+    le cosinus pur ignore les dimensions manquantes.
+
+    `raw_by_variety` : {variety: {axe: valeur brute}}, déjà filtré aux axes
+    pertinents par l'appelant (composés aromatiques pour la composition,
+    catégories de la roue d'arôme pour l'intensité) -- cette fonction ne sait
+    rien du domaine, purement générique sur la structure {variety: {axe: v}}.
+
+    Retourne {variety_candidate: {"similarity": 0..1, "coverage": 0..1,
+    "shared": set[axe]}}, NON tronqué à `top` et NON multiplié par 100
+    (fait par l'appelant, chacun avec son propre vocabulaire de sortie --
+    `shared_compounds` vs `shared_descriptors`) -- `variety` lui-même exclu,
+    candidats à similarité nulle/sans axe partagé exclus (honnêteté d'abord,
+    pas de faux zéro)."""
+    if variety not in raw_by_variety or not raw_by_variety[variety]:
+        return {}
+    axes = sorted({a for v in raw_by_variety.values() for a in v})
+    max_val = {a: max((raw_by_variety[h].get(a, 0.0) for h in raw_by_variety), default=0.0)
+              for a in axes}
+    n = len(raw_by_variety)
+    spec = {}
+    for a in axes:
+        n_with = sum(1 for h in raw_by_variety if raw_by_variety[h].get(a, 0.0) > 0)
+        spec[a] = math.log(n / (1 + n_with)) + 1.0
+
+    def vector(h: str) -> dict[str, float]:
+        vec = {}
+        for a in axes:
+            v = raw_by_variety[h].get(a, 0.0)
+            if v > 0 and max_val[a]:
+                vec[a] = (v / max_val[a]) * spec[a]
+        return vec
+
+    target_vec = vector(variety)
+    target_norm = math.sqrt(sum(v * v for v in target_vec.values()))
+    if not target_vec or not target_norm:
+        return {}
+
+    out = {}
+    for h in raw_by_variety:
+        if h == variety:
+            continue
+        vec = vector(h)
+        shared = target_vec.keys() & vec.keys()
+        if not shared:
+            continue
+        dot = sum(target_vec[c] * vec[c] for c in shared)
+        norm = math.sqrt(sum(v * v for v in vec.values()))
+        cosine = dot / (target_norm * norm) if norm else 0.0
+        coverage = len(shared) / len(target_vec)
+        sim = cosine * coverage
+        if sim <= 0:
+            continue
+        out[h] = {"similarity": sim, "coverage": coverage,
+                 "shared": sorted(shared, key=lambda c: -(target_vec[c] * vec[c]))}
+    return out
+
+
+def similar_hops_by_composition(con, variety: str, top: int = 10) -> list[dict]:
+    """Houblons les plus proches de `variety` par COMPOSITION MOLÉCULAIRE
+    (`hop_composition`, déjà en base — aucune nouvelle source), demande
+    utilisateur explicite (2026-08-21) pour une section "Similar hops" en bas
+    de Browse. Volontairement PAS `hop_similar`/`hop_pairings`/`hop_substitutions`
+    (T25, déjà affichées par `_hop_associations`) : ces trois-là sont
+    éditoriales/recette (Yakima/BeerMaverick), celle-ci est calculée
+    directement depuis la chimie mesurée — une relation distincte, jamais
+    fusionnée avec les trois autres (voir `similar_hops` pour la combinaison
+    de CETTE couche avec la couche roue d'arôme, T68).
+
+    Réutilise la même méthode que la couche moléculaire d'`amplify`
+    (`molecular_scores`) plutôt que d'en inventer une nouvelle : cosinus sur
+    des vecteurs normalisés-par-composé (`amount / max sur tous les houblons`)
+    puis pondérés par `specificity` (IDF-like — un composé quasi-ubiquitaire
+    comme le myrcène pèse peu, un composé rare/signature pèse beaucoup), même
+    principe que documenté en tête de ce module ("similarité normalisée-par-
+    composé (TF-IDF), pas en cosinus pseudo-OAV"). Exclut
+    `NON_AROMA_DISPLAY` (total_oil/alpha_acid/beta_acid/co_humulone) du
+    vecteur : ce ne sont pas des molécules d'arôme.
+
+    **Pénalité de couverture (corrige un vrai défaut, signalé en direct par
+    l'utilisateur le jour même du premier passage T67 : Callista ressortait
+    #1 pour Citra devant Mosaic, alors que Callista a des descripteurs
+    berry/stone fruit très différents de Citra citrus/tropical, et que le
+    comparatif visuel Compare Hops ne montrait rien de tel).** Root cause
+    vérifiée sur données réelles : le cosinus pur est invariant d'échelle --
+    Callista (BarthHaas seul, 8/10 composés de Citra, aucune donnée
+    beta-pinène/géraniol) a des valeurs uniformément DILUÉES (~20-50% de
+    celles de Citra sur les composés partagés, cohérent avec son alpha/huile
+    totale plus faibles) mais PROPORTIONNELLEMENT alignées -> cosinus élevé
+    (89.1%) simplement parce que la direction du vecteur, tronqué à ses 8
+    dimensions, reste proche de celle de Citra. Mosaic, qui a pourtant la
+    MÊME couverture complète que Citra (10/10 composés, aucune donnée
+    manquante), scorait plus bas (88.2%) à cause d'un seul composé
+    (`ketones`, poids de spécificité élevé car rare dans la base) où sa
+    valeur diverge fortement -- un vrai désaccord directionnel sur UN axe
+    pèse plus, dans un cosinus pur, qu'une incomplétude systématique sur
+    DEUX axes entiers. C'est l'inverse de ce que la confiance dans la
+    donnée devrait donner. Corrigé par `_coverage_penalized_cosine` (pénalité
+    de rappel côté `variety`, voir sa docstring) : Mosaic (couverture 100%)
+    repasse devant Callista (couverture 80%, pénalisé à 71.3%), vérifié en
+    direct sur données réelles."""
+    hops, comp, _, _ = load(con)
+    raw = {v: {c: amount(v, c, comp) for c in cmap if c not in NON_AROMA_DISPLAY}
+          for v, cmap in comp.items()}
+    sims = _coverage_penalized_cosine(raw, variety)
+    ranked = [{"variety": h, "name": hops[h]["name"], "similarity": round(100 * r["similarity"], 1),
+              "coverage": round(100 * r["coverage"], 1), "shared_compounds": r["shared"][:5],
+              "sources": hops[h]["sources"], "purpose": hops[h].get("purpose")}
+             for h, r in sims.items()]
+    ranked.sort(key=lambda r: (-r["similarity"], r["variety"]))
+    return ranked[:top]
+
+
+def similar_hops_by_aroma_wheel(con, variety: str, top: int = 10) -> list[dict]:
+    """Houblons les plus proches de `variety` par ROUE D'ARÔME QUANTITATIVE
+    (`hop_aroma_intensity`, T26 -- intensité RÉELLE 0-100 par catégorie,
+    Yakima uniquement, voir `hop_aroma_intensity()`), T68 (2026-08-21, demande
+    utilisateur explicite : "we also could use the quantitative aroma wheel
+    scores right?"). Même méthode que `similar_hops_by_composition`
+    (`_coverage_penalized_cosine`, cosinus normalisé-par-axe/pondéré-
+    spécificité + pénalité de couverture) appliquée aux 15 catégories de la
+    roue au lieu des composés de `hop_composition` -- deux couches
+    INDÉPENDANTES sur des données différentes (chimie mesurée vs perception
+    sensorielle Yakima), jamais fusionnées ici (voir `similar_hops` pour leur
+    combinaison optionnelle, contrôlée par l'utilisateur).
+
+    Couverture Yakima uniquement (94/151 variétés Yakima, T26) : un houblon
+    BarthHaas seul, ou une variété Yakima non couverte, n'a AUCUNE entrée
+    `hop_aroma_intensity` -> absent de `raw`, donc soit `variety` elle-même
+    (liste vide, rien à comparer), soit simplement absent des candidats
+    (jamais un score inventé)."""
+    hops, _, _, _ = load(con)
+    raw: dict[str, dict[str, float]] = {}
+    for r in con.execute("SELECT variety, descriptor, intensity FROM hop_aroma_intensity"):
+        raw.setdefault(r["variety"], {})[r["descriptor"]] = r["intensity"]
+    sims = _coverage_penalized_cosine(raw, variety)
+    ranked = [{"variety": h, "name": hops[h]["name"], "similarity": round(100 * r["similarity"], 1),
+              "coverage": round(100 * r["coverage"], 1), "shared_descriptors": r["shared"][:5],
+              "sources": hops[h]["sources"], "purpose": hops[h].get("purpose")}
+             for h, r in sims.items() if h in hops]
+    ranked.sort(key=lambda r: (-r["similarity"], r["variety"]))
+    return ranked[:top]
+
+
+_SIMILARITY_LAYERS = ("molecular", "aroma_wheel")
+
+
+def similar_hops(con, variety: str, use_molecular: bool = True, use_aroma_wheel: bool = True,
+                 top: int = 10) -> list[dict]:
+    """Combine `similar_hops_by_composition`/`similar_hops_by_aroma_wheel`,
+    chacune activable/désactivable indépendamment (T68, 2026-08-21, demande
+    utilisateur explicite : "allow the user to toggle molecular and/or
+    aroma_wheel layers... by default both layers would be included"). Point
+    d'entrée utilisé par la GUI (`app._similar_hops_section`).
+
+    Combinaison = MOYENNE des couches actives qui ont RÉELLEMENT une donnée
+    pour ce candidat (pas une moyenne qui compte silencieusement une couche
+    manquante comme 0 -- honnêteté d'abord, même principe que `quant_score`
+    dans `by_descriptor`) : un houblon BarthHaas seul (aucune donnée
+    `hop_aroma_intensity`) reste comparable via la seule couche moléculaire
+    même si `use_aroma_wheel=True`, plutôt qu'exclu ou pénalisé pour une
+    donnée qui n'existe simplement pas côté Yakima. `layers_used` (liste,
+    triée) expose explicitement quelles couches ont contribué à CE houblon --
+    jamais un score composite opaque.
+
+    `use_molecular=use_aroma_wheel=False` -> liste vide (rien demandé). Un
+    houblon sans AUCUNE donnée dans les couches actives -> absent (pas de
+    score 0 fabriqué)."""
+    if not use_molecular and not use_aroma_wheel:
+        return []
+    hops, comp, _, _ = load(con)
+    per_layer: dict[str, dict[str, dict]] = {}
+    if use_molecular:
+        raw = {v: {c: amount(v, c, comp) for c in cmap if c not in NON_AROMA_DISPLAY}
+              for v, cmap in comp.items()}
+        per_layer["molecular"] = _coverage_penalized_cosine(raw, variety)
+    if use_aroma_wheel:
+        raw = {}
+        for r in con.execute("SELECT variety, descriptor, intensity FROM hop_aroma_intensity"):
+            raw.setdefault(r["variety"], {})[r["descriptor"]] = r["intensity"]
+        per_layer["aroma_wheel"] = _coverage_penalized_cosine(raw, variety)
+
+    candidates = set().union(*(sims.keys() for sims in per_layer.values())) if per_layer else set()
+    ranked = []
+    for h in candidates:
+        if h not in hops:
+            continue
+        layer_scores = {layer: sims[h]["similarity"] for layer, sims in per_layer.items() if h in sims}
+        if not layer_scores:
+            continue
+        combined = sum(layer_scores.values()) / len(layer_scores)
+        entry = {"variety": h, "name": hops[h]["name"], "similarity": round(100 * combined, 1),
+                 "layers_used": sorted(layer_scores),
+                 "molecular_similarity": (round(100 * layer_scores["molecular"], 1)
+                                          if "molecular" in layer_scores else None),
+                 "aroma_wheel_similarity": (round(100 * layer_scores["aroma_wheel"], 1)
+                                            if "aroma_wheel" in layer_scores else None),
+                 "shared_compounds": per_layer.get("molecular", {}).get(h, {}).get("shared", [])[:5],
+                 "shared_descriptors": per_layer.get("aroma_wheel", {}).get(h, {}).get("shared", [])[:5],
+                 "sources": hops[h]["sources"], "purpose": hops[h].get("purpose")}
+        ranked.append(entry)
+    ranked.sort(key=lambda r: (-r["similarity"], r["variety"]))
+    return ranked[:top]
