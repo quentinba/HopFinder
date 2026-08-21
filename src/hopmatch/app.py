@@ -1511,6 +1511,28 @@ def _compare_principal_values(hcomp: dict) -> dict[str, float | None]:
            "Co-humulone\n(% of hop)": co_h_abs, "Total oil\n(ml/100g)": oil}
 
 
+def _compare_detail_value(hcomp: dict, compound: str, absolute: bool) -> float | None:
+    """Valeur d'UN composé du barplot 2 pour UN houblon, en % d'huile (par
+    défaut) ou en quantité absolue ml/100g (`absolute=True`, bascule
+    2026-08-21, demande utilisateur explicite -- reprend une suggestion
+    lue telle quelle : convertir `% d'huile × huile_totale / 100`, EXACTEMENT
+    la même conversion que `matching.amount()` applique déjà pour l'unité
+    `pct_oil` côté scoring, réappliquée ici pour l'affichage). Composés en
+    dehors de `pct_oil` (thiols, en µg/kg) ne sont JAMAIS convertis, quel
+    que soit `absolute` -- déjà une quantité absolue. `None` si le composé
+    est absent, OU si `absolute=True` et que `total_oil` de ce houblon est
+    inconnu (aucune conversion possible) -- jamais une valeur fabriquée."""
+    rec = hcomp.get(compound)
+    if not rec or rec.get("mid") is None:
+        return None
+    if not absolute or rec.get("unit") != "pct_oil":
+        return rec["mid"]
+    oil = hcomp.get("total_oil", {}).get("mid")
+    if oil is None:
+        return None
+    return rec["mid"] * oil / 100.0
+
+
 _COMPARE_LABEL_ANGLE = -45
 
 
@@ -1779,26 +1801,54 @@ def _compare(con):
         st.write("No principal composition data for the selected hops.")
 
     st.subheader("Detailed composition")
+    # Bascule relatif/absolu (2026-08-21, demande utilisateur explicite,
+    # suggestion reprise telle quelle : "Compare Hops separates total oil...
+    # from composition (% of oil)... the reader has both numbers in front of
+    # them but in two different charts, and has to do the multiplication in
+    # their head"). ON par défaut : deux houblons à 48%/35% de myrcène
+    # peuvent s'inverser en absolu si leur huile totale (barplot "Principal
+    # info" juste au-dessus) diffère assez -- répondre directement à
+    # l'écran plutôt que de laisser le lecteur faire le calcul. Aucune
+    # nouvelle donnée : `total_oil` est déjà réconcilié par `matching.load()`
+    # (même valeur que la barre "Total oil" du barplot principal). Thiols
+    # exclus de la conversion (déjà en µg/kg, absolu dans les deux modes --
+    # `_compare_detail_value` ne convertit que l'unité `pct_oil`).
+    show_absolute = st.toggle(
+        "Show absolute amount (ml/100g) instead of % of oil",
+        value=True, key="compare_absolute_oil")
     present_oil_compounds = [c for c in _COMPARE_DETAIL_OIL_COMPOUNDS
                              if any(comp.get(v, {}).get(c, {}).get("mid") is not None
                                     for v in selected)]
     detail_rows = []
+    missing_oil = []
     for v in selected:
         name = hops[v]["name"]
         hcomp = comp.get(v, {})
-        for c in present_oil_compounds + [_COMPARE_THIOLS_COMPOUND]:
-            val = hcomp.get(c, {}).get("mid")
+        for c in present_oil_compounds:
+            val = _compare_detail_value(hcomp, c, show_absolute)
             if val is not None:
                 detail_rows.append({"Hop": name, "Field": c, "Value": val})
+            elif show_absolute and hcomp.get(c, {}).get("mid") is not None:
+                # Composé mesuré (% d'huile) mais `total_oil` inconnu pour CE
+                # houblon -- pas de conversion possible, jamais une barre
+                # fabriquée à partir d'une huile totale devinée.
+                missing_oil.append(name)
+        thiols_val = _compare_detail_value(hcomp, _COMPARE_THIOLS_COMPOUND, show_absolute)
+        if thiols_val is not None:
+            detail_rows.append({"Hop": name, "Field": _COMPARE_THIOLS_COMPOUND, "Value": thiols_val})
     thiols_fields = [_COMPARE_THIOLS_COMPOUND] if any(
         r["Field"] == _COMPARE_THIOLS_COMPOUND for r in detail_rows) else []
+    primary_title = "Amount (ml/100g)" if show_absolute else "Percent of oil (%)"
     detail_chart = _compare_dual_axis_barplot(
-        detail_rows, present_oil_compounds, "Percent of oil (%)",
+        detail_rows, present_oil_compounds, primary_title,
         thiols_fields, "Thiols (µg/kg)", colors)
     if detail_chart is not None:
         st.altair_chart(detail_chart, width="content")
     else:
         st.write("No detailed composition data for the selected hops.")
+    if missing_oil:
+        st.caption(":material/info: Total oil unknown for: " + ", ".join(sorted(set(missing_oil)))
+                  + " — their % of oil composition can't be converted to an absolute amount.")
 
 
 def main():
