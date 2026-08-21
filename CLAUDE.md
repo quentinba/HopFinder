@@ -1215,6 +1215,162 @@ jamais pouvoir être confondue avec une vraie donnée produit, même
 principe que documenté ailleurs pour ne jamais laisser une valeur de test
 ressembler à une donnée réelle. Suite pytest 214 -> 216.
 
+**T74 — Annotation de survie au procédé par classe de composé (2026-08-21,
+demande utilisateur explicite, spec complète fournie avec contrainte non
+négociable).** "Un lecteur qui voit « myrcène 48 % » sur une fiche doit
+savoir que ce chiffre compte en dry hop et devient largement caduc sur une
+ébullition de 60 minutes." Contrainte non négociable respectée à la lettre :
+AUCUNE valeur numérique, l'annotation est un badge texte purement affiché,
+jamais consommée par un score (`matching.process_survival` est une lecture
+pure sur `reference.PROCESS_SURVIVAL`, appelée uniquement depuis `app.py` --
+vérifié directement, aucun appel depuis `molecular_scores`/`amplify`/
+`contrast`/`by_descriptor`, et suite pytest complète inchangée avant/après).
+
+Étape 0 respectée avant de coder : `SELECT DISTINCT compound, source FROM
+hop_composition` sur la base réelle -- 11 composés d'huile essentielle
+présents, tous mappés avec certitude (aucun laissé sans décision). α-pinène
+et β-citronellol, cités par la figure Janish mais jamais mesurés par
+BarthHaas/Yakima actuellement, n'ont PAS d'entrée (une annotation qui ne
+s'afficherait jamais serait une entrée morte).
+
+`reference.PROCESS_SURVIVAL` : structure {compound: {class, subclass,
+annotation, confidence}}, à côté de `CONTRAST_AFFINITY`, avec le MÊME
+avertissement de prior -- mais **deux niveaux de provenance distincts dans
+la même structure**, documentés explicitement pour ne jamais les confondre :
+la classification (class/subclass) est SOURCÉE (Scott Janish, The New IPA,
+figure "Chemical compositions of the essential oils of hops" -- voir
+docs/DATA_SOURCES.md pour la citation complète) ; l'annotation/confidence
+est un PRIOR qualitatif de brassage (équipement/temps de contact/
+température/levure font varier le taux réel), au même titre que
+CONTRAST_AFFINITY -- listé dans README.md, section "Ce qui est un prior,
+pas une donnée", SANS marquer la classification comme prior (elle, solide).
+
+Mapping vérifié composé par composé (voir le commentaire complet dans
+reference.py) : myrcene/beta-pinene -> Monoterpenes ("dry hop / late
+additions", haute) ; humulene/caryophyllene/farnesene/selinene ->
+Sesquiterpenes ("direct traces, contributes via oxidation" -- PAS un simple
+"survit"/"ne survit pas" binaire, car les produits d'oxydation
+(humulénol, farnésol) changent de classe, haute) ; linalool/geraniol ->
+Monoterpene alcohols ("survives boiling", haute) ; ketones/isobutyrate ->
+"Other (ketones, esters, aldehydes, epoxides)" ("intermediate transfer",
+BASSE -- BarthHaas ne précise jamais quelle molécule précise compose cette
+valeur agrégée, classées par nomenclature chimique directe -- "-ate"=ester,
+"ketones"=nom littéral -- pas une supposition sur un nom approchant) ;
+thiols -> "Thiols" (jamais "Sulfur compounds" générique -- la figure éclate
+cette classe en thiols/sulfures/thioesters, BarthHaas ne mesure QUE les
+thiols agrégés) ("late / dry hop", MOYENNE, via le composé 4-mercapto-4-
+methylpentan-2-one/4MMP listé sous cette sous-classe -- déjà agrégé sous
+"thiols" par `reference.ALIASES`).
+
+`matching.process_survival(compound) -> dict | None` : lecture pure,
+`None` si non mappé, jamais une valeur par défaut. GUI :
+`app._process_survival_label` formate l'annotation + suffixe explicite
+"(low confidence)" pour confidence="low" SEULEMENT (cohérent avec le
+préfixe "Inferred:" déjà utilisé pour le purpose) -- confiance moyenne/
+haute affichées sans suffixe, comme demandé. Colonne "Process" ajoutée aux
+3 tableaux de composition texte (Browse, `_hop_detail_expanders`,
+`_by_descriptor` -- même extension que T72 pour "Smells like", cohérence
+avec le principe déjà établi "même contenu que Browse") et au tooltip/
+couche rect du barplot "Detailed composition" de Compare Hops (même
+mécanisme que "Smells like" T71, deux informations indépendantes ajoutées
+côte à côte dans le même tooltip, jamais fusionnées). Composé sans
+annotation -> "—", jamais "unknown"/placeholder.
+
+**Corrigé en cours de route** : un premier jet de commentaire réutilisait
+par erreur le raisonnement de T73 ("selinene absent du tableau du livre")
+alors que CE tableau-ci (fourni directement dans le ticket, distinct de
+l'image T73) liste explicitement sélinène sous Sesquiterpènes -- corrigé
+dans le code ET le test correspondant (repris sur "limonene", vraiment
+absent des données ET du tableau) avant tout commit.
+
+6 tests ajoutés (`test_matching.py`) : complétude (chaque composé distinct
+de hop_composition mappé ou exclu, échoue sur un composé nouveau non
+décidé), exclusion des 4 champs non-arôme, `None` sur composé inconnu,
+structure complète à 4 champs pour un composé mappé, suffixe confiance
+basse, absence de toute valeur numérique dans TOUTE la structure (vérifié
+programmatiquement, pas juste par relecture). Suite pytest 216 -> 222.
+Vérifié en direct dans le navigateur (Browse/Admiral, Compare Hops/Citra) :
+colonne "Process" et tooltip corrects, y compris le cas basse confiance
+(isobutyrate : "intermediate transfer (low confidence)").
+
+README.md et docs/DATA_SOURCES.md mis à jour (citation Janish complète,
+distinction explicite entre les DEUX figures du même livre utilisées par
+T73 et T74 -- jamais confondues).
+
+**Addendum T74, même jour (2026-08-21, signalé par l'utilisateur en
+direct) : légende de clarification pour les annotations "Process".** "I'm
+not sure to understand the difference [between] 'direct traces, contribute
+via oxydation' [and] 'survive boiling'." Distinction réelle (chimie déjà
+résumée dans les notes du ticket original, mais pas assez explicite pour
+un lecteur sans le contexte) : "survives boiling" (linalol/géraniol, déjà
+oxygénés via un groupe -OH -- une part significative de LA MÊME molécule
+persiste à travers l'ébullition) VS "direct traces, contributes via
+oxidation" (humulène/caryophyllène/farnésène/sélinène, hydrocarbures --
+une petite fraction survit telle quelle en traces directes, mais l'essentiel
+de la contribution aromatique vient de ce que la molécule DEVIENT après
+exposition à l'oxygène -- caryophyllène->oxyde de caryophyllène, humulène->
+humulénol/époxyde d'humulène, farnésène->farnésol -- des composés
+chimiquement DIFFÉRENTS, pas la même molécule qui "survit" partiellement).
+
+`reference.PROCESS_SURVIVAL_EXPLANATIONS` (nouveau) : une phrase de
+clarification par annotation DISTINCTE de `PROCESS_SURVIVAL` (5 entrées),
+même statut de prior qualitatif que `PROCESS_SURVIVAL` lui-même --
+COMPLÈTE les libellés courts existants (déjà validés T74) sans les
+réécrire. `app._process_survival_legend()` : `st.expander("What do these
+Process labels mean?")` replié par défaut, dérivé des annotations
+RÉELLEMENT utilisées (jamais une entrée orpheline si `PROCESS_SURVIVAL`
+change), affiché une fois sous le tableau de composition de Browse et une
+fois sous le barplot "Detailed composition" de Compare Hops -- jamais
+répété dans chaque expander de détail (bruit visuel inutile). 1 test
+ajouté (complétude : chaque annotation utilisée a une explication).
+Vérifié en direct dans le navigateur (Browse/Admiral) : légende correcte,
+distinction claire entre les deux annotations. Suite pytest 222 -> 223.
+
+**Second addendum T74, même jour (2026-08-21, signalé par l'utilisateur en
+direct, sur l'explication ci-dessus) : erreur de sourcing corrigée avant
+tout commit.** "In the 'direct traces, contributes via oxidation' you
+describe it as any type of oxydation can make them appear. but in the
+Scott's book he only mention LONG BOIL as an activator." La première
+version de l'explication affirmait un déclencheur ("exposure to oxygen --
+dry-hopping, packaging, aging") jamais donné par l'utilisateur -- une
+inférence perso à partir de connaissances générales de brassage, PAS une
+donnée sourcée (reconnu directement quand interrogé -- voir échange en
+direct). Corrigé après clarification explicite : le déclencheur réel est
+une ÉBULLITION LONGUE (>20 min), issu d'une étude d'extraction Saaz à temps
+variable citée dans le livre -- ET cette étude précise ne couvre QUE
+humulène et caryophyllène, PAS farnésène/sélinène (qui restent regroupés
+sous la même annotation de CLASSE via la figure de taxonomie, une source
+différente et plus générale, sans que le déclencheur précis leur soit
+confirmé pour autant). "caryophyllene oxide"/"humulene epoxide" (noms de
+produits d'oxydation inventés, jamais donnés) retirés -- seuls
+"humulénol"/"farnésol" gardés, cités tels quels dans la spec originale du
+ticket. Aucun changement de code hors le texte de `reference.
+PROCESS_SURVIVAL_EXPLANATIONS["direct traces, contributes via oxidation"]`
+-- vérifié en direct dans le navigateur, légende corrigée. Suite pytest
+inchangée à 223 (aucun test ne verrouillait le contenu littéral de cette
+phrase).
+
+**Troisième addendum T74, même jour (2026-08-21, signalé par l'utilisateur
+en direct) : libellé thiols reformulé, lisait comme un doublon.** "There is
+a redundancy in the infobox of the Process. late / dry hop no longer exist
+but is still present in the infobox." Vérifié en direct : PAS un bug de
+duplication littérale -- `PROCESS_SURVIVAL["thiols"]["annotation"]` ("late /
+dry hop") et `PROCESS_SURVIVAL["myrcene"/"beta-pinene"]["annotation"]`
+("dry hop / late additions") étaient deux entrées BIEN distinctes avec des
+explications différentes -- mais une simple PERMUTATION des mêmes mots,
+qui se LIT comme un doublon accidentel dans la légende "What do these
+Process labels mean?" une fois les deux entrées listées côte à côte.
+Reformulé thiols en "extremely volatile — dry hop only" (même
+recommandation pratique, mais formulation distincte reflétant la raison
+chimique réellement différente : volatilité extrême + quantités traces
+µg/kg, pas la simple perte par évaporation des hydrocarbures
+monoterpéniques) -- explication correspondante mise à jour en cohérence.
+Vérifié : aucun autre usage de la chaîne littérale "late / dry hop" dans le
+code/tests (`grep` sur src/tests/docs/README), donc pas de test cassé.
+Vérifié en direct dans le navigateur : les 5 entrées de la légende se
+lisent maintenant comme 5 idées distinctes, plus de paire qui se ressemble.
+Suite pytest inchangée à 223.
+
 Reste :
 1. Jointure FooDB/hop_composition au-delà des ~734 composés Flavornet si le vocabulaire
    s'élargit beaucoup (crawl Yakima déjà réel, plus d'aliments FooDB).

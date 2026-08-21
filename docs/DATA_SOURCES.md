@@ -161,6 +161,36 @@
   sans donnée.
 - Statut : `ingest.ingest_beermaverick` IMPLÉMENTÉ.
 
+**Scott Janish, *The New IPA* (livre, pas une source web crawlée)** — deux figures distinctes du
+même livre, utilisées pour deux besoins différents, **jamais confondues** :
+- Figure « Compound Descriptions » (T73, `reference.JANISH_COMPOUND_CATEGORIES`) : descripteurs
+  odeur par catégorie sensorielle (Floral, Citrus, Woody...), complète `matching.
+  compound_descriptors` (Flavornet) quand une catégorie du livre n'est pas déjà représentée.
+- Figure « Chemical compositions of the essential oils of hops » (T74, `reference.
+  PROCESS_SURVIVAL`) : classification chimique en 3 classes (Hydrocarbures, Oxygénés, Soufrés) et
+  sous-classes (monoterpènes, sesquiterpènes, alcools monoterpéniques...), utilisée pour
+  l'annotation « Process » (survie au procédé de brassage — dry hop / survit à l'ébullition /
+  transfert intermédiaire...) affichée dans Browse et Compare Hops.
+  - **La classification (classe/sous-classe) est sourcée et solide**, reprise telle quelle de la
+    figure du livre.
+  - **L'annotation de survie et sa confiance sont un PRIOR qualitatif**, pas une mesure — voir
+    README.md, section « Ce qui est un prior, pas une donnée ». Refus délibéré de chiffrer un
+    taux de transfert : les valeurs publiées dépendent de l'équipement, du temps de contact, de
+    la température et de la levure — les figer en un nombre unique serait exactement la
+    précision-déchet déjà refusée ailleurs dans ce projet (absence d'OAV réel, retrait de
+    `combine()`, voir CLAUDE.md section « But »). L'annotation reste donc du texte qualitatif
+    (« dry hop / late additions », jamais « 80 % de transfert »), jamais consommée par un score
+    (TF-IDF/`--oav`/blends) — vérifié : `matching.process_survival` est une fonction de lecture
+    pure sur `reference.PROCESS_SURVIVAL`, appelée uniquement depuis `app.py` (affichage), jamais
+    depuis `molecular_scores`/`amplify`/`contrast`/`by_descriptor`.
+  - Restreinte aux composés RÉELLEMENT mesurés dans `hop_composition` (vérifié le jour de l'ajout
+    via `SELECT DISTINCT compound, source FROM hop_composition`) : α-pinène et β-citronellol,
+    cités par la figure, ne sont mesurés par AUCUNE des deux sources (BarthHaas/Yakima)
+    actuellement, donc absents plutôt que fabriqués. Sous-classe « Thiols » (jamais « Sulfur
+    compounds » générique) : la figure éclate cette classe en thiols/sulfures/thioesters, mais
+    BarthHaas ne mesure que les thiols agrégés — l'étiquette reflète cette limite plutôt que de
+    suggérer une homogénéité que la source dément.
+
 ## Côté note (ingrédient → molécules)
 
 **FooDB** — https://foodb.ca

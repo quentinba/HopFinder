@@ -817,6 +817,15 @@ générales, à traiter comme un prior, pas une mesure :
 - **`CONTRAST_AFFINITY`** (carte d'affinités) : prior de sagesse culinaire, aucune source. À
   ancrer sur un corpus de recettes ou une référence d'accords.
 - Les listes de composés d'impact : connaissance générale, à confirmer via Flavornet/littérature.
+- **`PROCESS_SURVIVAL`** (annotation « Process » — dry hop / survit à l'ébullition / transfert
+  intermédiaire...) : les valeurs `annotation`/`confidence` sont un **prior qualitatif de
+  brassage**, au même titre que `CONTRAST_AFFINITY` — les taux de transfert réels dépendent de
+  l'équipement, du temps de contact, de la température et de la levure, jamais chiffrés ici (voir
+  CLAUDE.md, section « But », pour le refus symétrique de l'OAV réel/`combine()`). **La
+  classification `class`/`subclass` associée, elle, EST sourcée** (Scott Janish, *The New IPA*,
+  figure « Chemical compositions of the essential oils of hops » — voir `docs/DATA_SOURCES.md`)
+  et ne relève pas de ce prior : seule l'annotation de survie au procédé et son niveau de
+  confiance sont à traiter comme une synthèse qualitative, pas une mesure.
 
 À l'inverse, tout ce qui vient d'un **parseur avec source tracée** (composition houblon) est de
 la donnée. Règle du projet : ne jamais figer en dur des valeurs de composition — passer par un

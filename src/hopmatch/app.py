@@ -135,6 +135,15 @@ _TOOL_SUMMARIES = [
 # un `git log` en direct exigerait aussi que `.git` soit présent dans le
 # conteneur déployé, ce qui n'est pas garanti.
 _RECENT_UPDATES = [
+    ("2026-08-21", "Added a \"What do these Process labels mean?\" legend "
+                   "next to the Process badge (Browse and Compare Hops), "
+                   "explaining e.g. why sesquiterpenes say \"contributes "
+                   "via oxidation\" instead of \"survives boiling\"."),
+    ("2026-08-21", "New \"Process\" badge on Browse and Compare Hops: which "
+                   "compounds actually survive to dry hop vs. mostly vanish "
+                   "on a 60-min boil, sourced from Scott Janish's The New "
+                   "IPA — a qualitative prior, never a numeric transfer "
+                   "rate, never used in any score."),
     ("2026-08-21", "Compound odor descriptors cross-checked against Scott "
                    "Janish's The New IPA flavor-category table; missing "
                    "categories added and clearly cited — e.g. thiols now "
@@ -626,6 +635,49 @@ def _all_compound_descriptors(con, comp: dict) -> dict[str, str]:
     return matching.compound_descriptors(con, all_compounds)
 
 
+def _process_survival_label(compound: str) -> str | None:
+    """Libellé "Process" (badge de survie au procédé, T74, 2026-08-21,
+    demande utilisateur explicite : "Un lecteur qui voit « myrcène 48 % »
+    sur une fiche doit savoir que ce chiffre compte en dry hop et devient
+    largement caduc sur une ébullition de 60 minutes") pour un composé, ou
+    `None` si non mappé (`matching.process_survival`, jamais un placeholder
+    "unknown" -- même principe que "Smells like" absent).
+
+    Confiance BASSE rendue EXPLICITEMENT visible par un suffixe (demande
+    utilisateur : "rendu visuellement distinct (grisé, ou suffixe
+    explicite)" -- suffixe retenu, un `st.dataframe` ne permet pas de
+    griser une cellule individuelle ; cohérent avec le préfixe "Inferred:"
+    déjà utilisé pour `_purpose_label` sur une réserve de même nature).
+    Confiance moyenne/haute affichées telles quelles, sans suffixe -- seule
+    la confiance BASSE est explicitement demandée comme visuellement
+    distincte."""
+    info = matching.process_survival(compound)
+    if info is None:
+        return None
+    label = info["annotation"]
+    if info["confidence"] == "low":
+        label += " (low confidence)"
+    return label
+
+
+def _process_survival_legend() -> None:
+    """Légende "What do these Process labels mean?" (2026-08-21, demande
+    utilisateur explicite : la différence entre "direct traces, contributes
+    via oxidation" et "survives boiling" n'est pas évidente sans la chimie
+    sous-jacente -- "I'm not sure to understand the difference"). Une
+    phrase par annotation DISTINCTE (`reference.PROCESS_SURVIVAL_
+    EXPLANATIONS`), dérivée des annotations RÉELLEMENT utilisées dans
+    `reference.PROCESS_SURVIVAL` (jamais une entrée orpheline si une
+    annotation change un jour). `st.expander` replié par défaut -- pas de
+    bruit visuel pour qui ne se pose pas la question, disponible pour qui
+    se la pose."""
+    with st.expander("What do these Process labels mean?"):
+        for annotation in sorted({v["annotation"] for v in matching.reference.PROCESS_SURVIVAL.values()}):
+            explanation = matching.reference.PROCESS_SURVIVAL_EXPLANATIONS.get(annotation)
+            if explanation:
+                st.write(f"**{annotation}** — {explanation}")
+
+
 def _hop_detail_expanders(con, hops: dict, comp: dict, hop_desc: dict, rows: list[dict]) -> None:
     """Détail par houblon en expander, sous le tableau de résultats.
     Remplace l'ancien bouton de navigation directe vers Browse hop
@@ -668,7 +720,8 @@ def _hop_detail_expanders(con, hops: dict, comp: dict, hop_desc: dict, rows: lis
             crows = sorted(
                 ({"Compound": c, "Value": round(cv["mid"], 3), "Unit": cv["unit"],
                   "Sources": ", ".join(cv["sources"]),
-                  "Smells like": compound_smells.get(c, "—")}
+                  "Smells like": compound_smells.get(c, "—"),
+                  "Process": _process_survival_label(c) or "—"}
                  for c, cv in hcomp.items()
                  if c not in matching.NON_AROMA_DISPLAY and cv["mid"] is not None),
                 key=lambda r: -r["Value"])
@@ -1112,11 +1165,17 @@ def _browse(con):
     compound_smells = _all_compound_descriptors(con, comp)
     rows = sorted(
         ({"Compound": c, "Value": round(v["mid"], 3), "Unit": v["unit"],
-          "Sources": ", ".join(v["sources"]), "Smells like": compound_smells.get(c, "—")}
+          "Sources": ", ".join(v["sources"]), "Smells like": compound_smells.get(c, "—"),
+          "Process": _process_survival_label(c) or "—"}
          for c, v in hcomp.items() if c not in matching.NON_AROMA_DISPLAY and v["mid"] is not None),
         key=lambda r: -r["Value"])
     if rows:
         st.dataframe(rows, width="stretch", hide_index=True)
+        if any(r["Process"] != "—" for r in rows):
+            st.caption(":material/info: \"Process\" is a qualitative prior (Scott Janish, "
+                      "The New IPA), not a measured transfer rate — it depends on equipment, "
+                      "contact time, temperature and yeast. Never used in any score.")
+            _process_survival_legend()
     else:
         st.write("No composition recorded.")
 
@@ -1476,7 +1535,8 @@ def _by_descriptor(con):
                 st.dataframe(
                     [{"Compound": c["compound"], "Value": round(c["mid"], 2),
                       "Unit": c["unit"], "Sources": ", ".join(c["sources"]),
-                      "Smells like": compound_smells.get(c["compound"], "—")}
+                      "Smells like": compound_smells.get(c["compound"], "—"),
+                      "Process": _process_survival_label(c["compound"]) or "—"}
                      for c in h["compounds"][:8]],
                     width="stretch", hide_index=True)
 
@@ -1582,7 +1642,8 @@ _COMPARE_LABEL_ANGLE = -45
 def _compare_dual_axis_barplot(rows: list[dict], primary_fields: list[str], primary_title: str,
                                secondary_fields: list[str], secondary_title: str,
                                colors: dict[str, str],
-                               descriptors: dict[str, str] | None = None):
+                               descriptors: dict[str, str] | None = None,
+                               process_notes: dict[str, str] | None = None):
     """Barplot groupé par houblon (`xOffset`) sur un axe "Field" catégoriel
     partagé, à DOUBLE ÉCHELLE Y : `primary_fields` sur l'axe gauche,
     `secondary_fields` sur l'axe droit (2026-08-19, T58 -- demande
@@ -1639,10 +1700,20 @@ def _compare_dual_axis_barplot(rows: list[dict], primary_fields: list[str], prim
     natif, contrairement à la roue d'arôme qui dessine ses propres labels
     en `mark_text` avec coordonnées calculées à la main) : cette colonne
     invisible pleine hauteur est le substitut robuste retenu, une cible de
-    survol plus large que le seul label, pas plus fragile à positionner."""
+    survol plus large que le seul label, pas plus fragile à positionner.
+
+    `process_notes` (T74, 2026-08-21, demande utilisateur explicite --
+    annotation de survie au procédé, `app._process_survival_label`) : même
+    contrat que `descriptors`, ajouté EN PLUS (pas à la place) dans le même
+    tooltip et la même couche rect -- deux informations indépendantes sur le
+    même composé, jamais fusionnées en une seule chaîne (l'une vient de
+    Flavornet/Janish -- ce que le composé SENT --, l'autre est un prior de
+    brassage -- CE QUI EN SURVIT au procédé -- aucun rapport de source entre
+    les deux)."""
     if not rows:
         return None
     descriptors = descriptors or {}
+    process_notes = process_notes or {}
     field_order = primary_fields + secondary_fields
     axis_kwargs = {
         "labelAngle": _COMPARE_LABEL_ANGLE,
@@ -1667,20 +1738,29 @@ def _compare_dual_axis_barplot(rows: list[dict], primary_fields: list[str], prim
     if any(f in descriptors for f in field_order):
         tooltip.append(alt.Tooltip("Descriptors:N", title="Smells like"))
         rows = [dict(r, Descriptors=descriptors.get(r["Field"], "—")) for r in rows]
+    if any(f in process_notes for f in field_order):
+        tooltip.append(alt.Tooltip("Process:N", title="Process"))
+        rows = [dict(r, Process=process_notes.get(r["Field"], "—")) for r in rows]
 
     primary_rows = [r for r in rows if r["Field"] in primary_fields]
     secondary_rows = [r for r in rows if r["Field"] in secondary_fields]
     layers = []
-    resolved_fields = [f for f in field_order if f in descriptors]
+    resolved_fields = [f for f in field_order if f in descriptors or f in process_notes]
     if resolved_fields:
         # Couche invisible EN PREMIER (sous les barres, voir docstring) :
-        # une colonne pleine hauteur par composé résolu, cible de survol
-        # pour "Smells like" en dehors d'une barre précise.
+        # une colonne pleine hauteur par composé résolu (Smells like ET/OU
+        # Process), cible de survol en dehors d'une barre précise.
+        rect_tooltip = ["Field:N"]
+        if descriptors:
+            rect_tooltip.append(alt.Tooltip("Descriptors:N", title="Smells like"))
+        if process_notes:
+            rect_tooltip.append(alt.Tooltip("Process:N", title="Process"))
         layers.append(
-            alt.Chart(alt.Data(values=[{"Field": f, "Descriptors": descriptors[f]}
+            alt.Chart(alt.Data(values=[{"Field": f, "Descriptors": descriptors.get(f, "—"),
+                                       "Process": process_notes.get(f, "—")}
                                        for f in resolved_fields]))
             .mark_rect(opacity=0.001)
-            .encode(x=x_enc, tooltip=["Field:N", alt.Tooltip("Descriptors:N", title="Smells like")]))
+            .encode(x=x_enc, tooltip=rect_tooltip))
     if primary_rows:
         layers.append(
             alt.Chart(alt.Data(values=primary_rows)).mark_bar()
@@ -1926,15 +2006,27 @@ def _compare(con):
     # -- voir sa docstring) : `_compare_dual_axis_barplot` affiche "—" pour
     # ceux non résolus, jamais une valeur inventée.
     descriptors = matching.compound_descriptors(con, present_oil_compounds + thiols_fields)
+    # Badge de survie au procédé (T74, 2026-08-21, demande utilisateur
+    # explicite) : même mécanisme que `descriptors` ci-dessus, ajouté EN
+    # PLUS dans le même tooltip/couche rect (voir docstring de
+    # `_compare_dual_axis_barplot`) -- deux infos indépendantes par composé.
+    process_notes = {c: label for c in present_oil_compounds + thiols_fields
+                     if (label := _process_survival_label(c)) is not None}
     detail_chart = _compare_dual_axis_barplot(
         detail_rows, present_oil_compounds, primary_title,
-        thiols_fields, "Thiols (µg/kg)", colors, descriptors=descriptors)
+        thiols_fields, "Thiols (µg/kg)", colors, descriptors=descriptors,
+        process_notes=process_notes)
     if detail_chart is not None:
         st.altair_chart(detail_chart, width="content")
-        if descriptors:
+        if descriptors or process_notes:
             st.caption(":material/info: Hover a bar, or the space near/below "
                       "a compound's label, for its Flavornet odor descriptors "
-                      "(not every compound has an entry).")
+                      "and process survival notes (not every compound has an "
+                      "entry). \"Process\" is a qualitative prior (Scott "
+                      "Janish, The New IPA) — never a measured transfer rate, "
+                      "never used in any score.")
+        if process_notes:
+            _process_survival_legend()
     else:
         st.write("No detailed composition data for the selected hops.")
     if missing_oil:

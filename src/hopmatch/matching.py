@@ -263,6 +263,25 @@ def compound_descriptors(con, compounds: list[str]) -> dict[str, str]:
     return out
 
 
+def process_survival(compound: str) -> dict[str, str] | None:
+    """Annotation de survie au procédé pour `compound` (T74, 2026-08-21,
+    demande utilisateur explicite -- lecture pure de
+    `reference.PROCESS_SURVIVAL`, aucune requête DB : contrairement à
+    `compound_descriptors`, cette info ne dépend d'aucune donnée houblon
+    (c'est une propriété de la MOLÉCULE, pas du houblon qui la porte).
+
+    Retourne {"class", "subclass", "annotation", "confidence"} ou `None` si
+    `compound` n'est pas dans `reference.PROCESS_SURVIVAL` (composé non
+    mappé, ou explicitement exclu -- alpha_acid/beta_acid/co_humulone/
+    total_oil, voir `NON_AROMA_DISPLAY` -- ne s'y trouvent jamais) : JAMAIS
+    une valeur par défaut fabriquée, contrainte explicite de ce ticket
+    ("Fonction de lookup renvoyant None pour un composé non mappé, jamais
+    une valeur par défaut"). Purement informatif -- n'est appelé par AUCUN
+    chemin de scoring (`molecular_scores`/`amplify`/`contrast`/
+    `by_descriptor`), uniquement par la GUI pour l'affichage."""
+    return reference.PROCESS_SURVIVAL.get(compound)
+
+
 def hop_similar_varieties(con, variety: str) -> list[str]:
     """Variétés similaires/substituts curées par Yakima (T25 backlog,
     `hop_similar`) — toujours une `variety` de notre propre catalogue (résolue

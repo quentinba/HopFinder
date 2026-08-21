@@ -260,6 +260,96 @@ def test_compound_descriptors_dedups_janish_category_already_covered(db):
         db.execute("DELETE FROM flavornet_compounds WHERE cas='123-35-3'")
         db.commit()
 
+def test_process_survival_all_hop_composition_compounds_have_a_decision(db):
+    # T74 (2026-08-21, "The New IPA" de Scott Janish, figure "Chemical
+    # compositions of the essential oils of hops") : chaque composé
+    # DISTINCT réellement présent dans hop_composition doit être soit
+    # mappé (reference.PROCESS_SURVIVAL), soit explicitement exclu
+    # (matching.NON_AROMA_DISPLAY -- acides alpha/bêta, co-humulone, huile
+    # totale, qui ne sont pas des composants de l'huile essentielle). Ce
+    # test échoue dès qu'un composé nouveau apparaît sans décision prise --
+    # jamais un oubli silencieux.
+    compounds = {r[0] for r in db.execute("SELECT DISTINCT compound FROM hop_composition")}
+    undecided = compounds - set(matching.reference.PROCESS_SURVIVAL) - matching.NON_AROMA_DISPLAY
+    assert not undecided, f"composé(s) sans décision de survie au procédé : {undecided}"
+
+def test_process_survival_excludes_non_essential_oil_compounds():
+    # Acides alpha/bêta, co-humulone, huile totale : pas des composants de
+    # l'huile essentielle (isomérisation à l'ébullition, sans rapport avec
+    # la volatilité/solubilité qui gouverne le reste de la table) -- ne
+    # reçoivent JAMAIS d'annotation, même par accident.
+    for c in matching.NON_AROMA_DISPLAY:
+        assert matching.process_survival(c) is None
+
+def test_process_survival_returns_none_for_unmapped_compound():
+    # limonene : dans reference.MOLECULES (molécule d'huile de houblon
+    # connue) mais JAMAIS mesuré dans hop_composition par BarthHaas/Yakima
+    # actuellement (vérifié en direct, 2026-08-21) -- pas d'entrée ici, une
+    # annotation qui ne s'afficherait jamais serait une entrée morte. Les
+    # 11 composés RÉELLEMENT présents sont tous mappés avec certitude (voir
+    # test_process_survival_all_hop_composition_compounds_have_a_decision) --
+    # aucun composé réel n'est donc "juste absent du tableau Janish" dans
+    # cette base. "nonexistent" : hors vocabulaire houblon.
+    assert matching.process_survival("limonene") is None
+    assert matching.process_survival("nonexistent") is None
+
+def test_process_survival_returns_full_structure_for_mapped_compound():
+    # myrcene : monoterpène (Janish), annotation qualitative jamais
+    # chiffrée -- les 4 champs demandés (classe/sous-classe/annotation/
+    # confiance) présents, `confidence` DANS la structure (pas seulement en
+    # commentaire) pour que la GUI puisse afficher une réserve visible.
+    info = matching.process_survival("myrcene")
+    assert info == {"class": "Hydrocarbons", "subclass": "Monoterpenes",
+                    "annotation": "dry hop / late additions", "confidence": "high"}
+
+def test_process_survival_low_confidence_entries_flagged():
+    # isobutyrate/ketones : agrégats BarthHaas sans molécule nominative
+    # précise dans le livre -- confidence="low" explicite, pas une
+    # affirmation au même niveau que les composés individuellement
+    # identifiés (ex. myrcene, confidence="high").
+    for c in ("isobutyrate", "ketones"):
+        assert matching.process_survival(c)["confidence"] == "low"
+
+def test_process_survival_never_contains_a_numeric_value():
+    # Contrainte non négociable du ticket : aucune valeur numérique nulle
+    # part dans la structure (pas de taux de transfert, pas de
+    # multiplicateur) -- vérifié directement sur les valeurs de tous les
+    # champs de toutes les entrées.
+    for entry in matching.reference.PROCESS_SURVIVAL.values():
+        for value in entry.values():
+            assert isinstance(value, str)
+            assert not any(ch.isdigit() for ch in value)
+
+def test_process_survival_every_annotation_has_an_explanation():
+    # 2026-08-21 (suite directe de T74, demande utilisateur : "I'm not sure
+    # to understand the difference [between] 'direct traces, contribute via
+    # oxydation' [and] 'survive boiling'") : chaque annotation DISTINCTE
+    # réellement utilisée dans PROCESS_SURVIVAL doit avoir une explication
+    # -- échoue si une nouvelle annotation est ajoutée sans sa légende.
+    annotations = {v["annotation"] for v in matching.reference.PROCESS_SURVIVAL.values()}
+    missing = annotations - set(matching.reference.PROCESS_SURVIVAL_EXPLANATIONS)
+    assert not missing, f"annotation(s) sans explication : {missing}"
+
+def test_process_survival_never_consulted_by_any_scoring_path(db, monkeypatch):
+    # T74, point de vigilance soulevé par l'utilisateur en direct (relecture
+    # externe) : "Le test « résultats identiques avant/après » est là pour
+    # attraper ça [l'annotation transformée en critère de sélection]." Un
+    # test qui compare juste des valeurs attendues FIGÉES (comme le reste de
+    # la suite existante, déjà vert avant/après T74) n'attrape qu'un
+    # changement qui modifie CES valeurs précises -- pas un futur appel
+    # ajouté par erreur qui laisserait le classement inchangé par coïncidence.
+    # Preuve structurelle plus forte : on rend `matching.process_survival`
+    # EXPLOSIF (n'importe quel appel lève), puis on fait tourner amplify/
+    # contrast/by_descriptor sur les mêmes note/descripteurs que le reste de
+    # la suite -- si l'un d'eux consultait PROCESS_SURVIVAL, même sans
+    # changer le résultat final, ce test échouerait immédiatement.
+    def _boom(compound):
+        raise AssertionError(f"process_survival() appelé depuis un chemin de score pour {compound!r}")
+    monkeypatch.setattr(matching, "process_survival", _boom)
+    matching.amplify(db, "_citrus")
+    matching.contrast(db, descriptors=["citrus", "floral"])
+    matching.by_descriptor(db, ["citrus", "tropical"])
+
 def test_amplify_ranks(db):
     r = matching.amplify(db, "_citrus")
     assert r["ranked"], "au moins un houblon"

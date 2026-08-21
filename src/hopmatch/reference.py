@@ -328,3 +328,160 @@ CONTRAST_AFFINITY: dict[str, list[str]] = {
     "onion":  ["floral"],
     "garlic": ["floral"],
 }
+
+# Annotation de survie au procédé par composé (T74, 2026-08-21, demande
+# utilisateur explicite, spec complète fournie). Vérifié composé par composé
+# contre `SELECT DISTINCT compound, source FROM hop_composition` (aromahops.db
+# réel) le jour de l'ajout -- 11 composés d'huile essentielle présents
+# (`matching.NON_AROMA_DISPLAY` exclut alpha_acid/beta_acid/co_humulone/
+# total_oil, jamais annotés ici, voir plus bas), tous les 11 mappés avec
+# certitude. α-pinène et β-citronellol (cités par la figure Janish
+# ci-dessous) NE SONT PAS présents dans nos données réelles (ni BarthHaas ni
+# Yakima ne les mesurent actuellement) -- pas d'entrée fabriquée pour un
+# composé qui n'apparaîtrait jamais dans la GUI.
+#
+# ⚠️ DEUX NIVEAUX DE PROVENANCE DISTINCTS DANS LA MÊME STRUCTURE, à ne
+# jamais confondre (y compris dans les commentaires qui suivent) :
+#   - "class"/"subclass" (LA TAXONOMIE CHIMIQUE) : SOURCÉE, solide, PAS un
+#     prior -- Scott Janish, The New IPA, figure "Chemical compositions of
+#     the essential oils of hops" (voir docs/DATA_SOURCES.md pour le détail
+#     complet de la citation).
+#   - "annotation"/"confidence" (LA SURVIE AU PROCÉDÉ) : un PRIOR qualitatif
+#     de brassage, au MÊME TITRE que CONTRAST_AFFINITY ci-dessus (voir aussi
+#     README.md, section "Ce qui est un prior, pas une donnée") -- les taux
+#     de transfert publiés dépendent de l'équipement/temps de contact/
+#     température/levure ; les chiffrer ici serait exactement la précision-
+#     déchet déjà refusée ailleurs dans ce projet (absence d'OAV réel,
+#     retrait de combine() -- voir la section "But" de CLAUDE.md). D'où la
+#     contrainte non négociable : AUCUNE valeur numérique nulle part dans
+#     cette structure, jamais consommée par un score (TF-IDF/--oav/blends),
+#     purement affichée -- voir `matching.process_survival` et son usage
+#     GUI (app._process_survival_label).
+#
+# Note sesquiterpènes : leurs produits d'oxydation (humulénol, farnésol)
+# changent de classe et passent en oxygénés -- d'où "contribue via
+# oxydation" plutôt qu'un simple "survit"/"ne survit pas" binaire, pour ne
+# pas suggérer que la molécule mesurée ARRIVE telle quelle dans le verre.
+#
+# Note soufrés : la figure Janish éclate cette classe en thiols, sulfures et
+# thioesters (ces deux derniers indésirables) ; BarthHaas ne mesure QUE les
+# thiols agrégés (voir schema.py, `hop_composition` compound="thiols").
+# Sous-classe explicitement étiquetée "Thiols", jamais "Sulfur compounds"
+# générique, pour ne pas suggérer une homogénéité que la source dément.
+# Annotation reformulée (2026-08-21, signalé par l'utilisateur en direct :
+# "there is a redundancy... 'late / dry hop'... but is still present") --
+# "late / dry hop" (thiols) n'était qu'une PERMUTATION des mêmes mots que
+# "dry hop / late additions" (monoterpènes) : deux entrées PROCESS_SURVIVAL
+# distinctes avec des explications différentes (pas un bug de duplication),
+# mais un libellé qui se LIT comme un doublon dans la légende. Reformulé en
+# "extremely volatile — dry hop only" : même recommandation pratique, mais
+# formulation distincte reflétant la raison chimique différente (volatilité
+# extrême + quantités traces µg/kg, PAS la simple perte par évaporation des
+# hydrocarbures monoterpéniques) -- ne se lit plus comme un réarrangement
+# du même libellé.
+#
+# Cas particuliers, PAS des omissions -- les 11 composés RÉELLEMENT
+# présents dans hop_composition sont TOUS mappés ci-dessous (vérifié,
+# aucun composé réel n'est laissé sans décision) :
+#   - "isobutyrate"/"ketones" classées "esters"/"ketones" par NOMENCLATURE
+#     CHIMIQUE DIRECTE ("-ate" = ester, "ketones" = nom littéral de la
+#     sous-classe -- pas une supposition sur un nom approchant) MAIS avec
+#     confidence="low", car BarthHaas ne précise JAMAIS quelle(s)
+#     molécule(s) précise(s) composent cette valeur agrégée (même réserve
+#     déjà documentée pour le refus de deviner un CID PubChem sur un nom
+#     flou -- voir ingest.py, section PubChem).
+#   - "selinene" EST listé sous Sesquiterpènes dans le tableau du ticket
+#     (avec humulène/caryophyllène/farnésène) -- mappé normalement,
+#     confidence="high". (Ne pas confondre avec le tableau "Compound
+#     Descriptions" d'un AUTRE extrait du même livre, utilisé pour T73
+#     (`JANISH_COMPOUND_CATEGORIES` ci-dessus) : celui-là ne listait PAS
+#     sélinène, mais ce n'est pas la source utilisée ici.)
+# Composés `MOLECULES` cités par la figure mais absents de nos données
+# réelles (α-pinène, β-citronellol) : voir le commentaire au-dessus de
+# `PROCESS_SURVIVAL` -- pas d'entrée pour un composé qui ne s'afficherait
+# jamais.
+PROCESS_SURVIVAL: dict[str, dict[str, str]] = {
+    "myrcene":       {"class": "Hydrocarbons", "subclass": "Monoterpenes",
+                      "annotation": "dry hop / late additions", "confidence": "high"},
+    "beta-pinene":   {"class": "Hydrocarbons", "subclass": "Monoterpenes",
+                      "annotation": "dry hop / late additions", "confidence": "high"},
+    "humulene":      {"class": "Hydrocarbons", "subclass": "Sesquiterpenes",
+                      "annotation": "direct traces, contributes via oxidation", "confidence": "high"},
+    "caryophyllene": {"class": "Hydrocarbons", "subclass": "Sesquiterpenes",
+                      "annotation": "direct traces, contributes via oxidation", "confidence": "high"},
+    "farnesene":     {"class": "Hydrocarbons", "subclass": "Sesquiterpenes",
+                      "annotation": "direct traces, contributes via oxidation", "confidence": "high"},
+    "selinene":      {"class": "Hydrocarbons", "subclass": "Sesquiterpenes",
+                      "annotation": "direct traces, contributes via oxidation", "confidence": "high"},
+    "linalool":      {"class": "Oxygenated", "subclass": "Monoterpene alcohols",
+                      "annotation": "survives boiling", "confidence": "high"},
+    "geraniol":      {"class": "Oxygenated", "subclass": "Monoterpene alcohols",
+                      "annotation": "survives boiling", "confidence": "high"},
+    "ketones":       {"class": "Oxygenated",
+                      "subclass": "Other (ketones, esters, aldehydes, epoxides)",
+                      "annotation": "intermediate transfer", "confidence": "low"},
+    "isobutyrate":   {"class": "Oxygenated",
+                      "subclass": "Other (ketones, esters, aldehydes, epoxides)",
+                      "annotation": "intermediate transfer", "confidence": "low"},
+    "thiols":        {"class": "Sulfur compounds", "subclass": "Thiols",
+                      "annotation": "extremely volatile — dry hop only", "confidence": "medium"},
+}
+
+# Clarification en une phrase par annotation DISTINCTE de PROCESS_SURVIVAL
+# (2026-08-21, demande utilisateur explicite, suite directe de T74 : "I'm
+# not sure to understand the difference [between] 'direct traces,
+# contribute via oxydation' [and] 'survive boiling'"). Les libellés courts
+# de PROCESS_SURVIVAL restent volontairement bruts/factuels (déjà validés
+# T74) -- cette table les COMPLÈTE pour la GUI (légende, pas une
+# réécriture) plutôt que de les remplacer par un texte plus long qui
+# encombrerait chaque ligne de tableau/tooltip. Prior qualitatif au même
+# titre que PROCESS_SURVIVAL lui-même (voir son commentaire) -- explique le
+# RAISONNEMENT chimique déjà résumé dans les notes du ticket T74, pas une
+# nouvelle affirmation.
+#
+# **Correctif (2026-08-21, même jour, signalé par l'utilisateur en direct) :
+# le premier jet de l'entrée "direct traces, contributes via oxidation"
+# affirmait un déclencheur ("exposure to oxygen -- dry-hopping, packaging,
+# aging") qui n'était PAS dans la donnée fournie -- une inférence perso à
+# partir de connaissances générales de brassage, pas une donnée sourcée
+# (exactement le type d'erreur que ce projet refuse ailleurs). Corrigé après
+# clarification explicite de l'utilisateur : le déclencheur documenté (une
+# étude d'extraction Saaz à temps d'ébullition variable, citée dans le livre)
+# est une ÉBULLITION LONGUE (>20 min), PAS une oxydation au dry-hop/
+# conditionnement/garde -- et cette étude précise ne couvre QUE humulène et
+# caryophyllène, PAS farnésène/sélinène (regroupés sous la même annotation
+# de CLASSE par la figure de taxonomie, une source différente et plus
+# générale, sans que le déclencheur précis leur soit confirmé pour autant).
+# "caryophyllene oxide"/"humulene epoxide" (noms de produits d'oxydation)
+# retirés de la même façon -- jamais donnés par l'utilisateur, une
+# supposition chimique plausible mais non vérifiée à ne pas afficher comme
+# un fait. Seuls "humulénol"/"farnésol" restent, cités tels quels dans la
+# spec originale du ticket T74.
+PROCESS_SURVIVAL_EXPLANATIONS: dict[str, str] = {
+    "dry hop / late additions":
+        "Volatile, non-polar hydrocarbons — mostly stripped away by evaporation during a "
+        "boil. Only additions with little or no boil exposure (dry hop, whirlpool, "
+        "flame-out) keep them close to the measured amount.",
+    "direct traces, contributes via oxidation":
+        "Heavier than the monoterpene hydrocarbons above, so a small amount can persist "
+        "as a direct trace of the same molecule. For humulene and caryophyllene "
+        "specifically, a Saaz extraction-timing study found that producing the "
+        "spicy-noted oxidized compounds (e.g. humulene → humulenol) requires a LONG boil "
+        "(over ~20 minutes) — not dry hop or late additions. Farnesene and selinene share "
+        "this class-level annotation (sesquiterpene hydrocarbons that can oxidize into "
+        "different, oxygenated compounds, e.g. farnesene → farnesol) but the boil-time "
+        "specifics above are not established for them in this source.",
+    "survives boiling":
+        "Already oxygenated (an -OH group makes these far less volatile and more "
+        "water-soluble than any hydrocarbon above) — a meaningful share persists as the "
+        "same molecule through a boil, not just in late/dry-hop additions.",
+    "intermediate transfer":
+        "BarthHaas doesn't specify which individual molecule(s) make up this aggregated "
+        "measurement, so no volatility-based transfer behavior can be stated with "
+        "confidence — hence the low confidence rating.",
+    "extremely volatile — dry hop only":
+        "Present in vanishingly small quantities (µg/kg) and far more volatile than the "
+        "hydrocarbons above — boiling drives them off almost entirely, so even the "
+        "moderate heat exposure that a late-boil addition tolerates is enough to lose "
+        "most of it; aroma impact depends on avoiding prolonged heat exposure altogether.",
+}
