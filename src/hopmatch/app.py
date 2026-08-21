@@ -135,6 +135,10 @@ _TOOL_SUMMARIES = [
 # un `git log` en direct exigerait aussi que `.git` soit présent dans le
 # conteneur déployé, ce qui n'est pas garanti.
 _RECENT_UPDATES = [
+    ("2026-08-21", "Compare Hops: toggle to show the detailed composition "
+                   "barplot as an absolute amount (ml/100g) instead of % of "
+                   "oil, so two hops can't silently swap rank just because "
+                   "their total oil differs."),
     ("2026-08-21", "Browse: new \"Similar hops\" section ranks hops by molecular "
                    "composition and/or quantitative aroma wheel intensity, with "
                    "each layer independently toggleable."),
