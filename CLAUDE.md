@@ -1105,3 +1105,16 @@ Reste :
   ingest-flavornet` puis `hopmatch ingest-foodb` (télécharge le dump si besoin) avant de
   pouvoir utiliser `hopmatch amplify|contrast <note>` ; `hopmatch by-descriptor
   <descripteurs>` ne dépend d'aucune note et fonctionne dès `build`.
+- **`app._RECENT_UPDATES` (T69, liste "Recent updates" en bas de la page d'accueil) doit
+  être mise à jour DANS LE MÊME COMMIT que tout changement utilisateur visible de la GUI**
+  (décision utilisateur explicite, 2026-08-21, après un oubli réel : le commit `995e83d`
+  -- bascule relatif/absolu du barplot Compare Hops -- avait été poussé sans nouvelle
+  entrée, "why this commit don't display a new feature update in the main page"). C'est
+  une liste STATIQUE curée à la main (voir sa section pour le pourquoi : pas de lecture
+  `git log` en direct, messages de commit en français incompatibles avec le texte GUI
+  anglais) -- rien ne la met à jour automatiquement, donc AVANT de committer un changement
+  visible dans `app.py` (nouvel outil, nouvelle section, changement de comportement
+  perceptible), ajouter une entrée en tête de `_RECENT_UPDATES` (date du jour, résumé en
+  anglais, une phrase) fait partie du changement lui-même, pas une étape à part qu'on peut
+  oublier. Ne s'applique qu'aux changements GUI VISIBLES par l'utilisateur final (pas les
+  changements internes purs -- refactor, tests, corrections de commentaires, CLI seul).
