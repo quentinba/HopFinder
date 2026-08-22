@@ -1,0 +1,49 @@
+# BarthHaas aroma-wheel category -> canonical hop_aroma_intensity category.
+#
+# Source: parsers.parse_barthhaas_aroma_wheel() extracts a 12-axis
+# quantitative "rose chart" (data-rose-labels + data-values attributes,
+# server-rendered, no JS execution needed) present on 100% of the 97
+# BarthHaas hop pages surveyed (2026-08-22, T79). Scale is roughly 0-8
+# (measured: min 0.0, max 8.0, mean ~3.1) — DIFFERENT from Yakima's
+# existing 0-100 scale (mean ~39) in hop_aroma_intensity. Both are kept
+# as separate rows (same table, distinct `source` column, already
+# supported by the schema's PRIMARY KEY (variety, descriptor, source))
+# — NEVER averaged/blended into one number: different measurement
+# methodologies on different scales, blending would manufacture a false
+# precision and hide real disagreement between the two sources (see
+# CLAUDE.md, T79, for the full discussion — user-confirmed decision).
+#
+# Left-hand key: the exact BarthHaas category string (note "curant" is
+# BarthHaas's own spelling on their site — a real typo in their source,
+# reproduced here verbatim since it's what the raw HTML actually
+# contains, not a transcription error on our side).
+# Right-hand value: the hop_aroma_intensity category to file it under.
+#   - 9 of the 12 map onto Yakima's EXISTING 15-category vocabulary
+#     (reference.AROMA_WHEEL_DEFINITIONS) — either an exact name match,
+#     a straight rename (woody aromatic -> woody, grassy-hay -> grassy,
+#     berries & curant -> berry), or a strong conceptual match
+#     (cream caramel -> sweet aromatic: Yakima's own definition for
+#     "sweet aromatic" is "Bubblegum, caramel, chocolate, creamy, honey,
+#     vanilla" — near enough to not warrant a separate axis).
+#   - sweet fruits -> tropical (BarthHaas's own icon for this category is
+#     a pineapple — user-confirmed, 2026-08-22).
+#   - green fruits -> apple (BarthHaas's own icon is a pear + apple —
+#     matches Yakima's official "POMME" category, user-confirmed).
+#   - menthol has no Yakima equivalent at all and becomes a genuinely
+#     NEW category, added to reference.AROMA_WHEEL_DEFINITIONS (16th
+#     axis) rather than dropped or force-fit onto an unrelated one.
+#
+# Reviewed and confirmed by the user on 2026-08-22 (see CLAUDE.md, T79).
+
+"citrus": citrus
+"sweet fruits": tropical # Image of brathaas suggest an ananas, hence tropical
+"green fruits": apple # Image of brathaas suggest an apple and a pear, hence apple
+"berries & curant": berry
+"cream caramel": sweet aromatic
+"woody aromatic": woody
+"menthol": menthol
+"herbal": herbal
+"spicy": spicy
+"grassy-hay": grassy
+"vegetal": vegetal
+"floral": floral

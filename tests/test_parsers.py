@@ -44,6 +44,51 @@ def test_parse_descriptors_still_works_if_barthhaas_gives_a_clean_list():
     text = "Aroma Profile\nTypical Aroma Profile\nCitrus, Herbal\nAnalyses\n"
     assert parsers.parse_descriptors(text) == ["citrus", "herbal"]
 
+def test_parse_barthhaas_tastes():
+    # gabarit calqué sur la page réelle 'admiral' (vérifié en direct,
+    # 2026-08-22, T79) : liste <li> structurée, JAMAIS du texte libre.
+    html = """
+    <ul class="section-card-text__tastes spacer-mb-32">
+        <li class="zitrus">Lemon</li>
+        <li class="rote-beeren">Cranberry</li>
+        <li class="sahnekaramell">Cream</li>
+        <li class="wurzig">Pepper</li>
+        <li class="krautig">Mate Tea</li>
+    </ul>
+    """
+    assert parsers.parse_barthhaas_tastes(html) == [
+        ("zitrus", "lemon"), ("rote-beeren", "cranberry"), ("sahnekaramell", "cream"),
+        ("wurzig", "pepper"), ("krautig", "mate tea"),
+    ]
+
+def test_parse_barthhaas_tastes_returns_empty_list_when_absent():
+    assert parsers.parse_barthhaas_tastes("<div>no tastes here</div>") == []
+
+def test_parse_barthhaas_aroma_wheel():
+    # gabarit calqué sur la page réelle 'admiral' (vérifié en direct,
+    # 2026-08-22, T79) : data-rose-labels sur un conteneur, data-values sur
+    # le <canvas> hero (toujours identique au bloc "Typical" plus bas,
+    # vérifié sur plusieurs variétés).
+    html = """
+    <div class="hp__hero__product-image" data-rose-labels="citrus,sweet fruits,green fruits,berries &amp; curant,cream caramel,woody aromatic,menthol,herbal,spicy,grassy-hay,vegetal,floral">
+        <canvas data-values="3,6,4,6,1,3,3,6,1,5,4,1"></canvas>
+    </div>
+    """
+    result = parsers.parse_barthhaas_aroma_wheel(html)
+    assert result == {
+        "citrus": 3.0, "sweet fruits": 6.0, "green fruits": 4.0, "berries & curant": 6.0,
+        "cream caramel": 1.0, "woody aromatic": 3.0, "menthol": 3.0, "herbal": 6.0,
+        "spicy": 1.0, "grassy-hay": 5.0, "vegetal": 4.0, "floral": 1.0,
+    }
+
+def test_parse_barthhaas_aroma_wheel_returns_none_when_absent():
+    assert parsers.parse_barthhaas_aroma_wheel("<div>no wheel here</div>") is None
+
+def test_parse_barthhaas_aroma_wheel_returns_none_on_label_value_count_mismatch():
+    html = ('<div data-rose-labels="citrus,floral">'
+           '<canvas data-values="1,2,3"></canvas></div>')
+    assert parsers.parse_barthhaas_aroma_wheel(html) is None
+
 def test_parse_flavornet():
     # gabarit calqué sur d_kovats_ov101.html (RI x4, lien CAS, descripteurs)
     html = """

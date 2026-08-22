@@ -257,6 +257,28 @@ et *ce qu'elle vaut*.
   source de composition ; les descripteurs viennent de Yakima et BeerMaverick (voir plus bas —
   BeerMaverick s'est révélé le vocabulaire le plus riche des deux, signalé en direct par
   l'utilisateur : "dank" n'était tagué que sur 1/203 houblons côté Yakima).
+- **Descripteurs qualitatifs et roue d'arôme quantitative RÉELS trouvés (T79, 2026-08-22).**
+  Le constat ci-dessus ("Aroma Profile" = prose, jamais une liste exploitable) reste vrai, mais
+  n'était pas la seule donnée d'arôme structurée présente sur ces pages. Deux blocs distincts,
+  jamais parsés jusqu'ici, couvrent 100% des ~97 variétés BarthHaas : une liste qualitative
+  courte (`<ul class="section-card-text__tastes">`, 3-5 mots par houblon,
+  `parsers.parse_barthhaas_tastes`) et une roue d'arôme **quantitative** à 12 axes servie en HTML
+  statique (attributs `data-rose-labels`/`data-values` sur le graphique "Typical Aroma Profile",
+  échelle 0-8, `parsers.parse_barthhaas_aroma_wheel`). Les 12 axes BarthHaas sont mappés vers le
+  vocabulaire `hop_aroma_intensity` existant (9 correspondances directes/renommages, 3 mappings
+  visuels confirmés par l'utilisateur sur les icônes BarthHaas — sweet fruits→tropical [ananas],
+  green fruits→apple [poire/pomme] — et `menthol`, une 16e catégorie sans équivalent Yakima).
+  Les mots qualitatifs sont réconciliés au vocabulaire `hop_descriptors` (105 termes) via un
+  alias ciblé quand un synonyme évident existe, sinon ajoutés tels quels. **Les deux décisions de
+  mapping (catégories de roue, alias de mots) sont des dictionnaires curés, pas une donnée
+  sourcée** — revus et confirmés par l'utilisateur, documentés dans
+  [`data/mappings/barthhaas_aroma_wheel_categories.yaml`](data/mappings/barthhaas_aroma_wheel_categories.yaml)
+  et [`data/mappings/barthhaas_descriptor_aliases.yaml`](data/mappings/barthhaas_descriptor_aliases.yaml).
+  BarthHaas et Yakima restent deux échelles distinctes (0-8 vs 0-100), **jamais moyennées** dans
+  un même houblon (voir la note "Fusion" ci-dessous) : résolution automatique par houblon
+  (Yakima si disponible, sinon BarthHaas remis à l'échelle), avec un toggle manuel
+  BarthHaas/Yakima sur chaque roue d'arôme houblon-unique de la GUI (Browse, détail
+  Amplify/Contrast/By-descriptor) et un toggle global sur Compare Hops.
 - **Symboles commerciaux (®/™/©) et slugs déposés.** Le générateur de slug de BarthHaas
   translittère ® en "r"/™ en "tm" collé sans séparateur ("Citra®" → `citrar`), ce qui créait
   de faux doublons avec Yakima (`ingest._fix_barthhaas_trademark_slug`, ne déclenche que sur
@@ -271,6 +293,9 @@ et *ce qu'elle vaut*.
   (`aromas`) et une roue **quantitative** à 15 catégories fixes, 0-100 réelle
   (`aroma_values`/`sensory_values` — voir [Compare Hops et Browse](#interface-graphique--détails-dimplémentation)
   pour son usage GUI). Données issues de leur labo qualité, conformes aux méthodes ASBC.
+  BarthHaas fournit désormais sa propre roue quantitative sur 12 de ces catégories (T79,
+  voir ci-dessus) — les deux échelles restent stockées et affichées séparément, jamais
+  mélangées dans un même houblon.
 - **Comment.** Le site place un rempart anti-bot devant le HTML (Vercel Security Checkpoint) :
   une requête HTTP simple ne l'atteint pas, même avec un User-Agent de navigateur. Leur front
   s'appuie sur **Algolia** (recherche instantanée) avec une clé API **publique en lecture
@@ -698,14 +723,18 @@ roues d'arôme réelles (`hop_descriptors`, BarthHaas/Yakima/BeerMaverick), pas 
 **Méthode, à deux paliers.** (1) **Catégorique**, prioritaire : nombre de descripteurs texte
 recoupés (desc) — le filtre ET le tri principal ; un houblon doit recouper au moins un
 descripteur choisi pour apparaître. (2) **Quantitatif**, départage seulement à l'intérieur d'un
-même palier catégorique : intensité moyenne mesurée (`hop_aroma_intensity`, Yakima uniquement,
-0-100 réel, voir la roue d'arôme quantitative plus bas) sur les descripteurs de la roue choisis
-en plus — jamais un critère de présence/absence, jamais une moyenne comptant un descripteur
-manquant comme 0. (3) `total_oil` réconcilié desc puis `variety` asc en dernier recours
-(déterminisme total, même tri secondaire que `contrast`). En GUI, la roue quantitative (15
-catégories fixes) est proposée comme des pills à cocher séparément du texte libre : si aucun
-descripteur texte n'est choisi, elle sert aussi de filtre (repli), sinon elle ne fait plus que
-noter les résultats déjà filtrés par le texte.
+même palier catégorique : intensité moyenne mesurée (`hop_aroma_intensity`, résolue par houblon
+— Yakima si disponible, sinon BarthHaas remis à l'échelle, jamais les deux mélangés dans un même
+houblon, voir T79 plus haut — 0-100 réel, voir la roue d'arôme quantitative plus bas) sur les
+descripteurs de la roue choisis en plus — jamais un critère de présence/absence, jamais une
+moyenne comptant un descripteur manquant comme 0. (3) `total_oil` réconcilié desc puis `variety`
+asc en dernier recours (déterminisme total, même tri secondaire que `contrast`). En GUI, la
+roue quantitative (16 catégories fixes, 15 Yakima + `menthol` ajoutée avec BarthHaas T79) est
+proposée comme des pills à cocher séparément du texte libre : si aucun descripteur texte n'est
+choisi, elle sert aussi de filtre (repli), sinon elle ne fait plus que noter les résultats déjà
+filtrés par le texte. Cette résolution automatique pilote aussi bien le score que la roue
+affichée dans chaque expander de détail ; un toggle manuel permet d'y afficher explicitement
+l'autre source si les deux existent pour ce houblon (jamais sur le score lui-même).
 
 Les variantes de descripteurs entre sources (« stone fruit » vs « stonefruit », pluriels…) sont
 normalisées à l'ingestion via `reference.DESCRIPTOR_ALIASES`, appliqué dans
@@ -741,12 +770,16 @@ créé dans le même run).
 le houblon choisi : purpose (aromatique/amérisant/les deux, ou "Inferred: ..." en repli, voir
 BeerMaverick plus haut) affiché en information principale ; alpha/beta acides, co-humulone
 (Yakima uniquement), huile totale en `st.metric` ; descripteurs ; composition détaillée triée
-par valeur ; et, pour les variétés couvertes par la roue quantitative Yakima (94/151, voir
-`docs/DATA_SOURCES.md`), un radar/spider chart sur 15 axes fixes — intensité 0-100 réelle,
+par valeur ; et, pour les variétés couvertes par la roue quantitative Yakima et/ou BarthHaas
+(voir `docs/DATA_SOURCES.md`), un radar/spider chart sur 16 axes fixes (résolu automatiquement
+par houblon — Yakima si disponible, sinon BarthHaas remis à l'échelle 0-8→0-100, jamais les
+deux mélangés dans un même houblon, voir T79 plus haut — avec un toggle manuel pour afficher
+explicitement l'autre source si les deux existent) — intensité 0-100 réelle,
 **pas** une simple présence/absence (contrairement à la heatmap de `by-descriptor` ci-dessus,
 ce radar-ci porte une vraie quantité par axe, d'où le choix justifié d'un radar plutôt qu'une
 grille). Chaque label d'axe affiche sa définition au survol (tooltip Vega-Lite natif), sourcée
-sur le "Hop Sensory Ballot" officiel de Yakima Chief — utile car trois catégories voisines
+sur le "Hop Sensory Ballot" officiel de Yakima Chief (`menthol`, la 16e catégorie, vient de
+BarthHaas — voir T79) — utile car trois catégories voisines
 (grassy/herbal/vegetal) sont facilement perçues comme synonymes alors qu'elles désignent des
 notes réellement différentes (herbe fraîche coupée / thé-menthe-romarin / légume, ce dernier
 étant plutôt un signal de prudence en brassage). `browse` affiche enfin trois associations
@@ -801,10 +834,15 @@ Flavornet. Consommée par `ingest._canonical_compound` (fusion de synonymes par 
 et `ingest_flavordb2` (accès direct à la fiche par CID).
 
 **Table `hop_aroma_intensity`** (`variety`, `descriptor`, `intensity`, `source`). Roue d'arôme
-QUANTITATIVE (0-100 réel), Yakima uniquement — distincte de `hop_descriptors` (présence/absence,
-toutes sources). Alimentée par `crawl_yakima` depuis `imported_fields.sensory_values`/
-`aroma_values`, consommée par `matching.by_descriptor` (tri quantitatif) et les radars GUI
-(`browse`/`compare`).
+QUANTITATIVE — distincte de `hop_descriptors` (présence/absence, toutes sources). Alimentée par
+`crawl_yakima` (0-100 réel, depuis `imported_fields.sensory_values`/`aroma_values`) **et**,
+depuis T79, `crawl_barthhaas` (0-8 réel, depuis leur "rose chart" HTML, voir
+[data/mappings/](#côté-houblon)). Les deux sources cohabitent par variété (clé `(variety,
+descriptor, source)`) mais ne sont **jamais mélangées dans le calcul d'un même houblon** —
+`matching.resolve_aroma_intensity` choisit une seule source par houblon (Yakima par défaut,
+BarthHaas remis à l'échelle sinon, ou sur demande explicite via le toggle GUI), consommée par
+`matching.by_descriptor` (tri quantitatif), `matching.similar_hops` (couche roue d'arôme) et
+les radars GUI (`browse`/`compare`/expanders de détail).
 
 ---
 

@@ -268,14 +268,127 @@ def get_note_descriptors(con, note: str) -> set[str]:
         "SELECT descriptor FROM note_descriptors WHERE note=?", (note,))}
 
 
-def hop_aroma_intensity(con, variety: str) -> dict[str, float]:
-    """Roue d'arôme QUANTITATIVE d'un houblon (T26 backlog), {descriptor:
-    intensité 0-100} — Yakima uniquement (`hop_aroma_intensity`, distinct de
-    `hop_descriptors` qui est binaire présence/absence). Vide pour un houblon
-    sans cette donnée (BarthHaas seul, ou variété non couverte) : pas de
-    repli inventé."""
-    return {r["descriptor"]: r["intensity"] for r in con.execute(
-        "SELECT descriptor, intensity FROM hop_aroma_intensity WHERE variety=?", (variety,))}
+# T79 (2026-08-22, demande utilisateur explicite) : BarthHaas alimente
+# désormais aussi `hop_aroma_intensity` (roue "rose chart", voir
+# `parsers.parse_barthhaas_aroma_wheel`/`ingest.crawl_barthhaas`), sur une
+# échelle DIFFÉRENTE de celle de Yakima -- 0-8 environ (mesuré : min 0.0,
+# max 8.0 EXACTEMENT sur les 1164 valeurs des 97 variétés BarthHaas, jamais
+# dépassé -> traité comme le plafond réel de leur échelle, pas une
+# supposition), contre 0-100 pour Yakima (mesuré : moyenne ~39). Un bug
+# RÉEL a été trouvé en vérifiant en direct après le premier crawl complet :
+# l'ancienne requête `SELECT descriptor, intensity FROM hop_aroma_intensity
+# WHERE variety=?` ne filtrait PAS par source -- pour un houblon à double
+# source (ex. citra, mosaic), une catégorie partagée entre les deux
+# (ex. "citrus") pouvait être silencieusement écrasée par la dernière ligne
+# lue, mélangeant DANS LE MÊME polygone des axes à des échelles
+# incompatibles (visuellement : roue déformée ; en scoring, `by_descriptor`
+# moyenne des intensités brutes -> un houblon BarthHaas-only aurait
+# artificiellement toujours un score écrasé, peu importe son intensité
+# RELATIVE réelle).
+#
+# Politique retenue (demande utilisateur explicite, "no per-hop choice" par
+# défaut, un TOGGLE seulement là où un houblon UNIQUE est affiché) :
+# jamais de mélange DANS un même houblon -- une seule source à la fois,
+# entière, pour un houblon donné. Par défaut (`prefer=None`) : Yakima si
+# disponible, sinon BarthHaas (remise à l'échelle 0-100, jamais les valeurs
+# brutes 0-8 telles quelles) -- jamais les deux mélangées catégorie par
+# catégorie. `prefer` permet un override explicite (le toggle GUI) --
+# retombe silencieusement sur l'autre source si celle demandée n'existe
+# pas pour ce houblon (jamais un houblon vidé par un choix utilisateur qui
+# ne s'applique pas ici), la source RÉELLEMENT utilisée est toujours
+# renvoyée pour affichage (jamais caché à l'utilisateur, même principe que
+# T77 "Descriptor sources").
+BARTHHAAS_AROMA_WHEEL_MAX = 8.0
+
+
+def load_aroma_intensity(con) -> dict[str, dict[str, dict[str, float]]]:
+    """{variety: {source: {catégorie: intensité BRUTE}}} -- UNE requête pour
+    toute la base, RAW (pas encore résolu/remis à l'échelle) : sert de socle
+    commun à `hop_aroma_intensity` (un houblon) et aux 3 consommateurs en
+    masse (`by_descriptor`, `similar_hops_by_aroma_wheel`, `similar_hops`),
+    qui faisaient chacun leur propre `SELECT ... FROM hop_aroma_intensity`
+    sans filtre de source avant ce correctif (T79)."""
+    out: dict[str, dict[str, dict[str, float]]] = {}
+    for r in con.execute("SELECT variety, source, descriptor, intensity FROM hop_aroma_intensity"):
+        out.setdefault(r["variety"], {}).setdefault(r["source"], {})[r["descriptor"]] = r["intensity"]
+    return out
+
+
+def _usable_aroma_readings(values: dict[str, float]) -> bool:
+    """Une entrée `hop_aroma_intensity` "présente mais entièrement à 0" (le
+    cas corrompu déjà documenté côté Yakima, ex. `admiral`, voir
+    `docs/DATA_SOURCES.md`) n'est PAS une vraie mesure exploitable -- même
+    convention que les appelants GUI (`any(val > 0 ...)`), factorisée ici
+    pour T79 addendum (voir `resolve_aroma_intensity`)."""
+    return bool(values) and any(v > 0 for v in values.values())
+
+
+def resolve_aroma_intensity(by_source: dict[str, dict[str, float]],
+                            prefer: str | None = None) -> tuple[dict[str, float], str | None]:
+    """Résout LA source à utiliser pour UN houblon (jamais un mélange de
+    deux) à partir de `{source: {catégorie: intensité brute}}` (voir
+    `load_aroma_intensity`) -- renvoie (intensités sur 0-100, source
+    utilisée) ; (`{}`, `None`) si `by_source` est vide. `prefer` (le
+    toggle GUI) retombe silencieusement sur l'autre source dispo si la
+    source demandée n'existe pas pour CE houblon précis.
+
+    T79 addendum (signalé en direct par l'utilisateur sur Admiral) : l'ordre
+    de préférence par défaut (Yakima puis BarthHaas) sautait par-dessus une
+    entrée Yakima PRÉSENTE mais entièrement corrompue à 0 (cas documenté
+    `docs/DATA_SOURCES.md`) -- la roue s'affichait alors vide plutôt que de
+    retomber automatiquement sur BarthHaas, pourtant disponible et réel.
+    L'ordre de préférence (`prefer` d'abord si fourni, puis Yakima, puis les
+    autres sources) ne retient désormais que la PREMIÈRE source à la fois
+    présente ET exploitable (`_usable_aroma_readings`) ; si AUCUNE source
+    n'est exploitable (toutes vides/à 0), repli sur l'ancien comportement
+    (peu importe laquelle, le résultat est dégénéré de toute façon -- jamais
+    une exception, jamais un houblon qui disparaît)."""
+    if not by_source:
+        return {}, None
+    order = ([prefer] if prefer else []) + ["yakima"] + [s for s in by_source if s not in (prefer, "yakima")]
+    source = next((s for s in order if s in by_source and _usable_aroma_readings(by_source[s])), None)
+    if source is None:
+        source = prefer if prefer in by_source else ("yakima" if "yakima" in by_source else next(iter(by_source)))
+    values = by_source[source]
+    if source == "barthhaas":
+        values = {d: min(100.0, v * 100.0 / BARTHHAAS_AROMA_WHEEL_MAX) for d, v in values.items()}
+    return values, source
+
+
+def aroma_wheel_vocabulary(con, sources: set[str] | frozenset[str] | None = None) -> list[str]:
+    """Catégories distinctes de `hop_aroma_intensity`, éventuellement
+    restreintes aux SOURCES données. T79 addendum (signalé en direct par
+    l'utilisateur) : BarthHaas ne couvre que 12 des 16 catégories connues
+    (voir `data/mappings/barthhaas_aroma_wheel_categories.yaml`) -- afficher
+    le vocabulaire COMPLET (16, comportement historique) sur une roue
+    résolue en BarthHaas dessine 4 axes Yakima-only (melon/earthy/stone
+    fruit/dried fruit) TOUJOURS à zéro pour cette source, un bruit visuel
+    trompeur (laisse croire à une absence de donnée plutôt qu'à une
+    catégorie inexistante côté BarthHaas). `sources=None` renvoie le
+    vocabulaire complet -- comportement inchangé pour les usages
+    source-agnostiques (ex. les pills de sélection `by-descriptor`, qui
+    filtrent/notent sans jamais rendre de roue elles-mêmes)."""
+    if not sources:
+        return sorted(r[0] for r in con.execute("SELECT DISTINCT descriptor FROM hop_aroma_intensity"))
+    placeholders = ",".join("?" * len(sources))
+    rows = con.execute(
+        f"SELECT DISTINCT descriptor FROM hop_aroma_intensity WHERE source IN ({placeholders})",
+        tuple(sources))
+    return sorted(r[0] for r in rows)
+
+
+def hop_aroma_intensity(con, variety: str, prefer: str | None = None) -> tuple[dict[str, float], str | None]:
+    """Roue d'arôme QUANTITATIVE d'UN houblon (T26 backlog ; multi-source
+    depuis T79, voir le commentaire au-dessus de `BARTHHAAS_AROMA_WHEEL_MAX`)
+    -- {descriptor: intensité 0-100}, JAMAIS un mélange Yakima/BarthHaas
+    dans le même houblon. Renvoie (intensités, source utilisée) ; ({}, None)
+    pour un houblon sans aucune donnée. `prefer` = override explicite
+    (toggle GUI), retombe silencieusement sur l'autre source si absente ici."""
+    by_source: dict[str, dict[str, float]] = {}
+    for r in con.execute(
+            "SELECT source, descriptor, intensity FROM hop_aroma_intensity WHERE variety=?", (variety,)):
+        by_source.setdefault(r["source"], {})[r["descriptor"]] = r["intensity"]
+    return resolve_aroma_intensity(by_source, prefer)
 
 
 def compound_descriptors(con, compounds: list[str]) -> dict[str, str]:
@@ -1105,9 +1218,12 @@ def by_descriptor(con, selected: list[str], wheel_descriptors: list[str] | None 
     selected = {reference.DESCRIPTOR_ALIASES.get(d, d) for d in selected}
     wheel = {reference.DESCRIPTOR_ALIASES.get(d, d) for d in (wheel_descriptors or [])}
     categorical = selected or wheel
-    intensity_by_variety: dict[str, dict[str, float]] = {}
-    for r in con.execute("SELECT variety, descriptor, intensity FROM hop_aroma_intensity"):
-        intensity_by_variety.setdefault(r["variety"], {})[r["descriptor"]] = r["intensity"]
+    # T79 : passe par `resolve_aroma_intensity` (une seule source par
+    # houblon, jamais un mélange Yakima/BarthHaas -- voir son commentaire)
+    # -- l'ancienne requête brute ne filtrait pas par source, un houblon à
+    # double source pouvait moyenner des intensités d'échelles incompatibles.
+    intensity_by_variety = {v: resolve_aroma_intensity(by_source)
+                            for v, by_source in load_aroma_intensity(con).items()}
     ranked = []
     for h in hops:
         hd = hop_desc.get(h, set())
@@ -1120,7 +1236,7 @@ def by_descriptor(con, selected: list[str], wheel_descriptors: list[str] | None 
             ({"compound": c, "mid": v["mid"], "unit": v["unit"], "sources": v["sources"]}
              for c, v in hcomp.items() if c not in NON_AROMA_DISPLAY and v["mid"] is not None),
             key=lambda r: -r["mid"])
-        intensity = intensity_by_variety.get(h, {})
+        intensity, intensity_source = intensity_by_variety.get(h, ({}, None))
         quant_descriptors = sorted(d for d in wheel if d in intensity)
         quant_score = (sum(intensity[d] for d in quant_descriptors) / len(quant_descriptors)
                       if quant_descriptors else None)
@@ -1128,6 +1244,7 @@ def by_descriptor(con, selected: list[str], wheel_descriptors: list[str] | None 
                        "matched_descriptors": sorted(matched), "all_descriptors": sorted(hd),
                        "compounds": compounds, "sources": hops[h]["sources"],
                        "purpose": hops[h].get("purpose"), "intensity": intensity,
+                       "intensity_source": intensity_source,
                        "quant_score": quant_score, "quant_descriptors": quant_descriptors,
                        "_rank": (-len(matched), 0 if quant_score is not None else 1,
                                 -(quant_score or 0.0), -total_oil, h)})
@@ -1282,9 +1399,9 @@ def similar_hops_by_aroma_wheel(con, variety: str, top: int = 10) -> list[dict]:
     (liste vide, rien à comparer), soit simplement absent des candidats
     (jamais un score inventé)."""
     hops, _, _, _ = load(con)
-    raw: dict[str, dict[str, float]] = {}
-    for r in con.execute("SELECT variety, descriptor, intensity FROM hop_aroma_intensity"):
-        raw.setdefault(r["variety"], {})[r["descriptor"]] = r["intensity"]
+    # T79 : voir le commentaire équivalent dans `by_descriptor` -- une seule
+    # source par houblon, jamais un mélange.
+    raw = {v: resolve_aroma_intensity(by_source)[0] for v, by_source in load_aroma_intensity(con).items()}
     sims = _coverage_penalized_cosine(raw, variety)
     ranked = [{"variety": h, "name": hops[h]["name"], "similarity": round(100 * r["similarity"], 1),
               "coverage": round(100 * r["coverage"], 1), "shared_descriptors": r["shared"][:5],
@@ -1327,9 +1444,9 @@ def similar_hops(con, variety: str, use_molecular: bool = True, use_aroma_wheel:
               for v, cmap in comp.items()}
         per_layer["molecular"] = _coverage_penalized_cosine(raw, variety)
     if use_aroma_wheel:
-        raw = {}
-        for r in con.execute("SELECT variety, descriptor, intensity FROM hop_aroma_intensity"):
-            raw.setdefault(r["variety"], {})[r["descriptor"]] = r["intensity"]
+        # T79 : voir le commentaire équivalent dans `by_descriptor` -- une
+        # seule source par houblon, jamais un mélange.
+        raw = {v: resolve_aroma_intensity(by_source)[0] for v, by_source in load_aroma_intensity(con).items()}
         per_layer["aroma_wheel"] = _coverage_penalized_cosine(raw, variety)
 
     candidates = set().union(*(sims.keys() for sims in per_layer.values())) if per_layer else set()

@@ -105,9 +105,18 @@ def parse_descriptors(text: str) -> list[str]:
     Miner ce texte libre pour en extraire de faux descripteurs serait de la
     précision-déchet (CLAUDE.md) ; un paragraphe se repère par un point final,
     absent d'une vraie liste de descripteurs courts — dans ce cas, aucun
-    descripteur n'est retourné plutôt qu'un mot inventé. Yakima
-    (imported_fields.aromas, JSON structuré) reste la source fiable pour
-    hop_descriptors sur les variétés qu'il couvre.
+    descripteur n'est retourné plutôt qu'un mot inventé.
+
+    **Ne retourne donc quasi jamais rien sur le site réel actuel (T79,
+    2026-08-22, confirmé en direct sur les 97 variétés du catalogue) --
+    mais ça ne veut PAS dire que BarthHaas n'a pas de descripteurs
+    utilisables.** Il en a, ailleurs sur la même page : voir
+    `parse_barthhaas_tastes` (liste `<li>` structurée en tête de page,
+    ex. "Lemon", "Cranberry" -- jamais du texte libre miné, un vrai
+    descripteur par élément) et `parse_barthhaas_aroma_wheel` (roue
+    quantitative embarquée en attributs `data-*`). Cette fonction-ci
+    (paragraphe "AROMA PROFILE") reste inutile sur le site actuel, gardée
+    telle quelle par honnêteté sur ce qu'elle fait vraiment.
     """
     lines = [l.strip() for l in text.splitlines() if l.strip()]
     for i, l in enumerate(lines[:-1]):
@@ -120,6 +129,88 @@ def parse_descriptors(text: str) -> list[str]:
                 return []
             return [d.strip().lower() for d in re.split(r"[,;]", lines[j]) if d.strip()]
     return []
+
+
+def parse_barthhaas_tastes(html: str) -> list[tuple[str, str]]:
+    """Extrait la liste `<ul class="section-card-text__tastes">` en tête de
+    chaque page BarthHaas (T79, 2026-08-22, demande utilisateur explicite,
+    après capture d'écran montrant "Lemon, Cranberry, Cream, Pepper, Mate
+    Tea" sur la page Admiral -- jamais trouvée avant car hors du texte
+    "AROMA PROFILE" que `parse_descriptors` regarde). Vérifié en direct sur
+    les 97 variétés du catalogue (2026-08-22) : présente à 100%, toujours
+    3 à 5 éléments `<li>`, JAMAIS du texte libre à miner -- un vrai mot
+    descripteur par élément, structurellement fiable (contrairement au
+    paragraphe "AROMA PROFILE").
+
+    Chaque `<li>` porte une classe CSS allemande qui identifie SANS
+    AMBIGUÏTÉ l'une des 12 catégories de la roue BarthHaas (vérifié sur les
+    97 variétés : exactement 12 classes distinctes, correspondance 1:1
+    avec les 12 libellés `data-rose-labels`, voir `parse_barthhaas_aroma_
+    wheel`) -- ex. "zitrus"->citrus, "sahnekaramell"->cream caramel,
+    "grun"->grassy-hay. Renvoyée TELLE QUELLE (classe brute, mot en
+    minuscule) : cette fonction reste une extraction FIDÈLE à la source,
+    jamais une décision de mapping vers le vocabulaire `hop_descriptors`
+    existant (alias/nouveaux termes) -- cette décision (revue par
+    l'utilisateur) vit ailleurs (reference.py/ingest.py), pas ici.
+
+    Renvoie [] si la page n'a pas cette liste (jamais vu sur les 97
+    variétés réelles, mais une page pourrait changer de structure)."""
+    from bs4 import BeautifulSoup
+    soup = BeautifulSoup(html, "html.parser")
+    ul = soup.find("ul", class_="section-card-text__tastes")
+    if not ul:
+        return []
+    out = []
+    for li in ul.find_all("li"):
+        classes = li.get("class") or []
+        cls = classes[0] if classes else ""
+        text = li.get_text(strip=True).lower()
+        if text:
+            out.append((cls, text))
+    return out
+
+
+def parse_barthhaas_aroma_wheel(html: str) -> dict[str, float] | None:
+    """Extrait la roue d'arôme QUANTITATIVE BarthHaas ("rose chart") : 12
+    catégories fixes (`data-rose-labels`, IDENTIQUE mot pour mot sur les 97
+    variétés vérifiées, 2026-08-22) + une valeur numérique par catégorie
+    (`data-values` sur un `<canvas>`) -- rendue en `<canvas>` côté client
+    (Chart.js ou similaire) mais les valeurs sont DÉJÀ dans le HTML statique
+    servi par le serveur, aucune exécution JS nécessaire pour les lire.
+
+    Échelle 0-8 environ (vérifiée sur les 97 variétés : min 0.0, max 8.0,
+    moyenne ~3.1) -- DIFFÉRENTE de l'échelle 0-100 de Yakima
+    (`hop_aroma_intensity`, moyenne ~39). Ne JAMAIS mélanger les deux
+    échelles sans normalisation explicite (voir la discussion utilisateur
+    sur le risque d'une moyenne brute des deux sources -- non retenue).
+
+    Renvoie le PREMIER jeu de valeurs rencontré dans le HTML (repéré en
+    direct : c'est celui du petit graphique "hero" en tête de page, dont
+    les valeurs sont TOUJOURS identiques à celles du bloc "Typical Aroma
+    Profile" plus bas sur la page -- vérifié sur plusieurs variétés).
+    N'extrait PAS les variantes par millésime (ex. "Aroma Profile 2024"/
+    "2023", présentes sur 20/97 variétés vérifiées) -- une variété réelle
+    de donnée historique intéressante, mais hors du périmètre de cette
+    première passe (portée volontairement limitée, étape par étape --
+    voir CLAUDE.md pour la discussion complète).
+
+    Renvoie None si la page n'a pas cette donnée (jamais vu sur les 97
+    variétés réelles, mais une page pourrait changer de structure), ou si
+    labels/values ne correspondent pas en nombre (jamais observé, mais pas
+    de zip silencieux sur des listes de tailles différentes)."""
+    from bs4 import BeautifulSoup
+    soup = BeautifulSoup(html, "html.parser")
+    labels_el = soup.find(attrs={"data-rose-labels": True})
+    if not labels_el:
+        return None
+    labels = [l.strip() for l in labels_el["data-rose-labels"].split(",")]
+    canvas = soup.find("canvas", attrs={"data-values": True})
+    if not canvas:
+        return None
+    values = [float(v) for v in canvas["data-values"].split(",")]
+    if len(labels) != len(values):
+        return None
+    return dict(zip(labels, values))
 
 
 def parse_flavornet(html: str) -> list[tuple[str, str, list[str]]]:

@@ -1,0 +1,43 @@
+# BarthHaas descriptor word -> canonical hop_descriptors term.
+#
+# Source of the raw words: parsers.parse_barthhaas_tastes() extracts a
+# <li> list ("section-card-text__tastes", e.g. "Lemon", "Cranberry",
+# "Mate Tea") shown at the top of every BarthHaas hop page — verified live
+# on all 97 varieties in the catalogue (2026-08-22, T79): present on 100%
+# of pages, always a real word per <li>, never free text to mine (unlike
+# the "AROMA PROFILE" paragraph parse_descriptors already gives up on).
+#
+# This file is the reviewed decision on how each RAW word (lowercased,
+# exactly as scraped) becomes a CANONICAL hop_descriptors term:
+#   - A word absent from this file is used AS-IS, lowercased — either it
+#     already matches the existing ~105-term vocabulary (e.g. "lemon"),
+#     or it's a genuinely new term worth keeping on its own merit
+#     (e.g. "bergamot", "cognac", "tonka bean", "apple blossom" — the
+#     last one deliberately NOT aliased to the generic "blossom", since
+#     the apple-specific character is the point, per user review).
+#   - A word listed here maps to the term on the right: either a spelling/
+#     phrasing variant of an EXISTING term (e.g. "aniseed" -> "anise"),
+#     or a near-duplicate concept judged close enough to merge rather
+#     than fragment the vocabulary (e.g. "resin" -> "resinous").
+#
+# Reviewed and confirmed by the user on 2026-08-22 (see CLAUDE.md, T79,
+# for the full 49-word table this was drafted from and the reasoning
+# behind each toss-up). Never auto-generated or silently regenerated —
+# any future addition should go through the same live-verified,
+# user-reviewed process, not a bulk re-derivation.
+
+"red currant": redcurrant
+"aniseed": anise
+"liquorice": licorice
+"lemon grass": lemongrass
+"dried fruits": dried fruit
+"camomile blossom": chamomile
+"fennel seeds": fennel
+"honeydew melon": honeydew
+"green grassy": grassy
+"fresh cut grass": grassy
+"resin": resinous
+"myrrh": incense
+"barrique": oak
+"white wine grapes": grapes
+"wild garlic": garlic
