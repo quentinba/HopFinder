@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="assets/logo_transparent.png" alt="HopFinder" width="480">
+  <img src="assets/logo.png" alt="HopFinder" width="480">
 </div>
 
 *Nom d'affichage du projet (GUI, GitHub) ; le paquet Python et la commande CLI restent
