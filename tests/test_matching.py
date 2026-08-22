@@ -363,15 +363,107 @@ def test_orphans_flagged(db):
 def test_hop_aroma_intensity_empty_without_yakima_sensory_data(db):
     # fixtures (texte BarthHaas/Yakima) n'alimentent pas hop_aroma_intensity
     # (donnée Algolia YCH uniquement, voir ingest.crawl_yakima) -> vide, pas
-    # de valeur inventée.
-    assert matching.hop_aroma_intensity(db, "citra") == {}
+    # de valeur inventée. T79 : signature étendue à (valeurs, source) pour
+    # exposer la provenance résolue -- source `None` quand rien n'existe.
+    assert matching.hop_aroma_intensity(db, "citra") == ({}, None)
 
 def test_hop_aroma_intensity_reads_inserted_rows(db):
     db.execute("INSERT INTO hop_aroma_intensity VALUES (?,?,?,?)",
               ("citra", "citrus", 90.0, "yakima"))
     db.commit()
-    assert matching.hop_aroma_intensity(db, "citra") == {"citrus": 90.0}
+    assert matching.hop_aroma_intensity(db, "citra") == ({"citrus": 90.0}, "yakima")
     db.execute("DELETE FROM hop_aroma_intensity WHERE variety='citra'")
+    db.commit()
+
+def test_resolve_aroma_intensity_empty_by_source():
+    assert matching.resolve_aroma_intensity({}) == ({}, None)
+
+def test_resolve_aroma_intensity_defaults_to_yakima_over_barthhaas():
+    by_source = {"yakima": {"citrus": 50.0}, "barthhaas": {"citrus": 4.0}}
+    assert matching.resolve_aroma_intensity(by_source) == ({"citrus": 50.0}, "yakima")
+
+def test_resolve_aroma_intensity_rescales_barthhaas_from_0_8_to_0_100():
+    # T79 : BarthHaas mesure sur 0-8, jamais mélangé tel quel avec l'échelle
+    # 0-100 de Yakima -- remis à l'échelle uniquement quand c'est la source
+    # RÉELLEMENT utilisée (ici, seule source dispo).
+    by_source = {"barthhaas": {"citrus": 4.0, "floral": 8.0}}
+    values, source = matching.resolve_aroma_intensity(by_source)
+    assert source == "barthhaas"
+    assert values == {"citrus": 50.0, "floral": 100.0}
+
+def test_resolve_aroma_intensity_prefer_falls_back_silently_when_absent():
+    # `prefer="barthhaas"` mais ce houblon n'a QUE du Yakima -- jamais un
+    # houblon vidé par un choix de toggle qui ne s'applique pas ici.
+    by_source = {"yakima": {"citrus": 50.0}}
+    assert matching.resolve_aroma_intensity(by_source, prefer="barthhaas") == (
+        {"citrus": 50.0}, "yakima")
+
+def test_resolve_aroma_intensity_prefer_honored_when_available():
+    by_source = {"yakima": {"citrus": 50.0}, "barthhaas": {"citrus": 4.0}}
+    values, source = matching.resolve_aroma_intensity(by_source, prefer="barthhaas")
+    assert source == "barthhaas"
+    assert values == {"citrus": 50.0}
+
+def test_resolve_aroma_intensity_skips_degenerate_all_zero_preferred_source():
+    # T79 addendum (signalé en direct par l'utilisateur sur Admiral) : une
+    # entrée Yakima PRÉSENTE mais entièrement à 0 (cas corrompu documenté,
+    # voir docs/DATA_SOURCES.md) n'est pas une vraie mesure -- l'ordre de
+    # préférence par défaut doit sauter par-dessus et retomber
+    # automatiquement sur BarthHaas, jamais afficher une roue vide alors
+    # qu'une donnée réelle existe.
+    by_source = {"yakima": {"citrus": 0.0, "floral": 0.0}, "barthhaas": {"citrus": 4.0}}
+    values, source = matching.resolve_aroma_intensity(by_source)
+    assert source == "barthhaas"
+    assert values == {"citrus": 50.0}
+
+def test_resolve_aroma_intensity_all_sources_degenerate_falls_back_to_default_order():
+    # Si AUCUNE source n'est exploitable, on ne plante pas et on retombe sur
+    # l'ordre de préférence classique (peu importe laquelle, le résultat est
+    # dégénéré de toute façon).
+    by_source = {"yakima": {"citrus": 0.0}, "barthhaas": {"citrus": 0.0}}
+    values, source = matching.resolve_aroma_intensity(by_source)
+    assert source == "yakima"
+    assert values == {"citrus": 0.0}
+
+def test_aroma_wheel_vocabulary_full_without_source_filter(db):
+    db.execute("INSERT INTO hop_aroma_intensity VALUES (?,?,?,?)",
+              ("_fixture_vocab_full", "citrus", 50.0, "yakima"))
+    db.commit()
+    vocab = matching.aroma_wheel_vocabulary(db)
+    assert "citrus" in vocab
+    assert vocab == sorted(vocab)
+    db.execute("DELETE FROM hop_aroma_intensity WHERE variety='_fixture_vocab_full'")
+    db.commit()
+
+def test_aroma_wheel_vocabulary_restricted_to_given_sources(db):
+    db.executemany("INSERT INTO hop_aroma_intensity VALUES (?,?,?,?)", [
+        ("_fixture_vocab_bh", "menthol", 3.0, "barthhaas"),
+        ("_fixture_vocab_yk", "melon", 10.0, "yakima"),
+    ])
+    db.commit()
+    bh_vocab = matching.aroma_wheel_vocabulary(db, {"barthhaas"})
+    assert "menthol" in bh_vocab
+    assert "melon" not in bh_vocab
+    yk_vocab = matching.aroma_wheel_vocabulary(db, {"yakima"})
+    assert "melon" in yk_vocab
+    db.execute("DELETE FROM hop_aroma_intensity WHERE variety IN "
+              "('_fixture_vocab_bh','_fixture_vocab_yk')")
+    db.commit()
+
+def test_load_aroma_intensity_groups_by_variety_then_source(db):
+    # noms de variété fictifs (jamais dans les fixtures) pour ne toucher
+    # aucune donnée réelle utilisée par d'autres tests de ce module partagé.
+    db.executemany("INSERT INTO hop_aroma_intensity VALUES (?,?,?,?)", [
+        ("_fixture_multi_source", "citrus", 50.0, "yakima"),
+        ("_fixture_multi_source", "citrus", 4.0, "barthhaas"),
+        ("_fixture_bh_only", "spicy", 6.0, "barthhaas"),
+    ])
+    db.commit()
+    out = matching.load_aroma_intensity(db)
+    assert out["_fixture_multi_source"] == {"yakima": {"citrus": 50.0}, "barthhaas": {"citrus": 4.0}}
+    assert out["_fixture_bh_only"] == {"barthhaas": {"spicy": 6.0}}
+    db.execute("DELETE FROM hop_aroma_intensity WHERE variety IN "
+              "('_fixture_multi_source','_fixture_bh_only')")
     db.commit()
 
 def test_hop_similar_varieties_empty_without_yakima_data(db):
@@ -1227,16 +1319,17 @@ def test_aroma_wheel_definitions_reexported_identically_from_reference():
     assert matching.AROMA_WHEEL_DEFINITIONS is reference.AROMA_WHEEL_DEFINITIONS
 
 def test_aroma_wheel_definitions_cover_exactly_the_15_intensity_categories():
-    # Vocabulaire fixe de `hop_aroma_intensity` (T26), tel que documenté dans
-    # reference.py -- si un futur re-crawl Yakima renomme/ajoute une
-    # catégorie sans mettre à jour AROMA_WHEEL_DEFINITIONS, ce test échoue
-    # plutôt que de laisser un label du radar sans tooltip en silence (voir
+    # Vocabulaire de `hop_aroma_intensity` (T26, 15 catégories Yakima +
+    # "menthol" ajoutée en T79 pour BarthHaas -- voir reference.py) : si un
+    # futur re-crawl Yakima/BarthHaas renomme/ajoute une catégorie sans
+    # mettre à jour AROMA_WHEEL_DEFINITIONS, ce test échoue plutôt que de
+    # laisser un label du radar sans tooltip en silence (voir
     # `app._aroma_wheel`/`_aroma_wheel_compare`, `Definition` vide par
     # défaut via `.get(d, "")`).
     expected = {
         "apple", "berry", "citrus", "dried fruit", "earthy", "floral",
         "grassy", "herbal", "melon", "spicy", "stone fruit",
-        "sweet aromatic", "tropical", "vegetal", "woody",
+        "sweet aromatic", "tropical", "vegetal", "woody", "menthol",
     }
     assert set(reference.AROMA_WHEEL_DEFINITIONS) == expected
     assert all(isinstance(v, str) and v.strip() for v in reference.AROMA_WHEEL_DEFINITIONS.values())

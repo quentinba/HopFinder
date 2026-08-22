@@ -32,6 +32,20 @@ import sqlite3
 from . import parsers, reference
 from .schema import init_db, validate_and_repair, DROP_COMPOUNDS
 
+MAPPINGS_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "data", "mappings")
+
+
+def _load_yaml_mapping(filename: str) -> dict[str, str]:
+    """Charge un fichier `data/mappings/*.yaml` (dict plat str->str) --
+    voir `crawl_barthhaas` (T79, 2026-08-22) pour son usage : mapping
+    revu et confirmé par l'utilisateur, jamais régénéré/deviné à
+    l'exécution. Import `yaml` local (extra `crawl`, comme
+    `requests`/`beautifulsoup4` -- inutile pour l'app déployée qui ne lit
+    que la base déjà construite, jamais ce fichier)."""
+    import yaml
+    with open(os.path.join(MAPPINGS_DIR, filename), encoding="utf-8") as f:
+        return yaml.safe_load(f) or {}
+
 
 # --------------------------------------------------------------------------- #
 # Référence (couche molécule/descripteur — pas de notes, voir reference.py)
@@ -252,6 +266,21 @@ def crawl_barthhaas(out_db: str, sleep: float = 1.5, limit: int | None = None) -
     cette fonction, comparé au <h1> réel de chaque page ; `name` vient
     directement de ce <h1> (plus fidèle que l'ancien `slug.title()`, qui
     reproduisait aussi l'artefact et perdait les accents/casse d'origine).
+
+    Descripteurs BarthHaas (T79, 2026-08-22, demande utilisateur explicite,
+    après capture d'écran montrant des descripteurs réels ("Lemon",
+    "Cranberry"...) jamais trouvés jusque-là) : `parsers.parse_descriptors`
+    (paragraphe "AROMA PROFILE") reste appelé pour compatibilité mais ne
+    renvoie quasi jamais rien sur le site réel (texte libre, jamais miné —
+    voir sa docstring). Les VRAIS descripteurs viennent de deux extractions
+    structurées DISTINCTES sur la même page, jamais essayées avant :
+    `parsers.parse_barthhaas_tastes` (liste `<li>` qualitative, ex.
+    "Lemon", "Cranberry") -> `hop_descriptors`, et `parsers.
+    parse_barthhaas_aroma_wheel` (roue quantitative 12 catégories) ->
+    `hop_aroma_intensity`. Chacune passe par un mapping REVU ET CONFIRMÉ
+    PAR L'UTILISATEUR (`data/mappings/*.yaml`, jamais deviné/régénéré à
+    l'exécution) avant insertion -- voir `_load_yaml_mapping` et
+    CLAUDE.md, T79, pour le détail complet des décisions.
     """
     import time, re, requests
     from bs4 import BeautifulSoup
@@ -260,6 +289,8 @@ def crawl_barthhaas(out_db: str, sleep: float = 1.5, limit: int | None = None) -
     con = connect(out_db)
     if not con.execute("SELECT name FROM sqlite_master WHERE name='hops'").fetchone():
         init_db(con); seed_reference(con); con.commit()
+    desc_map = _load_yaml_mapping("barthhaas_descriptor_aliases.yaml")
+    category_map = _load_yaml_mapping("barthhaas_aroma_wheel_categories.yaml")
     ov = requests.get(f"{BASE}/hops-and-products/hop-varieties-overview",
                       timeout=30, headers={"User-Agent": "hopmatch/0.1 (research)"}).text
     seen, slugs = set(), []
@@ -296,9 +327,20 @@ def crawl_barthhaas(out_db: str, sleep: float = 1.5, limit: int | None = None) -
                     merged = _find_variety_by_name_region(con, name, region)
                     if merged:
                         variety = merged
-                _ingest_variety(con, variety, name, region, comp,
-                                parsers.parse_descriptors(text), "barthhaas")
-                print(f"  ok {slug} ({len(comp)})"
+                # T79 : mots bruts ("lemon", "cranberry"...) mappés via le
+                # fichier revu par l'utilisateur -- mot absent du mapping =
+                # utilisé tel quel (déjà canonique, ou nouveau terme
+                # délibérément gardé, voir data/mappings/*.yaml).
+                tastes = parsers.parse_barthhaas_tastes(html)
+                descriptors = sorted({desc_map.get(word, word) for _, word in tastes})
+                descriptors += parsers.parse_descriptors(text)  # quasi toujours [], voir docstring
+                wheel = parsers.parse_barthhaas_aroma_wheel(html) or {}
+                aroma_intensity = {category_map[cat]: val for cat, val in wheel.items()
+                                   if cat in category_map}
+                _ingest_variety(con, variety, name, region, comp, descriptors, "barthhaas",
+                                aroma_intensity=aroma_intensity)
+                print(f"  ok {slug} ({len(comp)} composés, {len(descriptors)} descripteurs, "
+                     f"{len(aroma_intensity)} catégories roue)"
                      + (f" -> variety corrigée en {variety!r}" if variety != slug else ""))
         except Exception as e:  # noqa
             print(f"  !! {slug}: {e}")

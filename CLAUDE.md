@@ -1943,17 +1943,266 @@ au-dessus de son header ; Amplify (et vérifié que la même branche
 s'applique aux 4 autres outils) va directement à son `st.header`, sans
 logo. 233 tests toujours verts, `pyflakes` propre.
 
+## T79 -- Descripteurs qualitatifs + roue d'arôme quantitative BarthHaas
+(2026-08-22, demande utilisateur explicite : "re-evalutate why it's not
+possible to fetch the descriptors from Brathaas... double check if there
+is no tabular data")
+
+**Contexte.** La piste laissée ouverte au bas de T78 ("Reste", point 2 --
+un `<canvas>` avec des `data-values` par axe, libellés introuvables en
+HTML statique) a été réinvestiguée en profondeur plutôt que classée
+"non explorable". `parsers.parse_descriptors` continue de renvoyer `[]`
+sur la quasi-totalité des variétés (le bloc "AROMA PROFILE" reste un
+paragraphe libre, pas une liste -- confirmé inchangé) mais ce n'était PAS
+la seule donnée d'arôme structurée sur ces pages. Deux blocs distincts,
+jamais parsés jusqu'ici, trouvés en réexaminant le HTML déjà récupéré :
+- **`<ul class="section-card-text__tastes">`** : liste qualitative courte
+  (3-5 mots), chaque `<li>` portant une classe CSS ET le mot affiché --
+  signalée directement par l'utilisateur ("in the Brathaas hop pages...
+  there is descriptors at the top, see the image... we MUST find these
+  data"), retrouvée en réexaminant le HTML déjà fetché plutôt que via un
+  screenshot fourni (`/Users/quentin/Desktop/Screenshot...` inaccessible :
+  `Read` ET `Bash cp` ont échoué avec `Operation not permitted`, sandbox
+  TCC macOS sur Desktop -- contournement par relecture directe du HTML,
+  pas besoin de l'image en définitive).
+- **`data-rose-labels="citrus,sweet fruits,..."` + `data-values="..."`**
+  sur le hero de la page (label `<div>` + `<canvas>`) : la vraie roue
+  d'arôme QUANTITATIVE annoncée dans le "Reste" de T78 -- servie en HTML
+  STATIQUE (lisible par simple `requests`, pas de rendu JS nécessaire,
+  contrairement à ce qui avait été supposé), échelle 0-8 (max exact mesuré
+  8.0 sur 97 houblons x 12 axes = 1164 valeurs), 12 axes fixes.
+
+**Vérifié sur un balayage COMPLET des 97 pages BarthHaas** (pas un
+échantillon) : 100% de couverture pour les deux blocs, 12 classes CSS de
+tastes distinctes correspondant 1:1 aux 12 labels de la roue (zitrus,
+susse-fruchte, grune-fruchte, rote-beeren, sahnekaramell,
+holzig-aromatisch, krautig, wurzig, grun, vegetal, blumig, menthol). Un
+premier balayage à 3 houblons avait laissé une classe ("grun") ambiguë
+entre plusieurs labels possibles -- résolu seulement par le balayage
+complet, pas par une supposition. 20/97 houblons ont en plus des roues de
+millésime ("Aroma Profile 2023/2024") -- délibérément PAS extraites (hors
+scope, seule la roue "Typical" est parsée), piste pour un futur ticket.
+
+**Décisions de mapping, confirmées par l'utilisateur (revue point par
+point, PAS acceptées telles quelles du premier coup) :**
+- **12 catégories BarthHaas -> vocabulaire `hop_aroma_intensity`**
+  (`data/mappings/barthhaas_aroma_wheel_categories.yaml`) : 9
+  correspondances directes/renommages (woody aromatic->woody,
+  grassy-hay->grassy, berries & curant->berry [typo BarthHaas
+  reproduite verbatim], cream caramel->sweet aromatic -- cette dernière
+  cross-validée contre la définition Yakima officielle de "sweet
+  aromatic" : "bubblegum, caramel, chocolate, creamy, honey, vanilla",
+  assez proche pour ne pas justifier un axe séparé). 2 corrections
+  utilisateur sur ma proposition initiale (mappings visuels, pas
+  textuels) : "sweet fruits" -> **tropical** ("the image in brathaas is
+  an ananas"), "green fruits" -> **apple** ("the image is pear and
+  apple" -- correspond au "POMME" officiel Yakima). `menthol` : nouvelle
+  16e catégorie sans équivalent Yakima -- discuté explicitement
+  ("I'm not sure it's smart to add it because we will have
+  discrepency") avant d'être retenue : l'asymétrie existait déjà, en
+  pire, avant ce ticket (les houblons BarthHaas-only n'avaient AUCUNE
+  roue) -- ajoutée à `reference.AROMA_WHEEL_DEFINITIONS` (15 -> 16).
+- **49 mots qualitatifs "toss-up"** (hors correspondance directe avec le
+  vocabulaire `hop_descriptors` à 105 termes existant) : présentés à
+  l'utilisateur sous forme de tableau AVANT implémentation (demande
+  explicite : "show me the 49 word table before we implement this"), 15
+  retenus comme alias (`data/mappings/barthhaas_descriptor_aliases.yaml`
+  -- red currant->redcurrant, aniseed->anise, liquorice->licorice,
+  lemon grass->lemongrass, dried fruits->dried fruit, camomile
+  blossom->chamomile, fennel seeds->fennel, honeydew melon->honeydew,
+  green grassy/fresh cut grass->grassy, resin->resinous, myrrh->incense,
+  barrique->oak, wild garlic->garlic, white wine grapes->grapes). 2
+  corrections utilisateur sur ma proposition initiale : "apple blossom"
+  gardé comme terme NEUF distinct (pas aliasé à un "blossom" générique --
+  "I think it must be linked to apple so maybe keep it as is"), "white
+  wine grapes" -> `grapes` (pas `white wine` comme proposé au départ).
+  "green pepper" gardé NEUF délibérément (classe CSS `grun`/vegetal, pas
+  spicy -- cross-validé contre la définition officielle Yakima de
+  "vegetal" qui cite littéralement "green pepper" en exemple).
+
+**Jamais moyenné entre sources.** Yakima (0-100 réel, moyenne mesurée
+~39) et BarthHaas (0-8 réel, moyenne mesurée ~3.1, min 0.0, max exact
+8.0) sont deux méthodologies de mesure différentes -- moyenner
+fabriquerait une fausse précision et masquerait un désaccord réel entre
+sources (même principe que la réconciliation `hop_composition`, mais en
+plus strict : là, on moyenne des FOURCHETTES de la MÊME mesure ; ici, ce
+seraient deux MESURES DIFFÉRENTES). Discuté explicitement avec
+l'utilisateur ("why don't you want to make it possible to average? What's
+the risk?") avant d'être tranché dans ce sens.
+
+**Bug de mélange d'échelle découvert en VÉRIFICATION LIVE (pas en revue
+statique), corrigé avant de déclarer T79 terminé.** Après le crawl complet
+(97/97 houblons, 0 erreur, `data/mappings/*.yaml` chargés une fois avant
+la boucle, réutilise le HTML déjà fetché -- pas de requêtes
+supplémentaires), la roue d'Admiral en `browse` s'affichait comme un point
+quasi invisible. Root cause : `matching.hop_aroma_intensity` (ancienne
+signature) faisait `SELECT descriptor, intensity FROM hop_aroma_intensity
+WHERE variety=?` **sans filtre de source** -- pour un houblon
+MULTI-SOURCE (ex. citra, mosaic : `sources="barthhaas,yakima"`), SQLite
+pouvait laisser une ligne d'une source écraser silencieusement celle de
+l'autre sur une même catégorie, mélangeant deux échelles incompatibles
+DANS le même polygone. Confirmé que ça corrompait aussi le SCORING, pas
+seulement l'affichage : `by_descriptor` (moyenne `quant_score`),
+`similar_hops_by_aroma_wheel` et `similar_hops` (cosinus) faisaient
+chacun le même `SELECT` sans filtre.
+
+**Correctif : résolution PAR HOUBLON, jamais de mélange intra-houblon.**
+`matching.load_aroma_intensity(con)` (nouveau) : une requête pour toute
+la base, groupée `{variety: {source: {catégorie: valeur brute}}}`.
+`matching.resolve_aroma_intensity(by_source, prefer=None)` (nouveau) :
+choisit UNE source entière pour ce houblon (Yakima par défaut, sinon
+BarthHaas -- alors remis à l'échelle `100.0/BARTHHAAS_AROMA_WHEEL_MAX`,
+`BARTHHAAS_AROMA_WHEEL_MAX=8.0`), `prefer` permet un override explicite
+(retombe silencieusement sur l'autre source si absente pour ce houblon
+précis), renvoie toujours `(valeurs, source utilisée)` -- jamais caché à
+l'utilisateur, même principe que T77 "Descriptor sources".
+`matching.hop_aroma_intensity` (signature étendue, RENVOIE DÉSORMAIS UN
+TUPLE `(dict, source)` au lieu d'un simple dict -- tous les appelants mis
+à jour) délègue à ces deux fonctions. Les 3 sites de scoring/heatmap en
+masse (`by_descriptor`, `similar_hops_by_aroma_wheel`, `similar_hops`)
+consomment désormais `load_aroma_intensity`/`resolve_aroma_intensity` au
+lieu de leur propre `SELECT` non filtré.
+
+**GUI : toggle manuel BarthHaas/Yakima sur chaque roue d'arôme
+houblon-unique** (demande utilisateur explicite, après discussion sur le
+mécanisme : "why don't you want to make it possible to average" ->
+confirmé résolution automatique + toggle plutôt qu'une moyenne ; "Yes,
+however I would like a toogle button next to each spider plot to change
+to brathaas source if available (single hop spider charts or
+comparaison)"). Le score/tri (`by_descriptor`, similarité) garde
+TOUJOURS la résolution automatique SEULE -- jamais de toggle sur un
+classement, pour rester déterministe/explicable. Le toggle ne s'affiche
+QUE là où une roue d'un houblon UNIQUE est rendue, jamais sur la
+heatmap/le tri (impraticable à l'échelle d'un tableau de N houblons) :
+- `_browse` : case à cocher "Prefer BarthHaas source (if available)"
+  (n'apparaît que si le houblon a réellement >1 source), caption
+  systématiquement explicite sur la source EFFECTIVEMENT utilisée
+  (`_aroma_wheel_source_caption`). Message "no data" reformulé (l'ancien
+  exemple "Admiral" cité comme houblon sans donnée n'est plus vrai --
+  Admiral a désormais sa roue BarthHaas).
+- `_hop_detail_expanders` (partagé Amplify/Contrast) : même toggle, une
+  clé Streamlit par houblon (`prefer_bh_expander_{variety}`).
+- `_by_descriptor` : même toggle sur la roue de CHAQUE expander de
+  détail -- distinct du score/caption "Quantitative refinement" au-dessus
+  (qui reste la résolution AUTOMATIQUE utilisée par `matching.
+  by_descriptor` pour le TRI, exposée via le nouveau champ
+  `h["intensity_source"]` sur chaque ligne classée) : la roue affichée
+  peut donc montrer une source DIFFÉRENTE de celle qui a servi au score
+  juste au-dessus si l'utilisateur bascule le toggle -- volontaire, chaque
+  caption cite explicitement SA propre source, jamais présenté comme
+  contradictoire.
+- `_compare` (Compare Hops) : UN SEUL toggle global (pas par houblon --
+  jusqu'à `_COMPARE_MAX_HOPS`=5 houblons se superposent sur UN graphique
+  partagé), affiché seulement si au moins un houblon sélectionné a
+  réellement les deux sources ; caption listant la source RÉELLEMENT
+  utilisée par houblon ("Aroma wheel source per hop — Admiral: BarthHaas,
+  Citra: BarthHaas").
+
+Vérifié en direct dans le navigateur (après redémarrage du serveur
+Streamlit -- un process resté ouvert depuis avant ce ticket gardait
+l'ancien `matching` importé en mémoire, `AttributeError:
+module 'hopmatch.matching' has no attribute 'load_aroma_intensity'`,
+symptôme d'un import Python jamais rechargé plutôt qu'un vrai bug de
+code) : Admiral en `browse` -- roue invisible par défaut (Yakima
+corrompu à 0, comportement déjà documenté), toggle "Prefer BarthHaas"
+révèle la vraie roue BarthHaas (apple/berry/citrus/floral/grassy/
+herbal/menthol/spicy/sweet aromatic/tropical/vegetal/woody, les 4 axes
+Yakima-only -- melon/earthy/stone fruit/dank -- à 0) ; même
+comportement reproduit et vérifié dans `by-descriptor` (recherche
+"cranberry") et `compare` (Admiral + Citra, toggle global, caption par
+houblon correcte).
+
+7 tests ajoutés/mis à jour (`tests/test_matching.py`,
+`tests/test_parsers.py`) : 6 tests parseurs (tastes + roue, cas
+absent/mismatch label-valeur), `test_resolve_aroma_intensity_*` (vide,
+défaut Yakima, remise à l'échelle BarthHaas 0-8->0-100, repli silencieux
+sur `prefer` absent, `prefer` honoré), `test_load_aroma_intensity_
+groups_by_variety_then_source`, 2 tests `hop_aroma_intensity` réécrits
+pour la nouvelle signature tuple. Suite complète : 233 -> **244 tests,
+tous verts** ; `pyflakes` propre sur `matching.py`/`app.py`/
+`tests/test_matching.py`.
+
+README.md mis à jour (section BarthHaas : nouveau paragraphe T79 +
+liens vers les deux fichiers `data/mappings/*.yaml`, demande explicite
+de l'utilisateur "add in the readme where is should land a link to the
+yaml files... so we let the user know in the readme some important
+decision that were made" ; section Yakima Chief, `by-descriptor` et
+table `hop_aroma_intensity` de l'architecture technique corrigées pour
+ne plus dire "Yakima uniquement").
+
+**Addendum T79, même jour (2026-08-22) : 2 défauts trouvés en direct par
+l'utilisateur en testant Admiral (Browse), corrigés avant de considérer
+T79 terminé.**
+1. **Repli automatique n'ignorait pas une entrée Yakima corrompue à 0.**
+   "If the spider chart is not available for the hop, we don't see any
+   chart, It should be brathaas by default if the yakima is not
+   available." L'ordre de préférence par défaut de `resolve_aroma_
+   intensity` retenait "yakima" dès qu'une entrée EXISTAIT pour cette
+   source, sans vérifier qu'elle contenait une vraie mesure -- Admiral a
+   justement une entrée Yakima présente mais entièrement à 0 (corruption
+   déjà documentée, voir la section Yakima Chief plus haut), donc la roue
+   restait vide par défaut malgré une vraie donnée BarthHaas disponible.
+   Corrigé (`matching._usable_aroma_readings`, nouveau) : l'ordre de
+   préférence (`prefer` d'abord si fourni, puis Yakima, puis les autres)
+   ne retient que la PREMIÈRE source à la fois présente ET exploitable
+   (au moins une valeur > 0) ; repli sur l'ancien comportement seulement
+   si AUCUNE source n'est exploitable (résultat dégénéré de toute façon).
+   Effet de bord positif, pas juste cosmétique : ce même repli pilote
+   aussi le SCORE (`by_descriptor`, `similar_hops`), pas seulement
+   l'affichage -- un houblon comme Admiral n'était donc pas seulement mal
+   affiché, il était aussi mal noté par tri quantitatif.
+2. **Axes Yakima-only affichés (toujours à 0) sur une roue purement
+   BarthHaas.** "Melon/stone fruit/earthy/dried fruit are not existing in
+   the brathaas chart, hence you should remove these categories if you
+   display the brathaas chart." Le vocabulaire d'axes (`_intensity_
+   vocabulary`, 16 catégories toutes sources confondues) était réutilisé
+   tel quel pour dessiner N'IMPORTE QUELLE roue, y compris une résolue en
+   BarthHaas (qui ne couvre que 12/16 catégories) -- les 4 axes
+   Yakima-only s'affichaient donc TOUJOURS à zéro sur une roue BarthHaas,
+   un bruit visuel qui laisse croire à une mesure nulle plutôt qu'à une
+   catégorie inexistante côté BarthHaas. Nouveau `matching.aroma_wheel_
+   vocabulary(con, sources=None)` : restreint le vocabulaire aux
+   catégories que les SOURCES données peuvent réellement porter (`SELECT
+   DISTINCT descriptor ... WHERE source IN (...)`), `sources=None` garde
+   le comportement historique (vocabulaire complet, utilisé tel quel par
+   les pills de sélection `by-descriptor`, source-agnostiques par
+   nature -- inchangées). Câblé sur les 4 sites de rendu de roue
+   (`_browse`, `_hop_detail_expanders`, `_by_descriptor` : vocabulaire
+   restreint à la SEULE source résolue pour CE houblon ; `_compare` :
+   vocabulaire = UNION des sources RÉELLEMENT utilisées par les houblons
+   affichés, calculé APRÈS la résolution par houblon plutôt qu'avant).
+   **Question de design posée explicitement à l'utilisateur avant de
+   généraliser** (`AskUserQuestion`) : dans une comparaison MIXTE (ex.
+   Admiral/BarthHaas + Citra/Yakima sur un même graphique superposé),
+   fallait-il garder les axes Yakima-only dès qu'au moins un houblon
+   affiché les couvre réellement (Citra y a de vraies valeurs), ou les
+   retirer entièrement dès que les sources sont mixtes (perdrait la
+   donnée réelle de Citra pour éviter la ligne à zéro d'Admiral) ?
+   Utilisateur confirmé : garder l'UNION (comportement déjà implémenté) --
+   ne jamais masquer une vraie mesure d'un houblon à cause de la
+   limitation de source d'un AUTRE houblon affiché à côté.
+
+4 tests ajoutés (`test_resolve_aroma_intensity_skips_degenerate_all_zero_
+preferred_source`, `..._all_sources_degenerate_falls_back_to_default_
+order`, `test_aroma_wheel_vocabulary_full_without_source_filter`,
+`test_aroma_wheel_vocabulary_restricted_to_given_sources`). Vérifié en
+direct dans le navigateur (après redémarrage du serveur -- même piège
+d'import Python déjà rencontré plus haut dans ce ticket) : Admiral en
+`browse` affiche désormais sa roue BarthHaas SANS toggle nécessaire (12
+axes seulement, plus de melon/earthy/stone fruit/dried fruit à zéro) ;
+Compare Hops Admiral+Citra montre les 16 axes (Citra y a de vraies
+valeurs Yakima sur les 4 catégories qu'Admiral ne peut pas porter).
+Suite complète : 244 -> **248 tests, tous verts** ; `pyflakes` propre.
+
 Reste :
 1. Jointure FooDB/hop_composition au-delà des ~734 composés Flavornet si le vocabulaire
    s'élargit beaucoup (crawl Yakima déjà réel, plus d'aliments FooDB).
-2. `parsers.parse_descriptors` (BarthHaas) renvoie désormais `[]` pour la plupart des variétés :
-   le site réel a remplacé sa liste courte de descripteurs par un paragraphe descriptif (vérifié
-   en direct sur plusieurs variétés, ex. 'admiral', 'tango' — voir le commentaire de la fonction).
-   Piste non explorée : les pages exposent une roue d'arôme en `<canvas>` avec des valeurs
-   numériques par axe (`data-values="3,6,4,..."`) — les libellés d'axes ne sont pas dans le HTML
-   statique (rendu JS), pas retrouvés. Si retrouvés, remplacerait avantageusement l'ancien format
-   texte par des poids QUANTITATIFS par descripteur. Yakima (`imported_fields.aromas`) reste la
-   source fiable de `hop_descriptors` en attendant.
+2. Roues de millésime BarthHaas ("Aroma Profile 2023"/"2024", 20/97 houblons) jamais
+   extraites (T79, scope volontairement limité à la roue "Typical") -- pourrait affiner
+   la comparaison temporelle d'une même variété si un besoin réel se présente.
+3. `INGREDIENT_DESCRIPTORS` (T76, amorce ingrédient->descripteurs) pas encore revue
+   contre le vocabulaire élargi par T79 (+34 termes nets) -- mentionné dans la demande
+   T79 originale de l'utilisateur mais pas encore repris depuis.
 
 ## Conventions
 - Commentaires/docstrings en français (cohérent avec l'existant).

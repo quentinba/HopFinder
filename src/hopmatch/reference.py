@@ -176,7 +176,8 @@ DESCRIPTOR_ALIASES: dict[str, str] = {
     "pomme": "apple",
 }
 
-# Définitions des 15 catégories de la roue d'arôme quantitative Yakima
+# Définitions des 15 catégories (+1, "menthol", ajoutée en T79 -- voir plus
+# bas) de la roue d'arôme quantitative Yakima
 # (`hop_aroma_intensity`, T26) -- demande utilisateur explicite (2026-08-19) :
 # "grassy, herbal and vegetal mean the same thing... can you help me
 # understand them". Vérifié : elles ne sont PAS synonymes (corrélation
@@ -213,6 +214,17 @@ AROMA_WHEEL_DEFINITIONS: dict[str, str] = {
     "woody": "Cedar, pine, resinous, sawdust, tea tree, tobacco",
     "spicy": "Anise, black pepper, cinnamon, clove, ginger",
     "sweet aromatic": "Bubblegum, caramel, chocolate, creamy, honey, vanilla",
+    # 16e catégorie, AJOUTÉE (T79, 2026-08-22, demande utilisateur explicite
+    # -- source BarthHaas, PAS le Hop Sensory Ballot Yakima comme les 15
+    # ci-dessus, donc citée séparément) : leur roue d'arôme quantitative a
+    # une catégorie "menthol" sans équivalent chez Yakima -- vérifié en
+    # direct sur 97 variétés BarthHaas (data-rose-labels, 100% identique),
+    # jamais force-fit sur une catégorie existante qui ne convient pas.
+    # Mots réels observés sous cette catégorie sur le site (classe CSS
+    # "menthol", `parsers.parse_barthhaas_tastes`) : Eucalyptus, Lemon
+    # Balm, Menthol, Mint, Sage.
+    "menthol": "Eucalyptus, lemon balm, menthol, mint, sage (BarthHaas category, "
+              "no Yakima equivalent)",
 }
 
 # Carte d'affinités descripteurs pour le MODE CONTRASTE (cas A).

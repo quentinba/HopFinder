@@ -156,6 +156,14 @@ _TOOL_SUMMARIES = [
 # un `git log` en direct exigerait aussi que `.git` soit présent dans le
 # conteneur déployé, ce qui n'est pas garanti.
 _RECENT_UPDATES = [
+    ("2026-08-22", "BarthHaas now contributes real aroma data: a "
+                   "qualitative descriptor list and a quantitative aroma "
+                   "wheel (rescaled to match Yakima's 0-100 scale), "
+                   "previously undiscovered on their site. Each hop's "
+                   "spider chart resolves to one source automatically "
+                   "(never blended), with a manual BarthHaas/Yakima toggle "
+                   "next to every spider chart (Browse, Amplify/Contrast/"
+                   "By-descriptor detail, and Compare Hops)."),
     ("2026-08-22", "Added the HopFinder logo (sidebar on every page, and "
                    "the top of the Home page) and a matching browser tab "
                    "icon; removed the redundant \"HopFinder\" title and "
@@ -394,6 +402,28 @@ def _descriptors(con) -> list[str]:
 def _intensity_vocabulary(con) -> list[str]:
     db_path = _db_path()
     return _cached_intensity_vocabulary(con, db_path, _db_version(db_path))
+
+
+@st.cache_data
+def _cached_intensity_vocabulary_for_sources(_con, db_path: str, _version: float,
+                                             sources: tuple[str, ...]) -> list[str]:
+    return matching.aroma_wheel_vocabulary(_con, set(sources))
+
+
+def _intensity_vocabulary_for_sources(con, sources: set[str]) -> list[str]:
+    # T79 addendum (signalé en direct par l'utilisateur : "Melon/stone
+    # fruit/earthy/dried fruit are not existing in the brathaas chart,
+    # hence you should remove these categories") -- axes du graphique
+    # restreints aux catégories que LA/LES source(s) réellement affichée(s)
+    # peuvent porter (voir `matching.aroma_wheel_vocabulary`), plutôt que le
+    # vocabulaire complet 16 catégories toutes sources confondues (celui-ci
+    # reste utilisé tel quel par `_intensity_vocabulary`/les pills de
+    # sélection `by-descriptor`, source-agnostiques par nature).
+    if not sources:
+        return _intensity_vocabulary(con)
+    db_path = _db_path()
+    return _cached_intensity_vocabulary_for_sources(
+        con, db_path, _db_version(db_path), tuple(sorted(sources)))
 
 
 def _stats(con) -> dict:
@@ -733,6 +763,32 @@ def _process_survival_legend() -> None:
                 st.write(f"**{annotation}** — {explanation}")
 
 
+# T79 (2026-08-22, demande utilisateur explicite : "I would like a toggle
+# button next to each spider plot to change to barthhaas source if
+# available (single hop spider charts or comparaison)") : jamais un choix
+# PAR HOUBLON dans les vues à N houblons (heatmap by-descriptor, scoring
+# similar_hops) -- résolution automatique là-bas (Yakima si dispo, sinon
+# BarthHaas, voir `matching.resolve_aroma_intensity`). Le toggle n'a de
+# sens QUE là où un houblon (ou une poignée, pour Compare) est affiché
+# individuellement -- Browse, `_hop_detail_expanders`, Compare.
+def _aroma_wheel_source_toggle(by_source: dict[str, dict[str, float]], key: str) -> str | None:
+    """N'affiche le toggle QUE si ce houblon a RÉELLEMENT les deux sources
+    (rien à basculer sinon) -- renvoie la préférence choisie ou None
+    (résolution automatique, voir `matching.resolve_aroma_intensity`)."""
+    if len(by_source) <= 1:
+        return None
+    prefer_bh = st.checkbox("Prefer BarthHaas source (if available)", value=False, key=key)
+    return "barthhaas" if prefer_bh else None
+
+
+def _aroma_wheel_source_caption(used_source: str | None) -> str:
+    if used_source == "barthhaas":
+        return (":material/info: Hover a label for its definition. Aroma wheel source: "
+                "BarthHaas (rescaled to a comparable 0-100 range from their own 0-8 scale).")
+    return (":material/info: Hover a label for its definition. Aroma wheel source: "
+           "Yakima Chief Hop Sensory Ballot.")
+
+
 def _hop_detail_expanders(con, hops: dict, comp: dict, hop_desc: dict, rows: list[dict]) -> None:
     """Détail par houblon en expander, sous le tableau de résultats.
     Remplace l'ancien bouton de navigation directe vers Browse hop
@@ -767,6 +823,7 @@ def _hop_detail_expanders(con, hops: dict, comp: dict, hop_desc: dict, rows: lis
     # simple `set[str]` utilisé pour des opérations d'ensemble ailleurs,
     # voir `matching.descriptor_sources`).
     desc_src = matching.descriptor_sources(con)
+    all_intensity = matching.load_aroma_intensity(con)
     for row in rows:
         v = row["variety"]
         with st.expander(f"{row['name']} — {row['caption']}"):
@@ -784,12 +841,13 @@ def _hop_detail_expanders(con, hops: dict, comp: dict, hop_desc: dict, rows: lis
                     f"{d} ({s})" for s, ds in sorted(by_source.items()) for d in sorted(ds)))
             else:
                 st.write("**Descriptors:** none recorded")
-            intensity = matching.hop_aroma_intensity(con, v)
+            by_source = all_intensity.get(v, {})
+            prefer = _aroma_wheel_source_toggle(by_source, key=f"prefer_bh_expander_{v}")
+            intensity, used_source = matching.resolve_aroma_intensity(by_source, prefer)
             if intensity and any(val > 0 for val in intensity.values()):
-                st.altair_chart(_aroma_wheel(intensity, _intensity_vocabulary(con)),
-                                width="content", theme=None)
-                st.caption(":material/info: Hover a label for its definition "
-                          "(Yakima Chief Hop Sensory Ballot).")
+                vocab = _intensity_vocabulary_for_sources(con, {used_source} if used_source else set())
+                st.altair_chart(_aroma_wheel(intensity, vocab), width="content", theme=None)
+                st.caption(_aroma_wheel_source_caption(used_source))
             hcomp = comp.get(v, {})
             crows = sorted(
                 ({"Compound": c, "Value": round(cv["mid"], 3), "Unit": cv["unit"],
@@ -1609,7 +1667,9 @@ def _browse(con):
         st.write("**Descriptors:** " + all_desc)
     else:
         st.write("**Descriptors:** none recorded")
-    intensity = matching.hop_aroma_intensity(con, selected)
+    by_source = matching.load_aroma_intensity(con).get(selected, {})
+    prefer = _aroma_wheel_source_toggle(by_source, key=f"prefer_bh_browse_{selected}")
+    intensity, used_source = matching.resolve_aroma_intensity(by_source, prefer)
     # any(...) > 0, pas juste `if intensity :` : au moins une variété réelle
     # (admiral, vérifié en direct) a une entrée sensory_values existante mais
     # entièrement à 0 côté YCH — cohérent avec la corruption déjà documentée
@@ -1622,15 +1682,16 @@ def _browse(con):
         # clair/sombre -- vérifié en direct (labels illisibles en thème
         # sombre malgré la palette choisie) : c'est ce thème global qui gagne
         # sur les couleurs de mark, pas un mauvais choix de couleur.
-        st.altair_chart(_aroma_wheel(intensity, _intensity_vocabulary(con)),
-                        width="content", theme=None)
-        st.caption(":material/info: Hover a label for its definition "
-                  "(Yakima Chief Hop Sensory Ballot).")
+        vocab = _intensity_vocabulary_for_sources(con, {used_source} if used_source else set())
+        st.altair_chart(_aroma_wheel(intensity, vocab), width="content", theme=None)
+        st.caption(_aroma_wheel_source_caption(used_source))
     else:
-        st.caption("No quantitative aroma wheel for this variety "
-                   "(Yakima data unavailable or unusable here — BarthHaas "
-                   "only, variety not covered, or corrupted YCH entry as "
-                   "with Admiral).")
+        # T79 addendum : "Admiral" retiré de l'exemple -- BarthHaas alimente
+        # désormais aussi la roue, ce cas ne s'applique plus à ce houblon
+        # précis (gardé comme exemple de repère jusqu'au 2026-08-22).
+        st.caption("No quantitative aroma wheel for this variety (neither "
+                   "Yakima nor BarthHaas covers it, or the only entry "
+                   "present is a corrupted all-zero YCH reading).")
 
     # "Smells like" (T72, 2026-08-21, demande utilisateur explicite : le
     # tooltip Flavornet ajouté sur le barplot Compare Hops (T71) doit AUSSI
@@ -1976,6 +2037,11 @@ def _by_descriptor(con):
                       "data exists for these (black = present)" + suffix)
             st.altair_chart(other_chart, width="stretch")
 
+    # T79 (2026-08-22) : `all_intensity` chargé une seule fois pour toute la
+    # page, réutilisé par le toggle BarthHaas/Yakima de chaque expander
+    # ci-dessous -- même mécanisme que `_hop_detail_expanders`/`_browse`.
+    all_intensity = matching.load_aroma_intensity(con)
+
     for h in ranked:
         hcomp = comp.get(h["variety"], {})
         with st.expander(f"{h['name']} — matches {', '.join(h['matched_descriptors'])}"):
@@ -1998,24 +2064,33 @@ def _by_descriptor(con):
             # l'utilisateur puisse vérifier pourquoi ce houblon est classé où
             # il est parmi ceux à même nombre de descripteurs recoupés.
             if h["quant_score"] is not None:
+                src_label = "BarthHaas" if h.get("intensity_source") == "barthhaas" else "Yakima"
                 st.caption(f"Quantitative refinement: {h['quant_score']:.0f}/100 avg. "
-                          f"intensity on {', '.join(h['quant_descriptors'])} (Yakima)")
+                          f"intensity on {', '.join(h['quant_descriptors'])} ({src_label})")
             elif wheel_selected:
                 st.caption("Quantitative refinement: no aroma-wheel intensity data for "
-                          "this hop (BarthHaas only, or variety not covered by Yakima).")
+                          "this hop (neither Yakima nor BarthHaas covers it, or the "
+                          "only entry present is a corrupted all-zero YCH reading).")
             # Roue d'arôme quantitative (demande utilisateur 2026-08-19 : "The
             # aroma wheel is missing from the from descriptor tool") -- même
             # rendu que `_browse`/`_hop_detail_expanders` (theme=None, voir
-            # leur commentaire pour la raison), absente si Yakima ne couvre
-            # pas la variété ou si l'entrée est corrompue (ex. Admiral).
-            # `h["intensity"]` réutilise directement ce que `by_descriptor` a
-            # déjà chargé pour le score quantitatif -- pas une deuxième requête.
-            intensity = h["intensity"]
+            # leur commentaire pour la raison). T79 (2026-08-22) : le score de
+            # classement (`h["intensity"]`/`h["intensity_source"]`, ci-dessus)
+            # reste la résolution AUTOMATIQUE de `matching.by_descriptor`
+            # (jamais de toggle sur le classement lui-même, voir T79) -- ce
+            # rendu de roue, en revanche, est un "single hop spider chart" au
+            # même titre que `_hop_detail_expanders`/`_browse`, donc porte son
+            # propre toggle BarthHaas/Yakima (demande utilisateur explicite,
+            # T79). Peut donc afficher une source DIFFÉRENTE de celle utilisée
+            # pour le score juste au-dessus -- attendu, chaque caption cite
+            # explicitement sa propre source.
+            by_source = all_intensity.get(h["variety"], {})
+            prefer = _aroma_wheel_source_toggle(by_source, key=f"prefer_bh_by_desc_{h['variety']}")
+            intensity, used_source = matching.resolve_aroma_intensity(by_source, prefer)
             if intensity and any(val > 0 for val in intensity.values()):
-                st.altair_chart(_aroma_wheel(intensity, _intensity_vocabulary(con)),
-                                width="content", theme=None)
-                st.caption(":material/info: Hover a label for its definition "
-                          "(Yakima Chief Hop Sensory Ballot).")
+                vocab = _intensity_vocabulary_for_sources(con, {used_source} if used_source else set())
+                st.altair_chart(_aroma_wheel(intensity, vocab), width="content", theme=None)
+                st.caption(_aroma_wheel_source_caption(used_source))
             if h["compounds"]:
                 st.dataframe(
                     [{"Compound": c["compound"], "Value": round(c["mid"], 2),
@@ -2410,24 +2485,57 @@ def _compare(con):
     colors = {hops[v]["name"]: _COMPARE_PALETTE[i] for i, v in enumerate(selected)}
 
     st.subheader("Aroma wheel")
-    vocabulary = _intensity_vocabulary(con)
+    # T79 : jusqu'à 5 houblons superposés sur UN SEUL graphique -- un toggle
+    # PAR houblon n'aurait pas de sens ici (contrairement à Browse/aux
+    # expanders, un houblon à la fois) ; un SEUL toggle affecte tous les
+    # houblons sélectionnés à la fois, retombe automatiquement sur l'autre
+    # source pour ceux qui n'ont pas celle demandée (jamais vidés par un
+    # choix qui ne s'applique pas à eux -- voir `matching.resolve_aroma_
+    # intensity`). N'apparaît que si AU MOINS un houblon sélectionné a
+    # réellement les deux sources (rien à basculer sinon).
+    all_intensity = matching.load_aroma_intensity(con)
+    prefer = None
+    if any(len(all_intensity.get(v, {})) > 1 for v in selected):
+        prefer_bh = st.checkbox("Prefer BarthHaas source (if available)", value=False,
+                                key="prefer_bh_compare")
+        prefer = "barthhaas" if prefer_bh else None
     intensities = {}
+    sources_used = {}
     no_wheel_data = []
     for v in selected:
-        intensity = matching.hop_aroma_intensity(con, v)
+        intensity, used_source = matching.resolve_aroma_intensity(all_intensity.get(v, {}), prefer)
         if intensity and any(val > 0 for val in intensity.values()):
             intensities[hops[v]["name"]] = intensity
+            sources_used[hops[v]["name"]] = used_source
         else:
             no_wheel_data.append(hops[v]["name"])
+    # T79 addendum : axes restreints à l'UNION des sources RÉELLEMENT
+    # utilisées par les houblons affichés (jamais le vocabulaire complet
+    # 16 catégories) -- calculé APRÈS la boucle ci-dessus, une fois
+    # `sources_used` connu (signalé par l'utilisateur, même correctif que
+    # Browse/les expanders, voir `_intensity_vocabulary_for_sources`).
+    vocabulary = _intensity_vocabulary_for_sources(con, set(sources_used.values()))
     chart = _aroma_wheel_compare(intensities, vocabulary, colors)
     if chart is not None:
         st.altair_chart(chart, width="content", theme=None)
-        st.caption(":material/info: Hover a label for its definition "
-                  "(Yakima Chief Hop Sensory Ballot).")
+        # Source par houblon affichée explicitement (pas un simple "Yakima
+        # Ballot" générique) : avec le toggle, des houblons du MÊME
+        # graphique peuvent tout à fait venir de sources différentes (repli
+        # automatique par houblon) -- jamais caché, même principe que T77.
+        if sources_used:
+            per_hop = ", ".join(
+                f"{name}: {'BarthHaas' if s == 'barthhaas' else 'Yakima'}"
+                for name, s in sources_used.items())
+            st.caption(f":material/info: Aroma wheel source per hop — {per_hop}.")
+        st.caption(":material/info: Hover a label for its definition.")
     if no_wheel_data:
+        # T79 addendum : ce n'est PLUS "BarthHaas only" -- BarthHaas alimente
+        # aussi la roue désormais (voir le toggle ci-dessus). N'atterrit ici
+        # que si le houblon n'a VRAIMENT aucune des deux sources, ou une
+        # entrée présente mais entièrement à zéro (voir Browse).
         st.caption(":material/info: No quantitative aroma wheel data for: "
                   + ", ".join(no_wheel_data) +
-                  " (BarthHaas only, or variety not covered by Yakima).")
+                  " (neither Yakima nor BarthHaas covers this variety).")
 
     st.subheader("Principal info")
     principal_rows = []

@@ -13,7 +13,7 @@ authors = [{name = "Quentin", email = "quentin4313@gmail.com"}]
 dependencies = []
 
 [project.optional-dependencies]
-crawl = ["requests>=2.31", "beautifulsoup4>=4.12"]
+crawl = ["requests>=2.31", "beautifulsoup4>=4.12", "pyyaml>=6.0"]
 foodb = ["pandas>=2.0"]
 ui = ["streamlit>=1.30", "altair>=5.0", "pillow>=10.0"]
 dev = ["pytest>=7"]
