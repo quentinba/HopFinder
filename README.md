@@ -1,6 +1,7 @@
 <div align="center">
   <img src="assets/logo.png" alt="HopFinder" width="480">
 </div>
+
 ## Aperçu
 
 HopFinder relie deux mondes : l'**arôme** — une note comme yuzu, basilic ou mangue, un
