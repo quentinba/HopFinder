@@ -135,6 +135,35 @@ _TOOL_SUMMARIES = [
 # un `git log` en direct exigerait aussi que `.git` soit présent dans le
 # conteneur déployé, ce qui n'est pas garanti.
 _RECENT_UPDATES = [
+    ("2026-08-22", "\"Sources\" split into \"Composition sources\" and "
+                   "\"Descriptor sources\" everywhere both appear (Amplify, "
+                   "Contrast, blends, By-descriptor, Browse) — a hop's "
+                   "aroma tags often come from a different source than its "
+                   "composition data, and showing one label for both was "
+                   "misleading."),
+    ("2026-08-22", "Amplify: results table now splits \"Molecular "
+                   "contributors\" and \"Descriptor contributors\" into "
+                   "separate columns (each shown only when that layer "
+                   "actually counts), and a new \"How to rank hops?\" "
+                   "Descriptors/Both/Molecular-only control replaces the "
+                   "old nested checkboxes."),
+    ("2026-08-22", "Contrast: new optional \"Ingredient\" picker at the top "
+                   "auto-fills the descriptor list below (editable), same "
+                   "AI-assisted mapping as Amplify — no need to type "
+                   "descriptors by hand anymore."),
+    ("2026-08-22", "Amplify reworked: pick an \"Ingredient\" and its typical "
+                   "aroma descriptors now auto-fill (editable) as the main "
+                   "signal; molecular similarity + --oav become an optional "
+                   "checkbox instead of the default."),
+    ("2026-08-22", "Amplify: new \"How does the molecular score work?\" "
+                   "expander explains the TF-IDF + --oav math step by step, "
+                   "and the --oav checkbox now defaults on/off per note "
+                   "based on that note's own --oav coverage, instead of "
+                   "always defaulting on."),
+    ("2026-08-22", "--oav thresholds are now resolved live from FlavorDB2 "
+                   "(never hardcoded) and Amplify shows an --oav coverage "
+                   "caption/warning naming any molecule left at a neutral "
+                   "weight for lack of a sourced threshold."),
     ("2026-08-21", "Added a \"What do these Process labels mean?\" legend "
                    "next to the Process badge (Browse and Compare Hops), "
                    "explaining e.g. why sesquiterpenes say \"contributes "
@@ -701,15 +730,34 @@ def _hop_detail_expanders(con, hops: dict, comp: dict, hop_desc: dict, rows: lis
     -- calculée UNE FOIS ici (pas par houblon dans la boucle)."""
     st.subheader("Hop details")
     compound_smells = _all_compound_descriptors(con, comp)
+    # T77 (2026-08-22, demande utilisateur explicite -- confusion vérifiée
+    # en direct sur "enigma" : "the source is barthhaas... does berry come
+    # from this only?") : `st.caption(f"Sources: {hops[v]['sources']}")`
+    # juste au-dessus de la liste des descripteurs laissait clairement
+    # entendre que cette provenance couvrait AUSSI les descripteurs --
+    # `hops[v]['sources']` n'a toujours été que la provenance de la
+    # COMPOSITION (`hops` table). Descripteurs groupés par LEUR PROPRE
+    # source (`hop_descriptors.source`, jamais gardée par `hop_desc` --
+    # simple `set[str]` utilisé pour des opérations d'ensemble ailleurs,
+    # voir `matching.descriptor_sources`).
+    desc_src = matching.descriptor_sources(con)
     for row in rows:
         v = row["variety"]
         with st.expander(f"{row['name']} — {row['caption']}"):
             purpose, inferred = matching.resolve_purpose(hops[v].get("purpose"), comp.get(v, {}))
             _purpose_badge(purpose, inferred)
-            st.caption(f"Sources: {hops[v]['sources']}")
+            st.caption(f"Composition sources: {hops[v]['sources']}")
             _render_key_stats(comp.get(v, {}))
             descs = sorted(hop_desc.get(v, set()))
-            st.write("**Descriptors:** " + (", ".join(descs) if descs else "none recorded"))
+            if descs:
+                by_source: dict[str, list[str]] = {}
+                for d in descs:
+                    for s in desc_src.get(v, {}).get(d) or {"unknown"}:
+                        by_source.setdefault(s, []).append(d)
+                st.write("**Descriptors:** " + ", ".join(
+                    f"{d} ({s})" for s, ds in sorted(by_source.items()) for d in sorted(ds)))
+            else:
+                st.write("**Descriptors:** none recorded")
             intensity = matching.hop_aroma_intensity(con, v)
             if intensity and any(val > 0 for val in intensity.values()):
                 st.altair_chart(_aroma_wheel(intensity, _intensity_vocabulary(con)),
@@ -742,6 +790,142 @@ def _select_base_hop(ranked: list[dict], key: str) -> str:
                         format_func=lambda v: names[v], key=key)
 
 
+def _molecular_score_explainer() -> None:
+    """Explication du score moléculaire TF-IDF + --oav (T76, 2026-08-22,
+    demande utilisateur explicite : "How this score is working in practice?
+    ... Can you explain me more precisely how the amplify function is
+    working on a molecular perspective" -- suite directe de T75, l'ajout de
+    la couverture --oav ayant révélé que le mécanisme lui-même n'était pas
+    clair). Contenu statique (ne dépend pas de la note sélectionnée),
+    `st.expander` replié par défaut -- même principe que `_process_survival_
+    legend` (T74) : pas de bruit pour qui ne se pose pas la question.
+
+    Adapté d'un brouillon fourni par l'utilisateur, avec DEUX corrections
+    factuelles apportées avant publication (jamais republié tel quel sans
+    vérification, cohérent avec la discipline du projet) :
+    (1) le brouillon citait "thiols, cétones, isobutyrate" comme groupe
+    touché par le biais de neutralité --oav ; vérifié dans reference.py :
+    seuls les thiols sont dans `reference.MOLECULES` (CID=None -> jamais de
+    seuil --oav) ; "ketones"/"isobutyrate" n'existent que côté `PROCESS_
+    SURVIVAL`/`JANISH_COMPOUND_CATEGORIES` (badge Process, T74), pas dans le
+    scoring moléculaire/--oav -- affirmation corrigée pour ne citer QUE les
+    thiols, dont c'est vérifiable ci-dessous.
+    (2) l'exemple chiffré du brouillon affirmait "l'écart se resserre" avec
+    --oav (1,20× cité comme le cas AVEC --oav contre 1,44× SANS) ; recalculé
+    à la main ET par script (`amount`/`specificity` réels sur les mêmes
+    chiffres) : c'est l'inverse -- SANS --oav le ratio A/B est 1,20 (B
+    atteint 83,4% de A), AVEC --oav il est 1,44 (B tombe à 69,7% de A) --
+    l'écart s'élargit ici, pas l'inverse. Narration corrigée en conséquence ;
+    le reste de l'arithmétique du brouillon (TF/IDF/multiplicateurs/totaux)
+    était juste, revérifié terme à terme."""
+    with st.expander("How does the molecular score work? (TF-IDF + --oav explained)"):
+        st.markdown(
+            "**The problem.** Simply counting shared molecules doesn't work: "
+            "myrcene is present, at high amounts, in almost every hop — it "
+            "would dominate every ranking regardless of which note you're "
+            "matching, the same way \"the\"/\"a\" would dominate a plain "
+            "word-count search. The molecular score borrows a fix from text "
+            "search (TF-IDF): a molecule's weight depends on how much of it "
+            "a hop has *relative to other hops*, and how *rare* it is across "
+            "hops — never on its raw quantity alone.")
+        st.markdown(
+            "| Text search | hopmatch |\n"
+            "|---|---|\n"
+            "| Query | The note (e.g. mango) |\n"
+            "| Document | A hop |\n"
+            "| Word | A molecule |\n"
+            "| Corpus | The ~189 hops |\n"
+            "| Stop word (\"the\", \"a\") | Myrcene — present almost "
+            "everywhere, at high doses |")
+        st.markdown("**Per molecule, per hop:**")
+        st.latex(r"\text{contribution} = \text{note\_weight} \times TF \times IDF \times OAV")
+        st.markdown(
+            "- **note_weight** — how much this molecule matters for *this* "
+            "note. Fixed, identical for every hop.\n"
+            "- **TF** (term frequency) — `hop's amount ÷ richest hop's "
+            "amount`, for *that molecule specifically*, across all hops. "
+            "Between 0 and 1: \"what fraction of the record holder do I "
+            "reach?\" Answers *am I rich in this molecule?* — not *how much "
+            "do I have in absolute ppm.*\n"
+            "- **IDF** (inverse document frequency) — "
+            "`log(n_hops ÷ (1 + hops that have it)) + 1`. Answers *is this "
+            "molecule informative?* A molecule in nearly every hop (myrcene) "
+            "scores low; a rare one scores high. Same value for every hop — "
+            "it's a property of the molecule, not the hop.\n"
+            "- **OAV** (only with `--oav`, else 1.0) — "
+            "`30 ÷ perception threshold (ppb)`. Answers *how little of it "
+            "does it take to smell?* 30 ppb is an arbitrary reference point: "
+            "a molecule with exactly that threshold gets a neutral 1.0×.")
+        st.markdown("**What `--oav` does, and doesn't, do**")
+        st.markdown(
+            "- **It never filters anything.** A molecule with no sourced "
+            "threshold doesn't disappear from the score — it gets exactly "
+            "1.0× and keeps its full TF×IDF weight. `--oav` only changes "
+            "*how loud* a molecule counts, never *whether* it counts.\n"
+            "- **The direction is inverted — the usual source of "
+            "confusion.** A *low* threshold means a *potent* molecule, so it "
+            "gets a *high* multiplier: dividing by the threshold flips the "
+            "sign for you.")
+        st.markdown(
+            "| Molecule | Threshold | 30 ÷ threshold |\n"
+            "|---|---|---|\n"
+            "| Geraniol | 39.5 ppb | 0.76 — mildly discounted |\n"
+            "| β-pinene | 140 ppb | 0.21 — heavily discounted |\n"
+            "| Thiols *(illustrative — see note below)* | ~0.06 ppb | "
+            "500 — would be massively amplified |")
+        st.markdown(
+            "β-pinene is \"loud in concentration, quiet in perception\" — "
+            "`--oav` corrects for that. **Known current bias:** thiols are "
+            "hopmatch's most potent tracked compound by far, but they have "
+            "no individually resolvable PubChem CID in this project's data — "
+            "BarthHaas reports them as one combined field covering several "
+            "molecules — so `--oav` can't resolve a sourced threshold for "
+            "them either, and they stay stuck at the neutral 1.0× shown "
+            "above instead of the outsized multiplier their real potency "
+            "would justify. This is a data-source limitation, not a bug.")
+        st.markdown(
+            "**Illustrative example** *(hypothetical numbers, not real hop "
+            "data — for teaching the mechanic only)*. A note weighing "
+            "geraniol 0.332, myrcene 0.10, β-pinene 0.15, and two candidate "
+            "hops:")
+        st.markdown(
+            "| | Geraniol | Myrcene | β-pinene |\n"
+            "|---|---|---|---|\n"
+            "| Hop A | 0.031 *(record holder)* | 0.40 | 0.005 |\n"
+            "| Hop B | 0.010 | 0.65 *(record holder)* | 0.029 *(record holder)* |\n"
+            "| Present in | 60/189 hops | 185/189 hops | 45/189 hops |\n"
+            "| Threshold | 39.5 ppb | 13 ppb | 140 ppb |")
+        st.markdown(
+            "**Step 1 — raw amounts.** A = 0.436, B = 0.689. B \"wins\", but "
+            "only because myrcene reads in much bigger raw numbers — exactly "
+            "the failure mode TF-IDF exists to fix.\n\n"
+            "**Step 2 — TF**, each molecule rescaled 0–1 against its own "
+            "record holder: A → geraniol 1.00, myrcene 0.62, β-pinene 0.17. "
+            "B → geraniol 0.32, myrcene 1.00, β-pinene 1.00.\n\n"
+            "**Step 3 — IDF**: geraniol 2.13, myrcene 1.02 *(nearly neutral "
+            "— it's everywhere)*, β-pinene 2.44.\n\n"
+            "**Step 4 — contribution, without `--oav`.** "
+            "A = 0.332×1.00×2.13 + 0.10×0.62×1.02 + 0.15×0.17×2.44 "
+            "= 0.707 + 0.063 + 0.062 = **0.832**. "
+            "B = 0.332×0.32×2.13 + 0.10×1.00×1.02 + 0.15×1.00×2.44 "
+            "= 0.226 + 0.102 + 0.366 = **0.694**. A now leads — the "
+            "raw-quantity \"winner\" B has dropped to second.\n\n"
+            "**Step 5 — with `--oav`** (multipliers 0.76 / 2.31 / 0.21): "
+            "A = 0.537 + 0.146 + 0.013 = **0.696**. "
+            "B = 0.172 + 0.236 + 0.077 = **0.485**. A still leads — and the "
+            "gap *widens*, not narrows: B's biggest asset was β-pinene "
+            "(TF 1.00), and that's exactly the molecule `--oav` penalizes "
+            "hardest here, since it takes a lot of it to actually smell it. "
+            "OAV doesn't uniformly flatten every hop — it depends on which "
+            "specific molecule each candidate happens to lean on.\n\n"
+            "**Final normalization.** The best-scoring hop is always "
+            "rescaled to exactly 100; every other hop is shown *relative to "
+            "it*. Without `--oav`, B reaches 83.4% of A's score; with "
+            "`--oav`, only 69.7%. A score of 100 means \"the best match "
+            "among these candidates,\" never \"a perfect match\" in any "
+            "absolute sense.")
+
+
 def _amplify(con):
     # Tous les inputs de l'outil (note incluse) sur la page principale, pas
     # dans la sidebar (2026-08-20, signalé par l'utilisateur en testant sur
@@ -758,56 +942,267 @@ def _amplify(con):
     if not notes:
         st.error("No notes in the database.")
         st.stop()
-    note = st.selectbox("Note", notes)
-    use_oav = st.checkbox(
-        "--oav (olfactory power prior)", value=True,
-        help="Weights each molecule by 1/threshold when that threshold is "
-             "known (~14 common hop oil molecules: myrcene, geraniol, "
-             "thiols... — other molecules are unaffected). Approximate: not "
-             "a real concentration measurement, just a correction so a very "
-             "potent molecule with a low threshold isn't drowned out by a "
-             "ubiquitous but barely odorous one. Changes the ranking on "
-             "about 1 note in 6 (measured on the real database). Enabled by "
-             "default (user request): a real, measured effect, not noise — "
-             "disable it to compare without.")
-    # note_descriptors est vide par défaut pour toute note (pas d'amorce
-    # littérature, cf. reference.py) : sans sélection manuelle ici, la couche
-    # descripteurs ne peut jamais contribuer au score.
+    # T76 (2026-08-22, demande utilisateur explicite -- reframe complet du
+    # tool) : "Note" renommé "Ingredient" en GUI ("note" ne parlait pas à
+    # l'utilisateur -- c'est l'ADDITION réellement mise dans la recette,
+    # ex. mangue, basilic). `note`/`aroma_notes`/le paramètre CLI restent
+    # inchangés en interne (portée du renommage = label GUI uniquement,
+    # même principe déjà appliqué au vocabulaire anglais de app.py).
+    note = st.selectbox("Ingredient", notes,
+                        help="The actual addition put in the beer recipe "
+                             "(a fruit, herb, spice...).")
+
+    hops, comp, hop_desc, _ = matching.load(con)
+    # T77 (2026-08-22, demande utilisateur explicite -- confusion vérifiée
+    # en direct sur "enigma" : "berry"/"raspberry" venaient de BeerMaverick,
+    # jamais de BarthHaas, alors que la colonne "Sources" affichait
+    # "barthhaas" seul -- provenance de la COMPOSITION, pas des
+    # descripteurs) : provenance PAR DESCRIPTEUR, séparée de "sources"
+    # (composition). Voir `matching.descriptor_sources`.
+    desc_src = matching.descriptor_sources(con)
+    profile = matching.get_note(con, note)
+    producible, _, _ = matching.coverage(profile, comp)
+
+    # Couche descripteurs = COUCHE PRINCIPALE désormais (T76, demande
+    # utilisateur explicite : "I want you to put as a first layer the
+    # descriptors and as an optional layer the molecular" -- la couche
+    # moléculaire est jugée "less straightforward and more geeky/uncertain
+    # empirically", donc plus le comportement par défaut). Pré-remplie
+    # depuis `reference.INGREDIENT_DESCRIPTORS` (amorce IA T76, PAS une
+    # dérivation FooDB -- voir le commentaire au-dessus du dict dans
+    # reference.py) : jamais imposée, `key=f"desc_{note}"` -- un widget par
+    # ingrédient, l'utilisateur garde la main pour éditer/vider librement, y
+    # compris en revenant sur un ingrédient déjà visité dans la session
+    # (mémorisé via session_state, même mécanisme que `use_oav_{note}` T76).
+    _suggested_desc = [d for d in matching.reference.INGREDIENT_DESCRIPTORS.get(note, [])
+                       if d in _descriptors(con)]
+    if _suggested_desc:
+        st.caption(f"Prefilled from {note}'s typical aroma (AI-assisted "
+                  "suggestion, not measured data) — feel free to edit.")
+    else:
+        st.caption(f"No auto-suggested descriptors for {note} yet — add any "
+                  "that apply manually, or rely on the molecular layer below.")
     selected_desc = st.multiselect(
-        "Note descriptors (optional — activates the descriptor layer)",
-        _descriptors(con))
+        "Aroma descriptors", _descriptors(con), default=_suggested_desc,
+        key=f"desc_{note}")
+
+    # T76 3e addendum (2026-08-22, demande utilisateur explicite : "I have
+    # the feeling these two buttons are not super clear/ergonomic" -- au
+    # sujet des deux cases précédentes, "Also use molecular similarity" +
+    # sa sous-case "Use only the molecular layer" qui n'apparaissait que si
+    # la première était cochée). Remplacées par UN SEUL `st.segmented_
+    # control` à 3 états mutuellement exclusifs -- correspond directement
+    # aux 3 seules combinaisons `w_mol`/`w_desc` réellement utilisées (0/1,
+    # 0.5/0.5, 1/0), plus conforme aux conventions Streamlit du projet
+    # (segmented_control préféré à une case/un radio pour ce genre de choix)
+    # qu'une case qui n'apparaît que si une autre case précise est cochée.
+    # `required=True` : jamais de désélection vers `None` (un des 3 états
+    # est toujours actif). Défaut "Descriptors" (couche principale, T76) --
+    # PAS "Both", pour ne rien changer au comportement par défaut déjà en
+    # place (moléculaire toujours opt-in).
+    rank_mode = st.segmented_control(
+        "How to rank hops?", ["Descriptors", "Both", "Molecular only"],
+        default="Descriptors", required=True, key=f"rank_mode_{note}",
+        help="**Descriptors** — aroma tags only (see above), the default, "
+             "most reliable signal. **Both** — blends in molecular "
+             "similarity too (which hops share this ingredient's actual "
+             "aroma MOLECULES, not just its descriptor tags — see the "
+             "explainer below). **Molecular only** — ranks purely by "
+             "shared molecules, ignoring descriptor tags entirely, without "
+             "losing your descriptor selection above.")
+    use_molecular = rank_mode in ("Both", "Molecular only")
+    molecular_only = rank_mode == "Molecular only"
+
+    # T76 addendum (2026-08-22, demande utilisateur explicite : "should
+    # appear even if the molecular score is not ticked because user should
+    # be informed before taking the decision to activate it or not") --
+    # explainer + contexte de couverture affichés INCONDITIONNELLEMENT
+    # (avant, dans le `if use_molecular:` ci-dessous, donc invisibles tant
+    # que la case n'était pas déjà cochée -- à l'envers de leur but, qui est
+    # d'aider À DÉCIDER de cocher ou non).
+    _molecular_score_explainer()
+    # T76 : distribution RÉELLE mesurée sur 44 ingrédients effectivement
+    # courants en brassage (étude T76) -- remplace l'ancien `st.warning`
+    # "Low molecular coverage" qui se déclenchait pour LITTÉRALEMENT
+    # toutes les notes de toute la base (`LOW_COVERAGE_WARNING_
+    # THRESHOLD`=20%, or la couverture ne dépasse jamais ~12% nulle part,
+    # y compris sur les ingrédients réellement pertinents -- un
+    # "avertissement" qui ne varie jamais n'avertit de rien). Contexte
+    # factuel affiché systématiquement plutôt qu'un seuil binaire alarmant.
+    st.caption(
+        "For reference: on real beer ingredients (fruits, herbs, "
+        "spices), molecular coverage typically falls between 4% and "
+        "12% (measured on a curated sample) — hop oil chemistry only "
+        "ever tracks a handful of any ingredient's real aroma "
+        "molecules, so a low number here is normal, not a sign of "
+        "missing data. The descriptor layer above is the more "
+        "reliable signal on its own.")
+
+    use_oav = False
+    if use_molecular:
+        # T76 (2026-08-22, demande utilisateur explicite) : la case --oav se
+        # pré-coche/décoche désormais AUTOMATIQUEMENT par note plutôt qu'une
+        # valeur fixe `True` pour tout le monde, à partir de la couverture
+        # --oav RÉELLE de cette note précise -- calculée ici, EN AMONT de la
+        # case, donc dupliquée avec ce que `matching.amplify` recalculera
+        # juste en dessous (coût négligeable : une note, ~200 houblons,
+        # mêmes requêtes déjà bon marché que celles mesurées ~30-50ms pour
+        # toute la base en T-perf). `key=f"use_oav_{note}"` : un widget
+        # Streamlit distinct par note (pas juste par label) -- change de
+        # note recalcule un nouveau défaut informé par CETTE note, tout en
+        # gardant en mémoire (session_state) un override manuel si
+        # l'utilisateur revient sur une note déjà visitée.
+        if producible:
+            _oav_thr_preview = matching.oav_thresholds(con, list(producible))
+            _oav_cov_preview, _ = matching.oav_coverage(profile, comp, _oav_thr_preview)
+        else:
+            _oav_cov_preview = None
+        default_oav = bool(producible) and _oav_cov_preview is not None \
+            and _oav_cov_preview >= matching.OAV_LOW_COVERAGE_WARNING_THRESHOLD
+
+        use_oav = st.checkbox(
+            "--oav (olfactory power prior)", value=default_oav, key=f"use_oav_{note}",
+            help="Weights each molecule by 1/threshold when that threshold is "
+                 "known. Thresholds are resolved live from FlavorDB2 (PubChem "
+                 "CID → CAS → sourced threshold), never from a hardcoded value — "
+                 "molecules without a sourced FlavorDB2 threshold get a neutral "
+                 "weight (1x), never a guessed one. Approximate: not "
+                 "a real concentration measurement, just a correction so a very "
+                 "potent molecule with a low threshold isn't drowned out by a "
+                 "ubiquitous but barely odorous one. Changes the ranking on "
+                 "about 1 note in 6 (measured on the real database). Pre-checked "
+                 "only when this note's own --oav coverage is high enough to "
+                 "trust (see the caption below once enabled) — untick/tick "
+                 "freely to compare.")
+
     top = st.slider("Number of results", 1, 30, 8)
-    r = matching.amplify(con, note, use_oav=use_oav,
+
+    # T76 : plus de repli implicite "pas de descripteurs -> 100% moléculaire"
+    # ici -- ce repli reste dans `matching.amplify` (`has_descriptors`) pour
+    # le cas "moléculaire activé + aucun descripteur", mais si l'utilisateur
+    # a EXPLICITEMENT décoché la couche moléculaire ET n'a aucun descripteur,
+    # il n'y a structurellement rien à classer : le dire plutôt que de
+    # laisser `matching.amplify` retomber silencieusement sur 100%
+    # moléculaire malgré la case décochée (ce qui contredirait le choix
+    # explicite de l'utilisateur).
+    if not use_molecular and not selected_desc:
+        st.write("No descriptors selected and the molecular layer is off — "
+                 "nothing to rank. Add descriptors above, or enable the "
+                 "molecular layer.")
+        return
+
+    if not use_molecular:
+        w_mol, w_desc = 0.0, 1.0
+    elif molecular_only:
+        w_mol, w_desc = 1.0, 0.0
+    else:
+        w_mol, w_desc = 0.5, 0.5
+    r = matching.amplify(con, note, w_mol=w_mol, w_desc=w_desc, use_oav=use_oav,
                          descriptors=selected_desc or None, top=top)
 
-    st.metric("Molecular coverage", f"{r['coverage']*100:.0f}%")
-    if not r.get("has_descriptors", True):
-        st.caption("No descriptors for this note: 100% molecular score "
-                  "(w_desc not applied).")
-    if r["coverage"] < matching.LOW_COVERAGE_WARNING_THRESHOLD:
-        st.warning(
-            f"Low molecular coverage ({r['coverage']*100:.0f}%): the molecular "
-            "ranking alone risks being dominated by a single molecule common "
-            "to many foods, not by this note's own signature (hop oil "
-            "chemistry rarely overlaps with food aromas). "
-            "**Add as many descriptors as possible** above for a more "
-            "reliable result.")
-    if r["orphan"]:
-        st.warning("Orphans (carried by the addition, not the hop): "
-                   + ", ".join(r["orphan"]))
+    if use_molecular:
+        st.metric("Molecular coverage", f"{r['coverage']*100:.0f}%")
+        if not r.get("has_descriptors", True):
+            st.caption("No descriptors for this note: 100% molecular score "
+                      "(w_desc not applied).")
+        if use_oav and r.get("oav_coverage") is not None:
+            st.caption(
+                f"--oav coverage: {r['oav_coverage']*100:.0f}% of the molecular "
+                "score comes from molecules with a threshold sourced live from "
+                "FlavorDB2 (PubChem CID → CAS → threshold); the rest gets a "
+                "neutral (1x) weight, never a guessed threshold.")
+            if r["oav_coverage"] < matching.OAV_LOW_COVERAGE_WARNING_THRESHOLD:
+                st.warning(
+                    f"--oav is active, but {(1 - r['oav_coverage'])*100:.0f}% of "
+                    "the molecular score comes from molecules without a sourced "
+                    f"threshold (including {', '.join(r['oav_uncovered'])}): for "
+                    "those, --oav has no effect (neutral 1x weight) — its "
+                    "correction here is only partial.")
+        # T76 : avertissement recentré sur le VRAI cas dégénéré (1 seule
+        # molécule productible -- le classement se réduit alors à un simple
+        # tri par quantité brute de CETTE molécule, cf. le cas géraniol/
+        # Talus/Ekuanot documenté en T69) plutôt que sur un seuil de
+        # pourcentage qui se déclenchait pour toute la base sans exception.
+        if len(producible) <= 1:
+            st.warning(
+                f"Only {next(iter(producible)) if producible else 'no molecule'} "
+                "is a producible molecule for this ingredient: the molecular "
+                "ranking alone just reflects who has the most of it, not this "
+                "ingredient's real signature. The descriptor layer above is "
+                "the more reliable signal here.")
+        # T76 addendum : orphelines = molécules de la note qu'AUCUN houblon ne
+        # produit -- un concept purement moléculaire (`coverage()`), sans
+        # rapport avec la couche descripteurs. N'a de sens que si la couche
+        # moléculaire est activée (déplacé depuis en dehors de `if use_
+        # molecular`, où il s'affichait même case décochée).
+        if r["orphan"]:
+            st.warning("Orphans (carried by the addition, not the hop): "
+                       + ", ".join(r["orphan"]))
     if not r["ranked"]:
         st.write("No hop overlaps with this note.")
         return
-    hops, comp, hop_desc, _ = matching.load(con)
-    _render_hop_rows(
-        [dict(_row_with_purpose(h, hops, comp), why_str=", ".join(h["why"]) or "—")
-         for h in r["ranked"]],
-        [("Score", "score"), ("Mol.", "mol"), ("Desc.", "desc"), ("Purpose", "purpose"),
-        ("Contributes via", "why_str"), ("Sources", "sources")])
+    # T76 addendum (2026-08-22, demande utilisateur explicite : "we are
+    # missing the descriptor contribution... create two distinctive columns
+    # 'Molecular contributors' and 'Descriptor contributors'... activate the
+    # columns only if the respective scores are activated") : l'ancienne
+    # colonne unique "Contributes via" ne montrait QUE `h["why"]`
+    # (contributeurs moléculaires, `molecular_scores`) même quand la couche
+    # descripteurs pesait dans le score -- jamais quels descripteurs de la
+    # note avaient effectivement recoupé ceux du houblon
+    # (`descriptor_overlap`, jamais exposé nommément avant, juste une
+    # fraction numérique dans "Desc."). Calculé ici (pas dans matching.py) :
+    # simple recoupement d'ensembles déjà chargés (`selected_desc`,
+    # `hop_desc`), pas une nouvelle notion de score.
+    #
+    # "activées" = pèsent RÉELLEMENT dans le score final, pas juste
+    # "cochées" : `show_desc_col` exige `w_desc > 0` EN PLUS de `has_
+    # descriptors`, pour couvrir le cas "Use only the molecular layer" ---
+    # descripteurs sélectionnés (`has_descriptors=True`) mais explicitement
+    # mis à w_desc=0 par ce choix -- sinon la colonne "Descriptor
+    # contributors" resterait affichée pour une couche qui ne compte plus du
+    # tout, exactement le problème signalé pour "Mol."/"Contributes via" un
+    # tour plus tôt.
+    show_mol_col = use_molecular
+    show_desc_col = r.get("has_descriptors", False) and w_desc > 0
+    desc_set = set(selected_desc)
+    _columns = [("Score", "score")]
+    if show_mol_col:
+        _columns.append(("Mol.", "mol"))
+    if show_desc_col:
+        _columns.append(("Desc.", "desc"))
+    _columns.append(("Purpose", "purpose"))
+    if show_mol_col:
+        _columns.append(("Molecular contributors", "mol_why_str"))
+    if show_desc_col:
+        _columns.append(("Descriptor contributors", "desc_why_str"))
+        _columns.append(("Descriptor sources", "desc_src_str"))
+    # T77 addendum : "Sources" renommée "Composition sources" -- n'a
+    # toujours été que la provenance de la COMPOSITION (`hops.sources`,
+    # ex. "barthhaas"), jamais celle des descripteurs -- le nom générique
+    # laissait croire le contraire (source de la confusion signalée).
+    _columns.append(("Composition sources", "sources"))
+
+    def _row(h):
+        overlap = sorted(desc_set & hop_desc.get(h["variety"], set()))
+        d_src = sorted({s for d in overlap for s in desc_src.get(h["variety"], {}).get(d, set())})
+        return dict(_row_with_purpose(h, hops, comp),
+                   mol_why_str=", ".join(h["why"]) or "—",
+                   desc_why_str=", ".join(overlap) or "—",
+                   desc_src_str=", ".join(d_src) or "—")
+
+    _render_hop_rows([_row(h) for h in r["ranked"]], _columns)
+
+    def _contrib_caption(h):
+        parts = []
+        if show_mol_col:
+            parts.append(f"molecular: {', '.join(h['why']) or '(none)'}")
+        if show_desc_col:
+            overlap = sorted(desc_set & hop_desc.get(h["variety"], set()))
+            parts.append(f"descriptors: {', '.join(overlap) or '(none)'}")
+        return f"score {h['score']} — via {'; '.join(parts) or '(none)'}"
 
     _hop_detail_expanders(con, hops, comp, hop_desc, [
-        {"variety": h["variety"], "name": h["name"],
-         "caption": f"score {h['score']} — via {', '.join(h['why']) or '(none)'}"}
+        {"variety": h["variety"], "name": h["name"], "caption": _contrib_caption(h)}
         for h in r["ranked"]])
 
     st.subheader("Propose a blend")
@@ -819,10 +1214,10 @@ def _amplify(con):
         # Toujours 5 (décision utilisateur) : pas de curseur, un blend à 5
         # tailles complet reste peu coûteux à calculer et laisse voir toutes
         # les options d'un coup plutôt que de forcer un choix a priori.
-        blend_r = matching.amplify_blend(con, note, use_oav=use_oav,
+        blend_r = matching.amplify_blend(con, note, w_mol=w_mol, w_desc=w_desc, use_oav=use_oav,
                                          descriptors=selected_desc or None, max_hops=5,
                                          base_variety=base)
-        _render_blends(blend_r["blends"], hops, comp)
+        _render_blends(blend_r["blends"], hops, comp, desc_src)
 
 
 _VIA_LABELS = {"top": "top candidate", "chosen": "base hop (chosen)",
@@ -832,7 +1227,8 @@ _VIA_LABELS = {"top": "top candidate", "chosen": "base hop (chosen)",
               "relevance": "relevant extra hop (nothing new to cover)"}
 
 
-def _render_blends(blends: list[dict], hops: dict, comp: dict) -> None:
+def _render_blends(blends: list[dict], hops: dict, comp: dict,
+                   desc_src: dict[str, dict[str, set[str]]]) -> None:
     """Rendu partagé amplify_blend/contrast_blend (T33 backlog) : plusieurs
     tailles de blend affichées côte à côte plutôt qu'un seul "meilleur" blend
     — chaque houblon signale sa provenance (fréquence RÉELLE de pairing
@@ -862,12 +1258,18 @@ def _render_blends(blends: list[dict], hops: dict, comp: dict) -> None:
     for b in blends:
         with st.container(border=True):
             st.write(f"**Size {b['size']}**")
-            rows = [dict(_row_with_purpose(h, hops, comp),
-                        covers_str=", ".join(h["covers"]) or "(nothing new)",
-                        via_label=_VIA_LABELS[h["via"]])
-                   for h in b["hops"]]
+            rows = []
+            for h in b["hops"]:
+                d_src = sorted({s for d in h["covers"] for s in desc_src.get(h["variety"], {}).get(d, set())})
+                rows.append(dict(_row_with_purpose(h, hops, comp),
+                                covers_str=", ".join(h["covers"]) or "(nothing new)",
+                                desc_src_str=", ".join(d_src) or "—",
+                                via_label=_VIA_LABELS[h["via"]]))
+            # T77 (2026-08-22) : même split composition/descripteurs -- voir
+            # `matching.descriptor_sources`.
             _render_hop_rows(rows, [("Covers", "covers_str"), ("Purpose", "purpose"),
-                                    ("Origin", "via_label"), ("Sources", "sources")])
+                                    ("Origin", "via_label"), ("Descriptor sources", "desc_src_str"),
+                                    ("Composition sources", "sources")])
             if b["residual"]:
                 st.caption("Not covered: " + ", ".join(b["residual"]))
 
@@ -878,7 +1280,31 @@ def _contrast(con):
     # l'utilisateur décrit donc sa note à la main avec le vocabulaire réel de
     # la roue d'arôme (même source que by-descriptor), ce qui fonctionne pour
     # n'importe quelle note sans rien inventer.
-    selected = st.multiselect("Descriptors of the note to contrast", _descriptors(con))
+    #
+    # T76 addendum (2026-08-22, demande utilisateur explicite : "deploy this
+    # automatic descriptor definition in the contrast section... add the
+    # ingredient box at the very beginning of the contrast tool so the
+    # descriptors are more easily filled") : même amorce `reference.
+    # INGREDIENT_DESCRIPTORS` que sur Amplify, mais OPTIONNELLE ici
+    # (`index=None`/`placeholder`, rien de sélectionné par défaut) --
+    # contrairement à Amplify, contrast n'a jamais eu besoin d'un ingrédient
+    # précis (juste des descripteurs), donc pas question d'en imposer un ;
+    # ne sert qu'à préremplir la liste ci-dessous, toujours éditable.
+    ingredient = st.selectbox(
+        "Ingredient (optional)", _notes(con), index=None,
+        placeholder="Pick an ingredient to prefill descriptors below — or skip "
+                   "and choose descriptors directly")
+    _suggested_desc = [d for d in matching.reference.INGREDIENT_DESCRIPTORS.get(ingredient, [])
+                       if d in _descriptors(con)] if ingredient else []
+    if ingredient:
+        if _suggested_desc:
+            st.caption(f"Prefilled from {ingredient}'s typical aroma (AI-assisted "
+                      "suggestion, not measured data) — feel free to edit.")
+        else:
+            st.caption(f"No auto-suggested descriptors for {ingredient} yet — "
+                      "add any that apply manually below.")
+    selected = st.multiselect("Descriptors of the note to contrast", _descriptors(con),
+                              default=_suggested_desc, key=f"contrast_desc_{ingredient}")
 
     # Cible d'affinité MODIFIABLE (2026-08-19, demande utilisateur explicite :
     # "we should orient the complementary aroma by pre-selecting them but let
@@ -962,11 +1388,19 @@ def _contrast(con):
                   "(many hops often tie on score; see Contrasts via below for what each "
                   "one actually matches).")
     hops, comp, hop_desc, _ = matching.load(con)
+    # T77 (2026-08-22) : même split composition/descripteurs qu'Amplify --
+    # voir `matching.descriptor_sources`.
+    desc_src = matching.descriptor_sources(con)
+
+    def _contrast_row(h):
+        d_src = sorted({s for d in h["contrast_via"] for s in desc_src.get(h["variety"], {}).get(d, set())})
+        return dict(_row_with_purpose(h, hops, comp), contrast_via_str=", ".join(h["contrast_via"]),
+                   desc_src_str=", ".join(d_src) or "—")
+
     _render_hop_rows(
-        [dict(_row_with_purpose(h, hops, comp), contrast_via_str=", ".join(h["contrast_via"]))
-         for h in r["ranked"]],
+        [_contrast_row(h) for h in r["ranked"]],
         [("Score", "score"), ("Purpose", "purpose"), ("Contrasts via", "contrast_via_str"),
-        ("Sources", "sources")])
+        ("Descriptor sources", "desc_src_str"), ("Composition sources", "sources")])
 
     _hop_detail_expanders(con, hops, comp, hop_desc, [
         {"variety": h["variety"], "name": h["name"],
@@ -980,7 +1414,7 @@ def _contrast(con):
     # respecter le même filtre purpose que le tableau de résultats ci-dessus.
     blend_r = matching.contrast_blend(con, descriptors=selected, target_descriptors=target_selected,
                                       purposes=purposes_selected, max_hops=5, base_variety=base)
-    _render_blends(blend_r["blends"], hops, comp)
+    _render_blends(blend_r["blends"], hops, comp, desc_src)
 
 
 def _aroma_wheel(intensity: dict[str, float], vocabulary: list[str]):
@@ -1128,14 +1562,27 @@ def _browse(con):
     # "should appear in the browser information as a main/top information").
     purpose, inferred = matching.resolve_purpose(h.get("purpose"), hcomp)
     _purpose_badge(purpose, inferred)
-    st.caption(f"Region: {h['region'] or 'unknown'} · Sources: {h['sources']}")
+    st.caption(f"Region: {h['region'] or 'unknown'} · Composition sources: {h['sources']}")
     # Alpha/beta acids, co-humulone, total oil : demande utilisateur explicite
     # (2026-08-19), "il manque un élément principal : les infos les plus
     # importantes de yakima" -- voir `_render_key_stats`.
     _render_key_stats(hcomp)
 
+    # T77 (2026-08-22, demande utilisateur explicite -- confusion vérifiée en
+    # direct sur "enigma" : "the source is barthhaas... does berry come from
+    # this only?") : la ligne "Sources" ci-dessus juste au-dessus des
+    # descripteurs laissait croire qu'elle les couvrait aussi -- provenance
+    # de COMPOSITION uniquement. Chaque descripteur annoté par SA PROPRE
+    # source (`hop_descriptors.source`, voir `matching.descriptor_sources`).
     descs = sorted(hop_desc.get(selected, set()))
-    st.write("**Descriptors:** " + (", ".join(descs) if descs else "none recorded"))
+    desc_src = matching.descriptor_sources(con)
+    if descs:
+        all_desc = ", ".join(
+            f"{d} ({'/'.join(sorted(desc_src.get(selected, {}).get(d) or {'unknown'}))})"
+            for d in descs)
+        st.write("**Descriptors:** " + all_desc)
+    else:
+        st.write("**Descriptors:** none recorded")
     intensity = matching.hop_aroma_intensity(con, selected)
     # any(...) > 0, pas juste `if intensity :` : au moins une variété réelle
     # (admiral, vérifié en direct) a une entrée sensory_values existante mais
@@ -1481,6 +1928,13 @@ def _by_descriptor(con):
 
     _, comp, _, _ = matching.load(con)
     compound_smells = _all_compound_descriptors(con, comp)
+    # T77 (2026-08-22, demande utilisateur explicite -- confusion vérifiée
+    # en direct sur "enigma" : "the source is barthhaas... does berry come
+    # from this only?") : `[{h['sources']}]` dans l'en-tête d'expander (ci-
+    # dessous) juxtaposait "matches berry, raspberry" à une provenance de
+    # COMPOSITION (`hops.sources`) -- laissait croire à tort qu'elle couvrait
+    # aussi les descripteurs. Voir `matching.descriptor_sources`.
+    desc_src = matching.descriptor_sources(con)
 
     heatmap = _descriptor_heatmap(ranked, intensity_vocab)
     if heatmap is not None:
@@ -1498,13 +1952,18 @@ def _by_descriptor(con):
 
     for h in ranked:
         hcomp = comp.get(h["variety"], {})
-        with st.expander(
-                f"{h['name']} — matches {', '.join(h['matched_descriptors'])} "
-                f"[{h['sources']}]"):
+        with st.expander(f"{h['name']} — matches {', '.join(h['matched_descriptors'])}"):
             purpose, inferred = matching.resolve_purpose(h.get("purpose"), hcomp)
             _purpose_badge(purpose, inferred)
+            match_src = sorted({s for d in h["matched_descriptors"]
+                               for s in desc_src.get(h["variety"], {}).get(d, set())})
+            st.caption(f"Matched descriptors sourced from: {', '.join(match_src) or 'unknown'} "
+                      f"— composition sourced from: {h['sources']}")
             _render_key_stats(hcomp)
-            st.caption("All descriptors: " + ", ".join(h["all_descriptors"]))
+            all_desc = ", ".join(
+                f"{d} ({'/'.join(sorted(desc_src.get(h['variety'], {}).get(d) or {'unknown'}))})"
+                for d in h["all_descriptors"])
+            st.caption("All descriptors: " + all_desc)
             # Transparence sur le tri quantitatif (2026-08-19, "propose a 2
             # layer results ordering... inside this selection, propose a
             # ordered result... based on the aroma wheel descriptors") --

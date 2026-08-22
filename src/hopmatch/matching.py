@@ -100,6 +100,28 @@ def load(con: sqlite3.Connection):
     return hops, comp, hop_desc, mols
 
 
+def descriptor_sources(con) -> dict[str, dict[str, set[str]]]:
+    """{variety: {descripteur: {sources}}} -- provenance PAR DESCRIPTEUR
+    (T77, 2026-08-22, demande utilisateur explicite : "the source is
+    barthhaas... does berry come from this only?" -- confusion vérifiée en
+    direct sur "enigma" : la colonne "Sources" des tableaux de résultats
+    n'a JAMAIS reflété que `hops.sources` (provenance de la COMPOSITION,
+    ex. "barthhaas"), alors que `hop_desc` (`load()`, un simple `set[str]`
+    de noms de descripteurs) ne garde PAS le `source` de `hop_descriptors` --
+    "berry"/"raspberry" pour enigma viennent en réalité de BeerMaverick
+    (tags de sa page produit), jamais de BarthHaas, qui ne fournit ZÉRO
+    descripteur d'arôme fiable dans ce projet (voir docs/DATA_SOURCES.md).
+    Fonction séparée plutôt qu'un enrichissement de `hop_desc` dans `load()`
+    : `hop_desc` est un `set[str]` utilisé pour des opérations d'ensemble
+    (`&`, `descriptor_overlap`) dans de nombreux appelants -- changer sa
+    forme casserait ce pattern partout ; ce besoin de provenance est
+    localisé à l'affichage (app.py), pas au scoring."""
+    out: dict = {}
+    for r in con.execute("SELECT variety, descriptor, source FROM hop_descriptors"):
+        out.setdefault(r["variety"], {}).setdefault(r["descriptor"], set()).add(r["source"])
+    return out
+
+
 # Seuil d'acide alpha (%) séparant aromatic de bittering/both, demande
 # utilisateur (2026-08-19) : "AA% mean... can be used to infer the
 # aromatic/bittering status". PAS un seuil deviné/manuel -- mesuré sur les
@@ -162,6 +184,58 @@ def hop_compound(m: str) -> str:
     """Résout un nom de molécule côté note vers le composé à chercher côté houblon
     (`reference.ALIASES`, ex. agrégations mesurées ensemble comme "thiols")."""
     return reference.ALIASES.get(m, m)
+
+
+def oav_thresholds(con, molecules: list[str]) -> dict[str, float]:
+    """{molécule (nom CÔTÉ NOTE, ex. "4mmp") : seuil olfactif ppb} pour
+    `--oav`, résolu EN DIRECT depuis FlavorDB2 (T75, 2026-08-21, demande
+    utilisateur explicite -- "update the thresholds according to flavordb2...
+    don't consider oav when we don't have any, put none... never to the old
+    hardcoded literals"). MÊME jointure structurale que `compound_
+    descriptors` (T71/T73) : CID PubChem depuis `reference.MOLECULES` -> CAS
+    via `pubchem_cids` -> seuil via `flavordb2_thresholds` -- pas une
+    deuxième implémentation de la même idée, un besoin symétrique.
+
+    Remplace l'ancien mécanisme (seuils SAISIS À LA MAIN dans `reference.
+    MOLECULES`, seedés une fois dans la table `molecules` par `seed_
+    reference`, jamais revus depuis). Root cause vérifiée en direct
+    (2026-08-21) avant ce changement : pour les 14 molécules jusque-là
+    curées, `flavordb2_thresholds` (734 composés, `ingest_flavordb2`) porte
+    déjà un seuil RÉEL pour 5 d'entre elles -- caryophyllène (64 codé en dur
+    vs 77.0 chez FlavorDB2), géraniol (4 vs 39.5, x10 !), linalol (6 vs
+    7.0), beta-pinène (140 vs 140.0, identique -- la valeur en dur en avait
+    probablement été recopiée à l'origine), citronellol (8 vs 11.0) --
+    c'est-à-dire que le scoring utilisait un chiffre DIFFÉRENT de celui que
+    ce même projet avait déjà scrapé et stocké, sans que personne ne le
+    sache en regardant un résultat. Les 9 autres (dont myrcène) n'ont
+    simplement AUCUN seuil FlavorDB2 -- vérifié en DIRECT sur le site réel
+    pour myrcène/humulène/farnésène/limonène/terpinolène/géranial (pas
+    seulement en base) : myrcène n'a qu'une COMPOSITION en % ("Aroma
+    characteristics at 10%..."), farnésène/terpinolène pareil, géranial
+    n'a qu'une description sans nombre, humulène n'a carrément aucune
+    section seuil, limonène n'a qu'un seuil de GOÛT (pas d'arôme) -- confirmé
+    comportement correct de `parsers.parse_flavordb2_threshold`, PAS un bug
+    de correspondance de nom/CAS/CID.
+
+    Molécule sans CID connu (ex. "thiols", agrégation sans molécule unique
+    -- voir `reference.ALIASES`), CAS non résolu, ou seuil FlavorDB2 absent
+    -> ABSENTE du dict retourné, JAMAIS une valeur de repli (ni l'ancien
+    seuil codé en dur, ni une estimation). `molecular_scores` traite une
+    molécule absente d'ici comme un multiplicateur neutre (1.0), jamais une
+    exclusion du score -- voir sa docstring."""
+    out = {}
+    for m in molecules:
+        cid = reference.MOLECULES.get(hop_compound(m), (None, None, None))[2]
+        if not cid:
+            continue
+        cas_row = con.execute("SELECT cas FROM pubchem_cids WHERE cid=?", (cid,)).fetchone()
+        if not cas_row:
+            continue
+        thr_row = con.execute(
+            "SELECT threshold_ppb FROM flavordb2_thresholds WHERE cas=?", (cas_row[0],)).fetchone()
+        if thr_row and thr_row[0] is not None:
+            out[m] = thr_row[0]
+    return out
 
 
 def amount(variety: str, molecule: str, comp) -> float:
@@ -326,19 +400,26 @@ def _normalize_descriptors(descriptors: list[str]) -> set[str]:
 # --------------------------------------------------------------------------- #
 # Couches de score
 # --------------------------------------------------------------------------- #
-def molecular_scores(note_profile, comp, use_oav=False, mols=None):
+def molecular_scores(note_profile, comp, use_oav=False, thresholds=None):
     """Similarité moléculaire normalisée-par-composé (TF-IDF). -> {variety: (score, contribs)}.
 
     `use_oav` : multiplie la contribution d'une molécule par un PRIOR DE PUISSANCE
-    (REFERENCE_THRESHOLD_PPB / seuil olfactif) quand son seuil est connu — seulement
-    pour les ~14 molécules curées dans `reference.MOLECULES` (myrcène, humulène,
-    caryophyllène, géraniol, linalol, thiols...), les composés d'huile de houblon
-    les plus courants. Ce n'est PAS un OAV réel (aucune concentration mesurée) :
-    juste une réponse à « molécule X et Y ont la même quantité normalisée, mais X a
-    un seuil olfactif 10x plus bas — laquelle pèse le plus dans l'odeur perçue ? ».
+    (REFERENCE_THRESHOLD_PPB / seuil olfactif) quand son seuil est connu.
+    Ce n'est PAS un OAV réel (aucune concentration mesurée) : juste une réponse
+    à « molécule X et Y ont la même quantité normalisée, mais X a un seuil
+    olfactif 10x plus bas — laquelle pèse le plus dans l'odeur perçue ? ».
     Vérifié sur la base réelle : change le classement complet sur ~18% des notes et
     le houblon #1 sur ~15% (échantillon de 40 notes) — un effet réel, pas un bruit.
-    """
+
+    `thresholds` (T75, 2026-08-21 -- remplace l'ancien paramètre `mols` sur
+    la table `molecules` seedée une fois pour toutes depuis des seuils
+    codés en dur) : {molécule: seuil ppb}, déjà résolu par `oav_thresholds`
+    EN DIRECT depuis FlavorDB2 pour les molécules de CETTE note précise --
+    voir sa docstring pour le détail complet (root cause de l'ancien
+    mécanisme, seuils qui divergeaient silencieusement de FlavorDB2).
+    Molécule absente de `thresholds` -> multiplicateur NEUTRE (1.0), jamais
+    une exclusion du score : cohérent avec le repli déjà en place pour
+    `use_oav=False`."""
     max_amt = {m: max((amount(h, m, comp) for h in comp), default=0.0)
               for m in note_profile}
     # specificity(m, comp) ne dépend PAS du houblon `h` — seulement de la molécule
@@ -358,8 +439,8 @@ def molecular_scores(note_profile, comp, use_oav=False, mols=None):
             if a <= 0 or not max_amt[m]:
                 continue
             s = w * (a / max_amt[m]) * spec[m]
-            if use_oav and mols:
-                thr = mols.get(hop_compound(m), {}).get("threshold_ppb")
+            if use_oav and thresholds:
+                thr = thresholds.get(m)
                 s *= (REFERENCE_THRESHOLD_PPB / thr) if thr else 1.0
             contribs[m] = s
         if contribs:
@@ -399,6 +480,52 @@ def coverage(note_profile, comp):
     return producible, orphan, cov
 
 
+# Seuil d'avertissement "couverture --oav faible" (T75, 2026-08-21, demande
+# utilisateur explicite -- "métrique de couverture OAV... sur le modèle
+# exact de LOW_COVERAGE_WARNING_THRESHOLD"). Distinct de LOW_COVERAGE_
+# WARNING_THRESHOLD ci-dessus (celui-là = fraction du poids de note
+# couverte par au moins UN houblon, peu importe --oav ; celui-ci = parmi les
+# molécules PRODUCIBLES seulement, fraction dont le multiplicateur --oav
+# vient d'un seuil FlavorDB2 RÉEL plutôt que neutre). Mesuré empiriquement
+# sur les 258 notes réelles ayant au moins une molécule productible (même
+# méthodologie que le seuil ci-dessus) APRÈS le passage à des seuils résolus
+# en direct depuis FlavorDB2 (`oav_thresholds`, plus les anciens seuils
+# codés en dur) : médiane 100%, moyenne 91% -- la plupart des notes sont
+# largement couvertes (contrairement à LOW_COVERAGE_WARNING_THRESHOLD, où
+# la couverture ne dépasse JAMAIS 12%). 80% flagge 50/258 notes réelles
+# (19%) -- une minorité significative mais pas la quasi-totalité du corpus
+# comme l'autre seuil : reflet honnête d'une réalité différente (certaines
+# molécules ont un vrai seuil FlavorDB2, d'autres non), pas un seuil choisi
+# au hasard. Exemple réel vérifié : "cottonseed" (18%) -- producible =
+# {humulene, farnesene, geraniol, myrcene}, seul geraniol a un seuil réel ;
+# humulène/farnésène/myrcène (les 3 plus gros contributeurs de poids)
+# tournent à multiplicateur neutre.
+OAV_LOW_COVERAGE_WARNING_THRESHOLD = 0.80
+
+
+def oav_coverage(note_profile: dict[str, float], comp: dict,
+                 thresholds: dict[str, float]) -> tuple[float, list[str]]:
+    """(fraction du poids de note PRODUCTIBLE couverte par un seuil --oav
+    RÉEL, molécules productibles SANS seuil triées par poids de note
+    décroissant -- les plus contributrices d'abord, même esprit que les
+    molécules orphelines déjà rapportées ailleurs). Restreint aux molécules
+    PRODUCTIBLES (pas la note entière comme `coverage()` ci-dessus) : une
+    molécule orpheline ne contribue de toute façon à AUCUN score, --oav ou
+    pas -- la mélanger ici confondrait deux problèmes distincts (couverture
+    moléculaire globale vs couverture --oav des molécules qui comptent déjà
+    dans le score). Note sans aucune molécule productible -> (1.0, []) :
+    rien à pondérer, pas un faux avertissement."""
+    producible, _, _ = coverage(note_profile, comp)
+    if not producible:
+        return 1.0, []
+    with_threshold = [m for m in producible if thresholds.get(m)]
+    without_threshold = [m for m in producible if not thresholds.get(m)]
+    tot = sum(note_profile[m] for m in producible) or 1
+    cov = sum(note_profile[m] for m in with_threshold) / tot
+    without_threshold.sort(key=lambda m: -note_profile[m])
+    return cov, without_threshold
+
+
 # --------------------------------------------------------------------------- #
 # CAS A — amplify
 # --------------------------------------------------------------------------- #
@@ -412,8 +539,13 @@ def amplify(con, note: str, w_mol: float = 0.5, w_desc: float = 0.5, use_oav=Fal
     est vide par défaut pour toutes (pas d'amorce littérature, pas de
     dérivation fiable depuis FooDB — voir reference.py/docs/DATA_SOURCES.md).
     Éphémère : n'écrit rien dans `note_descriptors`, ne vaut que pour cet appel.
-    """
-    hops, comp, hop_desc, mols = load(con)
+
+    `oav_coverage`/`oav_uncovered` (T75, 2026-08-21, demande utilisateur
+    explicite -- métrique de transparence sur --oav, sur le modèle exact de
+    `coverage`/`orphan`) : calculés UNIQUEMENT si `use_oav=True` (sinon
+    `None`/`[]` -- pas de calcul ni de sens hors --oav). Voir `oav_coverage`
+    pour le détail complet."""
+    hops, comp, hop_desc, _ = load(con)
     profile = get_note(con, note)
     ndesc = _normalize_descriptors(descriptors) if descriptors else get_note_descriptors(con, note)
     # note_descriptors est vide par défaut pour TOUTE note désormais (pas d'amorce
@@ -427,7 +559,11 @@ def amplify(con, note: str, w_mol: float = 0.5, w_desc: float = 0.5, use_oav=Fal
     if not has_descriptors:
         w_mol, w_desc = 1.0, 0.0
 
-    mol = molecular_scores(profile, comp, use_oav=use_oav, mols=mols)
+    # T75 : seuils --oav résolus EN DIRECT depuis FlavorDB2 pour les molécules
+    # de CETTE note (jamais les anciens seuils codés en dur) -- calculé
+    # seulement si use_oav, une requête de plus par note sinon inutile.
+    oav_thr = oav_thresholds(con, list(profile)) if use_oav else {}
+    mol = molecular_scores(profile, comp, use_oav=use_oav, thresholds=oav_thr)
     mmax = max((s for s, _ in mol.values()), default=1.0) or 1.0
 
     ranked = []
@@ -442,8 +578,10 @@ def amplify(con, note: str, w_mol: float = 0.5, w_desc: float = 0.5, use_oav=Fal
                            "purpose": hops[h].get("purpose")})
     ranked.sort(key=lambda r: -r["score"])
     _, orphan, cov = coverage(profile, comp)
+    oav_cov, oav_uncovered = oav_coverage(profile, comp, oav_thr) if use_oav else (None, [])
     return {"mode": "amplify", "note": note, "coverage": cov, "orphan": orphan,
            "use_oav": use_oav, "has_descriptors": has_descriptors,
+           "oav_coverage": oav_cov, "oav_uncovered": oav_uncovered,
            "ranked": ranked[:top]}
 
 

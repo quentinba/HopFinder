@@ -204,6 +204,14 @@ def test_amplify_shows_inline_hop_detail_expander_without_navigating(toy_cwd):
     at = _app()
     at.run()
     at.sidebar.radio[0].set_value("amplify").run()
+    # T76 (2026-08-22) : couche descripteurs devenue la couche principale,
+    # couche moléculaire décochée par défaut -- ni "lownote" ni "mynote"
+    # n'ont de suggestion auto-remplie (INGREDIENT_DESCRIPTORS ne couvre que
+    # de vrais noms d'ingrédients), donc rien ne se classe sans activer
+    # explicitement une couche. Coche la couche moléculaire ici (comme les
+    # autres tests de fumée ci-dessous) plutôt que sélectionner un
+    # descripteur, pour rester indépendant du vocabulaire fixture exact.
+    at.segmented_control[0].set_value("Both").run()  # T76 3e addendum : segmented_control remplace les 2 cases
     assert not at.exception
     assert any("Hopa" in e.label for e in at.expander)
     assert at.sidebar.radio[0].value == "amplify"  # toujours sur la même page
@@ -212,6 +220,7 @@ def test_amplify_mode_renders_ranked_table(toy_cwd):
     at = _app()
     at.run()
     at.sidebar.radio[0].set_value("amplify").run()
+    at.segmented_control[0].set_value("Both").run()  # T76 3e addendum : segmented_control remplace les 2 cases
     assert not at.exception
     assert len(at.dataframe) >= 1
 
@@ -227,6 +236,7 @@ def test_amplify_results_table_includes_purpose_column(toy_cwd):
     at = _app()
     at.run()
     at.sidebar.radio[0].set_value("amplify").run()
+    at.segmented_control[0].set_value("Both").run()  # T76 3e addendum : segmented_control remplace les 2 cases
     assert not at.exception
     df = at.dataframe[0].value
     assert "Purpose" in df.columns
@@ -241,6 +251,7 @@ def test_hop_detail_expander_includes_purpose_badge_and_aroma_wheel(toy_cwd):
     at = _app()
     at.run()
     at.sidebar.radio[0].set_value("amplify").run()
+    at.segmented_control[0].set_value("Both").run()  # T76 3e addendum : segmented_control remplace les 2 cases
     assert not at.exception
     assert any("-badge[" in m.value for m in at.markdown)
     assert any(isinstance(n, UnknownElement) for n in at.main)
@@ -272,25 +283,33 @@ def test_amplify_blend_renders_each_size_in_its_own_container(toy_cwd):
     assert any("Size 1" in m.value for m in at.markdown)
 
 def test_amplify_warns_on_low_molecular_coverage(toy_cwd):
-    # "lownote" (fixture, ~1% de couverture) : voir _build_toy_db.
+    # "lownote" (fixture, un seul molécule productible : "molx" -- voir
+    # _build_toy_db) : avertissement recentré (T76, 2026-08-22) sur le VRAI
+    # cas dégénéré ("<=1 molécule productible") plutôt que sur un seuil de
+    # pourcentage qui se déclenchait pour toute la base sans exception (voir
+    # app._amplify). Couche moléculaire optionnelle, décochée par défaut
+    # depuis T76 -- activée explicitement ici.
     at = _app()
     at.run()
     at.sidebar.radio[0].set_value("amplify").run()
     # Note sur la page principale, pas la sidebar (2026-08-20, correctif
     # mobile -- voir app._amplify).
     at.selectbox[0].set_value("lownote").run()
+    at.segmented_control[0].set_value("Both").run()  # T76 3e addendum : segmented_control remplace les 2 cases
     assert not at.exception
-    assert any("Low molecular coverage" in w.value for w in at.warning)
+    assert any("producible molecule" in w.value for w in at.warning)
 
 def test_amplify_no_low_coverage_warning_when_coverage_high(toy_cwd):
     # "lownote" trie avant "mynote" alphabétiquement -> sélection explicite,
-    # pas de dépendance à l'ordre par défaut du selectbox.
+    # pas de dépendance à l'ordre par défaut du selectbox. "mynote" a 2
+    # molécules productibles (molx, moly) -- pas de cas dégénéré (T76).
     at = _app()
     at.run()
     at.sidebar.radio[0].set_value("amplify").run()
     # Note sur la page principale, pas la sidebar (2026-08-20, correctif
     # mobile -- voir app._amplify).
     at.selectbox[0].set_value("mynote").run()
+    at.segmented_control[0].set_value("Both").run()  # T76 3e addendum : segmented_control remplace les 2 cases
     assert not at.exception
     assert not any("Low molecular coverage" in w.value for w in at.warning)
 

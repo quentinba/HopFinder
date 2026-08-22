@@ -20,7 +20,14 @@ def _print_amplify(r):
     print(f"\n[AMPLIFY] {r['note']}  — couverture moléculaire {r['coverage']*100:.0f}%")
     if r.get("use_oav"):
         print("  (--oav actif : molécules à seuil olfactif bas pondérées plus fort, "
-              "prior de puissance approximatif — pas une mesure de concentration réelle)")
+              "seuils résolus en direct depuis FlavorDB2 (PubChem CID -> CAS -> seuil) — "
+              "prior de puissance approximatif, pas une mesure de concentration réelle ; "
+              "molécules sans seuil sourcé en base : poids neutre, jamais inventé)")
+        if r.get("oav_coverage") is not None and r["oav_coverage"] < matching.OAV_LOW_COVERAGE_WARNING_THRESHOLD:
+            print(f"  ATTENTION : --oav actif, mais {(1 - r['oav_coverage'])*100:.0f}% du score "
+                  f"moléculaire provient de molécules sans seuil sourcé "
+                  f"(dont {', '.join(r['oav_uncovered'])}) — pour celles-ci le poids --oav "
+                  "reste neutre (1x), le prior --oav n'a donc qu'un effet partiel ici.")
     if not r.get("has_descriptors", True):
         print("  (pas de descripteurs pour cette note : score 100% moléculaire)")
     if r["coverage"] < matching.LOW_COVERAGE_WARNING_THRESHOLD:

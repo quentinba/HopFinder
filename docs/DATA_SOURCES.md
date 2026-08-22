@@ -285,6 +285,25 @@ même livre, utilisées pour deux besoins différents, **jamais confondues** :
   inclus, accès direct par CID) : **227 seuils trouvés sur 734** (727 via CID direct, 6 sans
   correspondance, 501 trouvés mais sans seuil publié). Écrit dans `flavordb2_thresholds`, jamais
   dans `molecules`/`reference.MOLECULES`.
+- **`--oav` (T75)** : les seuils utilisés par `--oav` sont désormais résolus **en direct** depuis
+  `flavordb2_thresholds` (`matching.oav_thresholds`, chaîne CID `reference.MOLECULES` → CAS
+  `pubchem_cids` → seuil `flavordb2_thresholds`), jamais depuis une valeur codée en dur. Avant T75,
+  `reference.MOLECULES` portait 14 seuils codés en dur, jamais recroisés avec les seuils déjà
+  scrapés en base — 5 divergeaient silencieusement du seuil FlavorDB2 réel (le plus net : géraniol
+  4 ppb codé en dur vs **39,5 ppb** en base FlavorDB2, un facteur 10 ; aussi caryophyllène 64 vs
+  77,0, linalol 6 vs 7,0, bêta-pinène 140 vs 140,0, citronellol 8 vs 11,0). Tous les
+  `threshold_ppb` de `reference.MOLECULES` sont donc mis à `None` (le tuple garde sa forme, l'index
+  CID reste utilisé par `compound_descriptors`) : plus aucun seuil OAV ne provient de ce fichier.
+  Molécule sans ligne `flavordb2_thresholds` correspondante → poids `--oav` neutre (1x), jamais un
+  seuil deviné (`matching.oav_coverage` mesure et rapporte cette couverture, GUI/CLI).
+  > Myrcène : aucun seuil retenu. Littérature en bière : 30-1000 ppb (facteur 33 ;
+  > bases de test = lagers pâles à adjuvants ≤5 % ABV, non représentatives des
+  > styles très houblonnés). La valeur 13 ppb largement citée (Oxford Companion
+  > to Beer, BeerMaverick) est mesurée dans l'eau, pas en bière. Neiens &
+  > Steinhaus donnent 1,2 µg/kg en solution aqueuse. Aucune valeur ponctuelle
+  > n'est défendable dans cet intervalle. La fiche FlavorDB2 du myrcène contient
+  > une composition d'extrait aromatique et non un seuil : le refus par
+  > parse_flavordb2_threshold est le comportement correct.
 
 **The Good Scents Company** — descripteurs parfumeur fins, **pas d'API, CGU restrictives**. Optionnel.
 

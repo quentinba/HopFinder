@@ -417,6 +417,111 @@ def test_amplify_use_oav_flag_echoed(db):
     assert r["use_oav"] is True
     assert matching.amplify(db, "_citrus")["use_oav"] is False
 
+# T75 (2026-08-21, demande utilisateur explicite) : --oav résout désormais
+# ses seuils EN DIRECT depuis FlavorDB2 (CID reference.MOLECULES -> CAS
+# pubchem_cids -> seuil flavordb2_thresholds), jamais depuis un seuil codé
+# en dur (retiré de reference.MOLECULES, mis à None partout). La base
+# fixture (citra/mosaic/simcoe/saazer) a `pubchem_cids`/`flavordb2_
+# thresholds` VIDES (comme pour compound_descriptors, T71/T73) -- ces tests
+# insèrent des lignes de test ciblées puis les retirent, même pattern déjà
+# établi. Note "_citrus" (myrcene=0.4, linalool=0.7, limonene=1.0 orphelin) :
+# producible = {myrcene, linalool} sur cette base fixture.
+_MYRCENE_CAS, _MYRCENE_CID = "123-35-3", 31253  # reference.MOLECULES['myrcene'][2]
+_LINALOOL_CAS, _LINALOOL_CID = "78-70-6", 6549  # reference.MOLECULES['linalool'][2]
+
+def test_oav_thresholds_resolves_via_cid_cas_chain(db):
+    db.executemany("INSERT INTO pubchem_cids VALUES (?,?)",
+                   [(_MYRCENE_CAS, _MYRCENE_CID)])
+    db.executemany("INSERT INTO flavordb2_thresholds VALUES (?,?,?)",
+                   [(_MYRCENE_CAS, "myrcene", 13.0)])
+    db.commit()
+    try:
+        assert matching.oav_thresholds(db, ["myrcene", "linalool", "nonexistent"]) == {"myrcene": 13.0}
+    finally:
+        db.execute("DELETE FROM pubchem_cids WHERE cas=?", (_MYRCENE_CAS,))
+        db.execute("DELETE FROM flavordb2_thresholds WHERE cas=?", (_MYRCENE_CAS,))
+        db.commit()
+
+def test_oav_thresholds_never_falls_back_to_hardcoded_reference_value(db, monkeypatch):
+    # Contrainte non négociable du ticket : même si reference.MOLECULES
+    # portait encore un seuil (il ne devrait plus, mais on le vérifie
+    # explicitement au cas où une régression le réintroduirait), sans ligne
+    # pubchem_cids/flavordb2_thresholds correspondante, oav_thresholds() ne
+    # doit RIEN renvoyer pour ce composé -- jamais un repli sur reference.MOLECULES.
+    patched = dict(reference.MOLECULES)
+    patched["myrcene"] = (patched["myrcene"][0], 999.0, patched["myrcene"][2])
+    monkeypatch.setattr(reference, "MOLECULES", patched)
+    assert matching.oav_thresholds(db, ["myrcene"]) == {}
+
+def test_oav_coverage_100pct_when_all_contributing_molecules_have_thresholds(db):
+    db.executemany("INSERT INTO pubchem_cids VALUES (?,?)",
+                   [(_MYRCENE_CAS, _MYRCENE_CID), (_LINALOOL_CAS, _LINALOOL_CID)])
+    db.executemany("INSERT INTO flavordb2_thresholds VALUES (?,?,?)",
+                   [(_MYRCENE_CAS, "myrcene", 13.0), (_LINALOOL_CAS, "linalool", 6.0)])
+    db.commit()
+    try:
+        r = matching.amplify(db, "_citrus", use_oav=True)
+        assert r["oav_coverage"] == 1.0
+        assert r["oav_uncovered"] == []
+    finally:
+        db.execute("DELETE FROM pubchem_cids WHERE cas IN (?,?)", (_MYRCENE_CAS, _LINALOOL_CAS))
+        db.execute("DELETE FROM flavordb2_thresholds WHERE cas IN (?,?)", (_MYRCENE_CAS, _LINALOOL_CAS))
+        db.commit()
+
+def test_oav_coverage_below_100pct_when_a_major_molecule_lacks_a_threshold(db):
+    # Seul linalool (poids 0.7, le plus gros contributeur de "_citrus") a un
+    # seuil ; myrcene (poids 0.4) n'en a pas -> couverture < 100%, myrcene
+    # rapporté comme non couvert.
+    db.executemany("INSERT INTO pubchem_cids VALUES (?,?)", [(_LINALOOL_CAS, _LINALOOL_CID)])
+    db.executemany("INSERT INTO flavordb2_thresholds VALUES (?,?,?)",
+                   [(_LINALOOL_CAS, "linalool", 6.0)])
+    db.commit()
+    try:
+        r = matching.amplify(db, "_citrus", use_oav=True)
+        assert 0 < r["oav_coverage"] < 1.0
+        assert r["oav_coverage"] == pytest.approx(0.7 / 1.1)
+        assert r["oav_uncovered"] == ["myrcene"]
+        assert r["oav_coverage"] < matching.OAV_LOW_COVERAGE_WARNING_THRESHOLD
+    finally:
+        db.execute("DELETE FROM pubchem_cids WHERE cas=?", (_LINALOOL_CAS,))
+        db.execute("DELETE FROM flavordb2_thresholds WHERE cas=?", (_LINALOOL_CAS,))
+        db.commit()
+
+def test_oav_coverage_none_and_uncovered_empty_when_oav_disabled(db):
+    # Calculé UNIQUEMENT si use_oav=True -- pas de sens (ni de coût) sinon.
+    r = matching.amplify(db, "_citrus", use_oav=False)
+    assert r["oav_coverage"] is None
+    assert r["oav_uncovered"] == []
+
+def test_molecular_scores_neutral_multiplier_for_molecule_without_threshold(db):
+    # Contrainte non négociable : une molécule ABSENTE de `thresholds` (donc
+    # sans entrée pubchem_cids/flavordb2_thresholds en base, jamais devinée)
+    # doit produire EXACTEMENT la même contribution qu'avec use_oav=False --
+    # jamais un multiplicateur autre que neutre (1.0) inventé.
+    profile = matching.get_note(db, "_citrus")
+    _, comp, _, _ = matching.load(db)
+    without_oav = matching.molecular_scores(profile, comp, use_oav=False)
+    with_oav_no_thresholds = matching.molecular_scores(profile, comp, use_oav=True, thresholds={})
+    assert without_oav == with_oav_no_thresholds
+
+def test_amplify_scores_without_oav_unaffected_by_flavordb2_data(db):
+    # Insérer des seuils FlavorDB2 réels ne doit RIEN changer quand
+    # use_oav=False -- la feature est un prior optionnel, pas une correction
+    # silencieuse du score par défaut.
+    r_before = matching.amplify(db, "_citrus", use_oav=False)
+    db.executemany("INSERT INTO pubchem_cids VALUES (?,?)",
+                   [(_MYRCENE_CAS, _MYRCENE_CID), (_LINALOOL_CAS, _LINALOOL_CID)])
+    db.executemany("INSERT INTO flavordb2_thresholds VALUES (?,?,?)",
+                   [(_MYRCENE_CAS, "myrcene", 13.0), (_LINALOOL_CAS, "linalool", 6.0)])
+    db.commit()
+    try:
+        r_after = matching.amplify(db, "_citrus", use_oav=False)
+        assert r_before["ranked"] == r_after["ranked"]
+    finally:
+        db.execute("DELETE FROM pubchem_cids WHERE cas IN (?,?)", (_MYRCENE_CAS, _LINALOOL_CAS))
+        db.execute("DELETE FROM flavordb2_thresholds WHERE cas IN (?,?)", (_MYRCENE_CAS, _LINALOOL_CAS))
+        db.commit()
+
 def test_biotransform_removed_no_double_counting_path(db):
     # Non-régression : --biotransform a été retiré (2026-08-12) car il faisait
     # compter deux fois la même mesure de géraniol (une fois comme "geraniol",
@@ -1139,3 +1244,56 @@ def test_aroma_wheel_definitions_cover_exactly_the_15_intensity_categories():
 def test_contrast_blend_propagates_unmapped(db):
     r = matching.contrast_blend(db, descriptors=["citrus", "nonexistent-descriptor"])
     assert r["unmapped"] == ["nonexistent-descriptor"]
+
+def test_ingredient_descriptors_keys_and_terms_match_real_vocabulary(db):
+    # T76 (2026-08-22) : garde-fou de non-régression pour
+    # `reference.INGREDIENT_DESCRIPTORS` (amorce IA de pré-remplissage
+    # descripteurs sur `amplify`, voir le commentaire au-dessus du dict) --
+    # doit rester en permanence : (1) exactement les notes réelles de
+    # `aroma_notes` en clé (aucune manquante, aucune orpheline/mal
+    # orthographiée) ; (2) chaque terme de chaque valeur dans le vocabulaire
+    # réel `hop_descriptors` (jamais un terme inventé). `db` (fixture module)
+    # n'a que les hops/notes des fixtures, pas les 506 notes réelles de
+    # production -- ce test vérifie donc la cohérence STRUCTURELLE (types,
+    # absence de terme halluciné dans le sous-ensemble présent) plutôt que la
+    # couverture exacte des 506 clés, qui dépend de la base réelle et n'a
+    # de sens qu'en dehors de la fixture de test.
+    for ingredient, terms in reference.INGREDIENT_DESCRIPTORS.items():
+        assert isinstance(terms, list), ingredient
+        assert 0 <= len(terms) <= 4, (ingredient, terms)
+        assert len(terms) == len(set(terms)), (ingredient, terms)  # pas de doublon
+    # Vocabulaire : vérifié contre la base RÉELLE (aromahops.db), pas la
+    # fixture -- c'est elle qui a servi à l'authoring, et c'est elle que la
+    # GUI interroge réellement (`app._descriptors`).
+    import os
+    real_db_path = os.path.join(os.path.dirname(__file__), "..", "aromahops.db")
+    if os.path.exists(real_db_path):
+        from hopmatch.schema import connect
+        real_con = connect(real_db_path)
+        real_notes = {r[0] for r in real_con.execute("SELECT DISTINCT note FROM aroma_notes")}
+        real_desc_prod = {r[0] for r in real_con.execute("SELECT DISTINCT descriptor FROM hop_descriptors")}
+        assert set(reference.INGREDIENT_DESCRIPTORS) == real_notes
+        for ingredient, terms in reference.INGREDIENT_DESCRIPTORS.items():
+            for t in terms:
+                assert t in real_desc_prod, (ingredient, t)
+
+def test_descriptor_sources_groups_by_variety_and_descriptor(db):
+    # T77 (2026-08-22, demande utilisateur explicite -- confusion vérifiée
+    # en direct sur "enigma" en production : "berry"/"raspberry" venaient
+    # de BeerMaverick, jamais de BarthHaas, alors que la colonne "Sources"
+    # des tableaux de résultats n'a toujours reflété que `hops.sources`
+    # (provenance de la COMPOSITION) -- `matching.descriptor_sources`
+    # comble ce trou de provenance PAR DESCRIPTEUR. Fixture : citra/citrus
+    # a RÉELLEMENT deux sources (barthhaas ET yakima, vérifié en direct sur
+    # la base construite) -- un vrai cas multi-source, pas fabriqué pour ce
+    # test.
+    src = matching.descriptor_sources(db)
+    assert src["citra"]["citrus"] == {"barthhaas", "yakima"}
+    # Un descripteur mono-source reste un set à un seul élément, pas une
+    # chaîne nue -- l'appelant (`app.py`) fait toujours `sorted(...)`/`for s
+    # in ...`, jamais une comparaison directe à une string.
+    assert isinstance(src["citra"]["citrus"], set)
+    # Variété/descripteur absent de hop_descriptors -> absent du dict
+    # (jamais une entrée vide inventée) -- `.get(variety, {}).get(d, set())`
+    # côté appelant gère ce cas.
+    assert "nonexistent" not in src

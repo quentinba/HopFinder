@@ -577,6 +577,17 @@ pour encourager explicitement l'ajout du plus de descripteurs possible.
 ~18% des notes et le houblon #1 sur ~15% (échantillon de 40 notes). Activé par défaut en GUI
 (décision utilisateur), reste optionnel en CLI (`--oav`).
 
+**Sourcing des seuils (T75).** Les seuils `--oav` sont résolus **en direct** depuis FlavorDB2
+(`matching.oav_thresholds` : CID `reference.MOLECULES` → CAS `pubchem_cids` → seuil
+`flavordb2_thresholds`), jamais depuis une valeur codée en dur — voir `docs/DATA_SOURCES.md`
+pour l'historique (divergences silencieuses détectées entre les anciens seuils codés en dur et
+les seuils FlavorDB2 réels, ex. géraniol 4 vs 39,5 ppb) et le cas particulier du myrcène
+(aucun seuil défendable, voir `docs/DATA_SOURCES.md`). Une molécule sans seuil
+FlavorDB2 sourcé reçoit un poids `--oav` neutre (1×), jamais un seuil deviné. La **couverture
+OAV** (`matching.oav_coverage` — fraction du score moléculaire couverte par des molécules à
+seuil sourcé) est affichée (`st.caption`/`ATTENTION` CLI) et déclenche un avertissement sous
+`matching.OAV_LOW_COVERAGE_WARNING_THRESHOLD` (80 %), en nommant les molécules non couvertes.
+
 **Proposer un blend.** `matching.amplify_blend` (CLI : `hopmatch amplify-blend`) — équivalent de
 `contrast_blend` ci-dessous pour `amplify`, même mécanisme partagé (`_pairing_grown_blends`,
 priorité à la fréquence réelle de pairing BeerMaverick). La cible du blend est le

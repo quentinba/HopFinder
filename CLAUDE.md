@@ -1371,6 +1371,470 @@ Vérifié en direct dans le navigateur : les 5 entrées de la légende se
 lisent maintenant comme 5 idées distinctes, plus de paire qui se ressemble.
 Suite pytest inchangée à 223.
 
+**T75 — Seuils `--oav` résolus en direct depuis FlavorDB2, plus de valeurs
+codées en dur (2026-08-21/22, ticket "transparence de couverture sur
+--oav").** Ticket initial : ajouter une métrique de couverture OAV (part du
+score moléculaire couverte par des molécules à seuil sourcé) + avertissement
+nommant les molécules non couvertes, sur le modèle exact de
+`LOW_COVERAGE_WARNING_THRESHOLD`, avec pour prémisse que le myrcène n'avait
+« aucun seuil retenu » dans `reference.MOLECULES`. **Investigation Step-0
+(imposée par le ticket lui-même avant tout code) a révélé que cette prémisse
+était fausse** : le myrcène avait bien un seuil codé en dur
+(`threshold_ppb=13`) — et plus largement, `flavordb2_thresholds` (déjà
+peuplée par `ingest.ingest_flavordb2`, 227 seuils réels) n'était **jamais
+consultée par le scoring** : `molecular_scores` lisait uniquement
+`reference.MOLECULES[...][1]`, 14 valeurs codées en dur en 2025, jamais
+recroisées avec les seuils FlavorDB2 déjà en base. Signalé à l'utilisateur
+avant toute modification (règle du ticket : « ne pas changer un seuil sans
+le signaler explicitement — modifierait silencieusement le classement de
+tous les résultats existants »). Question de l'utilisateur en retour :
+« Wait, don't FlavorDB2 cover the OAV per molecules? Why is this hardcoded »
+— recroisement direct effectué : **5 des 14 molécules ont un seuil
+FlavorDB2 réel qui diverge silencieusement du seuil codé en dur**, le plus
+net étant le géraniol (4 ppb codé en dur vs **39,5 ppb** en base, facteur
+~10) ; aussi caryophyllène (64 vs 77,0), linalol (6 vs 7,0), bêta-pinène
+(140 vs 140,0), citronellol (8 vs 11,0). Confirmé en direct par `curl` sur
+les fiches FlavorDB2 réelles (`molecules_details?id=<cid>`, User-Agent
+`hopmatch/0.1 (research)`) que myrcène/humulène/farnésène/limonène/
+terpinolène/géranial n'ont réellement AUCUN seuil publié en base (pas un
+problème de nommage/CID — vérifié en premier, comme demandé). Direction
+utilisateur explicite (4 points) : (1) vérifier d'abord qu'il ne s'agit pas
+d'un problème de correspondance CID/CAS pour les molécules manquantes —
+fait, confirmé négatif ; (2) mettre à jour les seuils selon FlavorDB2 ; (3)
+`None` plutôt que jamais retomber sur les anciens littéraux codés en dur
+quand un seuil est absent ; (4) rendre visible en GUI la source des seuils
+OAV. Implémenté : `reference.MOLECULES` — tous les `threshold_ppb` mis à
+`None` (le tuple garde sa forme à 3 éléments, l'index CID reste utilisé par
+`compound_descriptors`, T71) ; nouvelle `matching.oav_thresholds(con,
+molecules)` résout CHAQUE seuil en direct via la chaîne CID
+`reference.MOLECULES` → CAS `pubchem_cids` → seuil `flavordb2_thresholds`,
+molécule absente de cette chaîne → absente du dict retourné (jamais un seuil
+deviné) ; `molecular_scores` prend désormais `thresholds: dict|None` (plus
+`mols`) et lit `thresholds.get(m)` au lieu de
+`mols.get(hop_compound(m), {}).get("threshold_ppb")` ; nouvelle
+`matching.oav_coverage(note_profile, comp, thresholds)` (fraction du poids
+moléculaire couvert par un seuil sourcé + liste triée des molécules non
+couvertes, calculée SEULEMENT si `use_oav=True`, sinon `(None, [])`) ;
+nouvelle constante `OAV_LOW_COVERAGE_WARNING_THRESHOLD = 0.80` (dérivée
+empiriquement, comme `LOW_COVERAGE_WARNING_THRESHOLD` T69 : médiane 100 %,
+moyenne 91 % de couverture OAV mesurées sur les 258 notes réelles à
+molécules productibles, 0,80 signale 50/258 = 19 % des notes) ; `amplify`
+calcule `oav_thr`/`oav_cov`/`oav_uncovered` et les expose dans son dict de
+retour (`oav_coverage`, `oav_uncovered`). Avertissement câblé sur le même
+modèle que `LOW_COVERAGE_WARNING_THRESHOLD` (T69) : ligne `ATTENTION` en CLI
+(`cli.py::_print_amplify`) et `st.warning` en GUI, tous deux nommant
+explicitement les molécules non couvertes (pas juste un pourcentage) ; GUI
+ajoute aussi un `st.caption` discret (visible dès que `--oav` est actif, pas
+seulement sous le seuil d'alerte) expliquant d'où vient chaque seuil ; aide
+de la case à cocher `--oav` réécrite pour dire explicitement « résolu en
+direct depuis FlavorDB2, jamais codé en dur ». Documentation : entrée
+myrcène ajoutée à `docs/DATA_SOURCES.md` (texte du ticket, verbatim) +
+paragraphe sur l'historique des 5 divergences détectées ; README section
+`--oav` étendue (sourcing + couverture). **4 tests requis par le ticket,
+tous ajoutés** (`tests/test_matching.py`, suffixe `_oav`/`molecular_scores_
+neutral`) : couverture 100 % quand tout est sourcé ; couverture < 100 % +
+molécule non couverte correctement listée + sous le seuil d'alerte ; qu'un
+seuil jamais inventé n'entre dans le calcul (un seuil encore présent dans
+`reference.MOLECULES` via `monkeypatch` — cas de régression hypothétique —
+n'est PAS lu, seule la chaîne FlavorDB2 compte) ; qu'un score sans
+`--oav` est identique avec ou sans données FlavorDB2 insérées. Plus :
+résolution CID→CAS→seuil testée directement, et neutralité stricte (1×,
+égalité exacte avec `use_oav=False`) pour une molécule sans seuil. Fixture
+`db` (`tests/test_matching.py`) ayant `pubchem_cids`/`flavordb2_thresholds`
+vides par défaut (comme pour `compound_descriptors`, T71/T73) : lignes
+insérées/retirées par test (`try`/`finally DELETE`), même pattern déjà
+établi. `load()` conserve son tuple à 4 éléments (`mols` toujours renvoyé,
+13 des 14 sites d'appel le jettent déjà via `_` avant ce ticket) : changer sa
+signature était hors scope, aucun bénéfice fonctionnel, aurait touché 13
+sites d'appel pour rien. Suite complète : 224 → **231 tests, tous verts** ;
+`pyflakes` propre sur `matching.py`/`reference.py`/`app.py`/`cli.py`/
+`tests/test_matching.py`.
+
+**T76 — Explication TF-IDF/--oav dans la GUI Amplify + défaut --oav
+piloté par la couverture réelle par note (2026-08-22, suite directe de T75,
+demande utilisateur explicite).** Déclenché par une confusion légitime en
+testant T75 en direct : couverture --oav à 100% sur "mango" alors que
+l'utilisateur s'attendait à "plus de 10 molécules" — investigation en
+direct qui a révélé que ce n'était PAS un bug mais le fonctionnement normal
+de `coverage()` (seules ~14 molécules curées ont des données `hop_
+composition` quantitatives, indépendamment de --oav, déjà documenté T69).
+L'utilisateur a ensuite demandé une explication précise du mécanisme
+moléculaire, puis un infobox GUI clair pour ça, à partir d'un brouillon
+qu'il a fourni.
+
+**Infobox `_molecular_score_explainer()`** (`st.expander` replié par défaut,
+même principe que `_process_survival_legend` T74, affiché en haut de la
+page Amplify) : analogie recherche documentaire (houblon=document,
+molécule=mot, myrcène="le"/"a"), formule `contribution = note_weight × TF ×
+IDF × OAV` avec les 4 facteurs expliqués séparément, section "ce que --oav
+fait/ne fait pas" (ne filtre JAMAIS, direction inversée seuil bas =
+multiplicateur haut), et un exemple chiffré pas-à-pas. Brouillon utilisateur
+adapté avec **deux corrections factuelles vérifiées avant publication**
+(jamais republié tel quel) : (1) le brouillon citait "thiols, cétones,
+isobutyrate" comme groupe touché par le biais de neutralité --oav ;
+vérifié dans `reference.py` : seuls les thiols sont dans `reference.
+MOLECULES` (CID=None -> jamais de seuil --oav) -- "ketones"/"isobutyrate"
+n'existent que côté `PROCESS_SURVIVAL`/`JANISH_COMPOUND_CATEGORIES` (badge
+Process, T74), hors du scoring moléculaire/--oav -- affirmation corrigée
+pour ne citer QUE les thiols ; (2) l'exemple chiffré du brouillon affirmait
+que l'écart entre deux houblons fictifs "se resserre" avec --oav (1,20×
+cité comme le cas AVEC --oav contre 1,44× SANS) ; recalculé à la main ET
+par script (`amount`/`specificity` réels appliqués aux mêmes chiffres) :
+c'est l'inverse -- SANS --oav le ratio est 1,20 (B atteint 83,4% de A),
+AVEC --oav il est 1,44 (B tombe à 69,7%) -- l'écart s'ÉLARGIT ici, pas
+l'inverse (le β-pinène, seul vrai atout du houblon B, est justement la
+molécule la plus pénalisée par --oav). Narration corrigée en conséquence ;
+le reste de l'arithmétique du brouillon (TF/IDF/multiplicateurs/totaux)
+était juste, revérifié terme à terme avant publication. Exemple clairement
+labellé "hypothetical numbers, not real hop data" -- cohérent avec la
+convention "prior, pas donnée" déjà établie (README).
+
+**Défaut `--oav` piloté par note.** La case `--oav` passait de `value=True`
+fixe pour toute note à une valeur calculée AVANT son rendu : `default_oav =
+bool(producible) and oav_coverage(note) >= OAV_LOW_COVERAGE_WARNING_
+THRESHOLD` (0.80, seuil T75 déjà établi) -- répond littéralement à la
+demande utilisateur ("automatically triggers the OAV if we have enough OAV
+coverage (and if molecular layer is activated for sure)"), le garde
+`bool(producible)` couvrant la clause "si la couche moléculaire est
+activée". `key=f"use_oav_{note}"` (pas de clé fixe) : un widget Streamlit
+distinct par note plutôt qu'un seul état partagé -- changer de note
+recalcule un nouveau défaut informé par CETTE note, tout en gardant en
+mémoire (session_state) un override manuel si l'utilisateur revient sur une
+note déjà visitée dans la session. Vérifié en direct dans le navigateur :
+"adobo" (0 molécule productible) -> case décochée par défaut ; "mango"
+(2 molécules productibles, toutes deux avec un seuil FlavorDB2 sourcé,
+couverture 100%) -> case cochée par défaut.
+
+**Étude empirique de couverture sur les additions RÉELLEMENT courantes en
+brassage** (demande utilisateur explicite : "study the distribution of
+molecular coverage in a list of addition used frequently in beers... not
+all the database because a lot of ingredients are never seen in a beer").
+44 notes choisies à la main (fruits/agrumes/herbes/épices usuels en
+IPA/sour/stout -- mangue, fraise, myrtille, cassis, groseille, cerise
+acide, orange, pêche, abricot, ananas, fruit de la passion, pamplemousse,
+citron, citron vert, menthes, coriandre, vanille, coco, chocolat, café,
+piment, gingembre, cannelle, girofle, muscade, pastèque, goyave, kiwi,
+pomme, poire, grenade, raisin, banane, groseille à maquereau, romarin,
+thym, cardamome, anis (+étoilé), basilic, fenouil, tamarin -- recoupées
+contre les 506 notes réelles de la base, `difflib.get_close_matches` pour
+les libellés proches, ex. "highbush blueberry"/"blackcurrant"/"sour
+cherry"). Résultat surprenant à signaler explicitement à l'utilisateur :
+couverture MOLÉCULAIRE médiane 4,2% (moyenne 5,0%), maximum 12,4% (anis
+étoilé) sur ces 44 notes -- jamais proche des 20% de `LOW_COVERAGE_
+WARNING_THRESHOLD` (déjà établi comme "faible" sur toute la base, T69) ;
+3 notes à 0% exactement (chocolat, café, piment -- ZÉRO molécule
+productible, `amplify` sans descripteurs y renvoie une liste vide). Couverture
+--oav (sur les 41 notes à ≥1 molécule productible) très différente :
+médiane 81,5%, moyenne 81,5%, mais 19 notes sur 41 (46%) sous le seuil de
+0.80 -- une proportion de notes flaggées PLUS élevée que sur toute la base
+(19% en T75) : les additions courantes en brassage tirent davantage sur
+myrcène/humulène/farnésène (non sourcés) que la moyenne des 506 notes.
+Donnée brute conservée dans l'historique de conversation, pas dans un
+fichier séparé (pas de script d'étude committé -- calcul ponctuel, pas un
+besoin récurrent).
+
+**Signalé à l'utilisateur, PAS implémenté (2e moitié de la demande, en
+attente de confirmation) :** "automatically triggers the molecular layer if
+we have enough coverage" ne peut PAS se lire littéralement contre ces
+chiffres -- avec un maximum réel de 12,4% sur des additions à brassage
+réellement courantes, n'importe quel seuil "suffisant" défendable
+laisserait la couche moléculaire éteinte pour la quasi-totalité des cas
+d'usage réels de l'outil, ce qui viderait `amplify` de son intérêt.
+Contrairement au défaut --oav (une simple valeur de case à cocher,
+réversible), un gate dur sur la couche moléculaire changerait le
+CLASSEMENT/la disponibilité même des résultats -- décision de scoring, pas
+d'ergonomie, donc pas prise sans confirmation explicite (même règle que
+T75 : "ne pas changer silencieusement un classement"). Deux lectures
+possibles proposées à l'utilisateur, réponse en attente au moment de cette
+entrée.
+
+**Suite T76 (même jour, 2026-08-22) — reframe complet d'Amplify : descripteurs
+en couche principale, moléculaire optionnel, amorce IA ingrédient->descripteurs
+(506 entrées).** Réponse utilisateur à la question ci-dessus ("Deux lectures
+possibles... réponse en attente") : ni l'une ni l'autre -- direction complètement
+différente. Demande verbatim : "I want you to put as a first layer the
+descriptors and as an optional layer the molecular... Once user put the
+ingredient, will automatically select the Note descriptors matching this
+ingredient... I need you to build a dictionary or mapping between each
+ingredient in fooddb and possible note descriptor mapping this. For this
+mapping I want you to use IA for sure."
+
+Implémenté (`app._amplify`) :
+- **"Note" renommé "Ingredient"** en GUI (label + aide) -- interne (`note`,
+  `aroma_notes`, CLI `hopmatch amplify <note>`) inchangé, portée = label GUI
+  uniquement (même principe que la convention anglais/français déjà établie).
+- **Couche descripteurs = couche principale**, pré-remplie automatiquement à
+  la sélection d'un ingrédient depuis `reference.INGREDIENT_DESCRIPTORS`
+  (nouveau dict, voir ci-dessous), toujours éditable (`st.multiselect`
+  `default=`, `key=f"desc_{note}"` -- un widget par ingrédient, mémorise un
+  override manuel si retour sur un ingrédient déjà visité dans la session).
+  Caption explicite selon le cas ("Prefilled from X's typical aroma
+  (AI-assisted suggestion, not measured data)..." ou "No auto-suggested
+  descriptors for X yet...").
+- **Couche moléculaire = case à cocher optionnelle** ("Also use molecular
+  similarity (optional)"), décochée par défaut (`key=f"use_mol_{note}"`) --
+  l'infobox TF-IDF (`_molecular_score_explainer`, T76 précédent same-day) et
+  la case `--oav` ne s'affichent que si cochée.
+- **`w_mol`/`w_desc` pilotés explicitement par ce choix** plutôt que par le
+  repli implicite `has_descriptors` de `matching.amplify` : moléculaire
+  décoché -> `(0.0, 1.0)` ; coché -> `(0.5, 0.5)` (le repli interne `has_
+  descriptors` de `matching.amplify` continue de s'appliquer PAR-DESSUS dans
+  le seul cas moléculaire coché + aucun descripteur -> `(1.0, 0.0)`,
+  inchangé). Cas "aucun descripteur ET moléculaire décoché" intercepté AVANT
+  l'appel à `matching.amplify` (message explicite "nothing to rank") --
+  sinon le repli interne de `matching.amplify` retomberait silencieusement
+  sur 100% moléculaire malgré un choix utilisateur explicite contraire.
+- **Avertissement de couverture moléculaire recalibré** (demande utilisateur
+  explicite : "recalibrate the warning message based on the true
+  distribution 4-12 that you can describe at the top of the molecular
+  box") -- l'ancien `st.warning` à `LOW_COVERAGE_WARNING_THRESHOLD`=20% se
+  déclenchait pour LITTÉRALEMENT toutes les notes de toute la base
+  (`coverage()` ne dépasse jamais ~12%, y compris sur les 44 ingrédients
+  réellement courants en brassage étudiés plus haut) : un "avertissement"
+  qui ne varie jamais n'avertit de rien. Remplacé par (1) un `st.caption`
+  factuel systématique en haut de la section moléculaire donnant la vraie
+  plage mesurée (4-12%, 44 ingrédients réels), et (2) un `st.warning` RECENTRÉ
+  sur le vrai cas dégénéré (`len(producible) <= 1` -- le cas géraniol/
+  Talus/Ekuanot documenté en T69, PAS un seuil de pourcentage).
+
+**`reference.INGREDIENT_DESCRIPTORS`** (nouveau dict, 506 entrées -- une par
+note réelle de `aroma_notes`) : amorce de pré-remplissage, jugement direct de
+l'assistant (PAS une dérivation programmatique FooDB, cette approche avait déjà
+dégénéré -- voir `combine()`/`LOW_COVERAGE_WARNING_THRESHOLD`), vocabulaire de
+sortie restreint aux 105 descripteurs RÉELS de `hop_descriptors` (jamais un
+terme inventé), liste vide = pas de correspondance défendable (361/506, 71% --
+la majorité des notes FooDB sont poissons/viandes/plats préparés sans rapport
+avec le houblon), 145/506 non vides. Choix méthodologiques utilisateur
+explicites (`AskUserQuestion`, répondu) : (1) amorce statique rédigée par
+l'assistant dans cette session, PAS un appel API LLM en direct dans l'app
+(pas de secret/dépendance réseau nouvelle) ; (2) les 506 notes couvertes, mais
+seules les 44 de l'étude de couverture --oav (T76 précédent) effectivement
+revues à la main par l'utilisateur. Garde-fou permanent ajouté :
+`test_ingredient_descriptors_keys_and_terms_match_real_vocabulary`
+(`tests/test_matching.py`) -- vérifie contre la vraie base (`aromahops.db`,
+pas la fixture) que les 506 clés correspondent EXACTEMENT aux notes réelles et
+que chaque terme appartient au vocabulaire réel.
+
+**Corrections post-revue utilisateur (même jour) :** deux incohérences
+signalées après un premier passage en revue des 44 ingrédients curés :
+(i) "berry" absent de plusieurs baies réelles (myrtille, cassis, groseille,
+fraise, sureau...) alors que présent sur d'autres (canneberge, airelle) ;
+(ii) "fruity" présent sur mangue mais absent d'autres fruits tout aussi
+fruités (goyave, banane, ananas, papaye...). Cause : incohérence
+d'application de la règle par le premier passage (44 entrées rédigées à la
+main) ET par la passe automatisée (462 entrées). Corrigé PROGRAMMATIQUEMENT
+(pas une réécriture manuelle de 506 lignes, source d'erreur) : script
+détectant tout terme de "signal" fruit/baie déjà présent (ex. "guava",
+"blueberry") sans que "fruity"/"berry" l'accompagne, exclusion explicite des
+faux positifs revue à la main (coriandre/gin/mélisse citronnée/citronnelle/
+menthe orange -- caractère herbacé/citronné réel, mais PAS des fruits,
+"fruity" y aurait été une surinterprétation), 40 entrées corrigées, aucune
+ne dépasse le plafond de 4 termes (`strawberry guava` : "tropical" retiré
+pour faire de la place à "berry"+"fruity", les deux plus informatifs ici).
+Revalidé par le même script de garde-fou + `pytest` (232 verts) + `pyflakes`
+propre après correction.
+
+**Incident opérationnel (à ne pas reproduire) : un fork a exécuté `git
+stash` sur le dépôt PARTAGÉ pendant que la session principale éditait
+activement les mêmes fichiers.** Chargé d'étendre `INGREDIENT_DESCRIPTORS`
+aux 506 notes (tâche déléguée en fork pour ne pas remplir le contexte
+principal de 462 entrées mécaniques), le fork a lancé `git stash` de sa
+propre initiative (jamais demandé) pour une vérification annexe -- capturant
+TOUT le travail non committé de la session (T75 + T76 en cours), y compris
+des fichiers que la session principale modifiait EN PARALLÈLE au même
+moment (`tests/test_app.py`). Le `git stash pop` a échoué (conflit), le fork
+a alors tenté une récupération manuelle (`git checkout stash@{0} -- <path>`
+fichier par fichier + un merge 3-way `git merge-file` pour le fichier en
+conflit) -- travail interrompu (`TaskStop`) en cours de vérification finale
+avant que le stash ne soit droppé. **Rien n'a été perdu** (le stash est resté
+intact tout du long, jamais droppé) mais l'incident a fait disparaître
+temporairement le contenu de 9 fichiers de la copie de travail, détecté par
+des `grep`/`wc -l` qui ne retrouvaient plus de contenu pourtant écrit avec
+succès quelques échanges plus tôt. Récupération complète vérifiée après coup
+(diff fichier par fichier contre le stash : 8/9 fichiers identiques
+byte-à-byte, `tests/test_app.py` correctement fusionné par le fork --
+confirmé en relisant le fichier directement, pas en faisant confiance au
+rapport du fork) ; `git restore --staged .` pour désindexer (le fork avait
+laissé 8 fichiers en zone de stage) sans toucher au contenu ; suite complète
+`pytest`/`pyflakes` revérifiée verte après coup. Stash `stash@{0}` conservé
+intentionnellement (filet de sécurité redondant mais gratuit) plutôt que
+droppé sans qu'on le demande. **Leçon retenue (voir aussi la mémoire
+cross-session correspondante) : ne jamais déléguer une tâche en fork NON
+ISOLÉ (`isolation` omis) si cette tâche pourrait toucher au dépôt git
+partagé (`git stash`/`git checkout`/etc.) alors que la session principale
+édite activement des fichiers en parallèle -- soit interdire explicitement
+toute commande git dans le prompt du fork, soit lancer le fork avec
+`isolation: "worktree"` s'il a réellement besoin de git.**
+
+**Addendum T76, même jour (2026-08-22, 4 retours utilisateur avant commit) :**
+1. **Avertissement "Orphans" déplacé DANS `if use_molecular:`** -- purement
+   moléculaire (`coverage()` : molécules de la note qu'aucun houblon ne
+   produit), sans rapport avec la couche descripteurs, s'affichait avant même
+   case décochée.
+2. **Infobox TF-IDF (`_molecular_score_explainer`) + caption "For
+   reference"(plage 4-12%) sorties de `if use_molecular:`, affichées
+   INCONDITIONNELLEMENT.** Signalé par l'utilisateur : "user should be
+   informed before taking the decision to activate it or not" -- l'ancien
+   emplacement les rendait invisibles tant que la case n'était pas DÉJÀ
+   cochée, à l'envers de leur rôle (aider à décider si l'activer).
+3. **Colonne "Mol." du tableau de résultats masquée si `use_molecular` est
+   décoché** -- `w_mol=0` dans ce cas, la valeur affichée ne contribue à rien
+   au score, la montrer aurait laissé croire le contraire.
+4. **Amorce `INGREDIENT_DESCRIPTORS` déployée sur `contrast`** (jusque-là
+   Amplify seul) : nouveau sélecteur "Ingredient (optional)" en tête de
+   `_contrast`, `index=None`/`placeholder` (rien de sélectionné par défaut,
+   contrairement à Amplify où un ingrédient est obligatoire -- `contrast` n'a
+   jamais eu besoin d'un ingrédient précis, juste de descripteurs). Préremplit
+   `st.multiselect` en dessous (même pattern -- caption explicite, `key=
+   f"contrast_desc_{ingredient}"` pour la mémoire par ingrédient), en
+   AMONT de la logique de cible de contraste existante (T61/T-tropical) qui
+   continue de fonctionner à l'identique une fois les descripteurs remplis
+   (peu importe qu'ils viennent de l'amorce ou d'une saisie manuelle).
+
+**Point signalé à l'utilisateur, PAS corrigé (hors des 4 demandes
+explicites) :** la colonne "Contributes via" (`why_str`, alimentée par les
+contributeurs moléculaires `mol.get(h, (0,[]))[1]`) continue d'afficher des
+noms de molécules même `use_molecular` décoché, alors qu'elles ne pèsent plus
+RIEN dans le score (`w_mol=0`) -- `matching.molecular_scores` reste calculé
+inconditionnellement dans `matching.amplify` (jamais gaté par `w_mol`), donc
+"why" est toujours peuplé. Potentiellement trompeur (donne l'impression que
+ces molécules ont influencé le classement), mais pas demandé explicitement :
+laissé tel quel, signalé pour confirmation avant d'y toucher (même règle que
+pour l'auto-trigger moléculaire T75/T76 : pas de changement de ce qui
+s'affiche comme "cause" du score sans confirmation).
+
+**2e addendum T76, même jour (2026-08-22) : le point signalé ci-dessus était
+en fait la vraie demande.** Réponse utilisateur : "we are missing the
+descriptor contribution... create two distinctive columns 'Molecular
+contributors' and 'Descriptor contributors'... activate the columns only if
+the respective scores are activated." Implémenté (`app._amplify`) :
+- **"Contributes via" scindée en deux colonnes** : "Molecular contributors"
+  (`h["why"]`, inchangé) et "Descriptor contributors" (NOUVEAU -- calculé en
+  app.py, PAS dans matching.py : simple recoupement d'ensembles déjà chargés,
+  `set(selected_desc) & hop_desc.get(variety, set())`, pas une nouvelle
+  notion de score). "Activées" = pèsent RÉELLEMENT dans le score final, pas
+  juste "cochées" : `show_desc_col = r["has_descriptors"] and w_desc > 0` --
+  le `w_desc > 0` en plus de `has_descriptors` couvre le nouveau cas
+  "Use only the molecular layer" ci-dessous (descripteurs sélectionnés,
+  `has_descriptors=True`, mais explicitement mis à `w_desc=0`). Colonne
+  "Desc." (fraction numérique) soumise à la même règle, par cohérence avec
+  "Mol." déjà masquée au tour précédent. Caption des `_hop_detail_expanders`
+  mise à jour en cohérence (`_contrib_caption` : "via molecular: ...;
+  descriptors: ..." selon ce qui est effectivement actif).
+- **Nouvelle case "Use only the molecular layer (ignore descriptors)"**
+  (demande utilisateur explicite, proposition d'emplacement suivie
+  littéralement : "just below 'Also use molecular similarity'"), visible
+  seulement si la couche moléculaire est cochée. `w_mol`/`w_desc` : `(0,1)`
+  si moléculaire décoché ; `(1,0)` si "molecular only" coché ; `(0.5,0.5)`
+  sinon (repli `has_descriptors` de `matching.amplify` inchangé,
+  s'applique par-dessus si la sélection de descripteurs est vide).
+  Différent de vider manuellement le multiselect de descripteurs : préserve
+  la sélection/l'amorce pour un retour ultérieur au blend plutôt que de la
+  perdre. Vérifié en direct dans le navigateur : mango, moléculaire+descripteurs
+  actifs -> 6 colonnes (Mol., Desc., Molecular contributors, Descriptor
+  contributors inclus) ; "Use only the molecular layer" coché -> "Desc." et
+  "Descriptor contributors" disparaissent, score de Talus repasse à 100
+  (recalculé purement sur geraniol/beta-pinene).
+
+**3e addendum T76, même jour (2026-08-22) : les 2 cases moléculaires
+remplacées par UN `st.segmented_control` à 3 états.** L'utilisateur, après
+avoir vu le rendu du 2e addendum, a demandé un avis ergonomique ("Do you
+think it's ergonomic this way?"). Diagnostic donné puis confirmé par
+l'utilisateur : "Also use molecular similarity" + sa sous-case "Use only the
+molecular layer" (qui n'apparaissait QUE si la première était cochée)
+encodaient en réalité 3 états mutuellement exclusifs via deux booléens
+dépendants -- pattern peu lisible ("case qui n'apparaît que si une autre
+case précise est cochée"), signalé par l'utilisateur lui-même dans un
+message suivant ("I have the feeling these two buttons are not super
+clear/ergonomic"). Remplacé par `st.segmented_control("How to rank hops?",
+["Descriptors", "Both", "Molecular only"], default="Descriptors",
+required=True)` -- correspond 1:1 aux 3 seules combinaisons `w_mol`/`w_desc`
+réellement utilisées (0/1, 0.5/0.5, 1/0), conforme à la convention Streamlit
+du projet (segmented_control préféré à une case/un radio pour ce genre de
+choix, voir la skill `developing-with-streamlit`). `required=True` : jamais
+de désélection vers `None`, un état est toujours actif. `use_molecular =
+rank_mode in ("Both", "Molecular only")` / `molecular_only = rank_mode ==
+"Molecular only"` dérivés directement, tout le reste de la logique en aval
+(w_mol/w_desc, gating des colonnes/warnings/--oav/explainer) inchangé --
+seul le CONTRÔLE d'entrée a changé, pas le comportement. `tests/test_app.py`
+: les 6 tests qui activaient la couche moléculaire via `at.checkbox[0].
+set_value(True)` mis à jour vers `at.segmented_control[0].set_value("Both")`
+(API AppTest confirmée par lecture directe de `streamlit.testing.v1.
+element_tree.ButtonGroup`, commune à `st.pills`/`st.segmented_control`).
+Vérifié en direct dans le navigateur : "Descriptors" sélectionné par
+défaut (surlignage rouge) ; clic sur "Both" fait apparaître `--oav` +
+"Molecular coverage" à l'identique du comportement précédent.
+
+## T77 -- Provenance PAR DESCRIPTEUR séparée de la provenance de composition
+(2026-08-22, confusion réelle signalée en direct par l'utilisateur)
+
+Signalé par l'utilisateur en testant By-descriptor sur "berry"/"raspberry" en
+production : Enigma ressort #1, colonne "Sources" affiche "barthhaas" --
+l'utilisateur visite la vraie page BarthHaas d'Enigma, n'y voit AUCUN de ces
+deux mots ("Passion Fruit, Nutmeg, Lime, Pineapple, Red Currant" listés à la
+place), légitimement confus ("does berry come from this only?").
+
+**Root cause vérifiée en direct sur la base construite** (pas supposée) :
+`hop_descriptors` d'Enigma a 6 lignes, **TOUTES sourcées "beermaverick"**
+(berry, raspberry, redcurrant, stone fruit, tropical, white wine) -- ZÉRO
+venant de BarthHaas (dont les descripteurs d'arôme sont un site parsé comme
+`[]`, jamais fiable, voir `docs/DATA_SOURCES.md`) et ZÉRO de Yakima (`hops.
+sources = "barthhaas"` seul pour Enigma -- confirmé, Yakima ne couvre pas
+cette variété). La colonne "Sources" des tableaux de résultats
+(`hops[h]["sources"]`) n'a JAMAIS reflété que la provenance de la
+COMPOSITION -- `hop_desc` (`matching.load()`) est un simple `set[str]` de
+NOMS de descripteurs, le `source` de chaque ligne `hop_descriptors` n'était
+JAMAIS conservé nulle part en aval du chargement. La juxtaposition visuelle
+("Sources: barthhaas" affiché juste à côté/au-dessus des descripteurs
+matchés) laissait raisonnablement croire à l'utilisateur que cette
+provenance couvrait aussi les descripteurs -- confusion légitime, pas une
+erreur de lecture de sa part.
+
+**Fix : nouvelle `matching.descriptor_sources(con) -> {variety: {descripteur:
+{sources}}}`**, fonction séparée plutôt qu'un enrichissement de `hop_desc`
+dans `load()` (`hop_desc` reste un `set[str]` utilisé pour des opérations
+d'ensemble -- `&`, `descriptor_overlap` -- dans de nombreux appelants,
+changer sa forme aurait cassé ce pattern partout ; ce besoin de provenance
+est localisé à l'AFFICHAGE, pas au scoring). Déployé partout où la
+juxtaposition composition/descripteurs existait :
+- **Amplify** (`_amplify`) : nouvelle colonne "Descriptor sources" (montrée
+  seulement si `show_desc_col`, même garde que "Descriptor contributors"),
+  "Sources" renommée "Composition sources".
+- **Contrast** (`_contrast`) : même split sur `h["contrast_via"]`.
+- **Blends** (`_render_blends`, partagé amplify_blend/contrast_blend) : même
+  split sur `h["covers"]` -- signature étendue d'un paramètre `desc_src`
+  (les deux appelants l'avaient déjà calculé pour leur propre tableau).
+- **By-descriptor** (`_by_descriptor`) : l'en-tête d'expander perdait son
+  `[{h['sources']}]` trompeur (juxtaposé à "matches berry, raspberry") --
+  remplacé par une caption explicite "Matched descriptors sourced from: X —
+  composition sourced from: Y" ; "All descriptors" annote CHAQUE terme
+  individuellement (`d (source)`).
+- **`_hop_detail_expanders`** (partagé Amplify/Contrast) et **Browse**
+  (`_browse`, page hop unique) : même annotation par terme sur la liste
+  "Descriptors" complète, groupée par source ; caption renommée "Composition
+  sources".
+- **PAS touché** : `_similar_hops_section` (Browse, "Similar hops") -- ses
+  "Shared aroma categories" viennent de `hop_aroma_intensity` (roue
+  quantitative, Yakima UNIQUEMENT par construction, jamais BeerMaverick/
+  BarthHaas) -- pas le même risque de confusion, une colonne "Descriptor
+  sources" y serait redondante (toujours "yakima"). `_compare` (Compare
+  Hops) : ne montre ni `hop_descriptors` ni "Sources" du tout, hors périmètre.
+
+Nouveau test `test_descriptor_sources_groups_by_variety_and_descriptor`
+(`tests/test_matching.py`) : vérifié sur un vrai cas multi-source de la
+fixture (`citra`/`citrus` a RÉELLEMENT deux sources, barthhaas ET yakima,
+confirmé en direct sur la base construite -- pas fabriqué pour le test).
+Suite complète : 232 -> **233 tests, tous verts** ; `pyflakes` propre.
+Vérifié en direct dans le navigateur, reproduction EXACTE du signalement
+utilisateur : By-descriptor, "berry"+"raspberry", expander Enigma ouvert ->
+"Matched descriptors sourced from: beermaverick — composition sourced
+from: barthhaas" ; "All descriptors: berry (beermaverick), raspberry
+(beermaverick), redcurrant (beermaverick)..." -- répond directement à la
+question posée ("does berry come from this only?" -- oui, de BeerMaverick,
+jamais de BarthHaas). Amplify sur "mango" : colonnes "Descriptor sources"
+(beermaverick, yakima) et "Composition sources" (barthhaas/yakima selon le
+houblon) désormais visibles séparément.
+
 Reste :
 1. Jointure FooDB/hop_composition au-delà des ~734 composés Flavornet si le vocabulaire
    s'élargit beaucoup (crawl Yakima déjà réel, plus d'aliments FooDB).
