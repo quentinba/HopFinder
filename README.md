@@ -2,18 +2,6 @@
   <img src="assets/logo.png" alt="HopFinder" width="480">
 </div>
 
-*Nom d'affichage du projet (GUI, GitHub) ; le paquet Python et la commande CLI restent
-`hopmatch` (décision utilisateur 2026-08-19 — renommage d'affichage seulement, pas de
-renommage mécanique du paquet/CLI/`pyproject.toml`).*
-
-**Note olfactive → molécules → houblons.** Un outil pour brasseur qui répond à une
-question concrète : *quel houblon accorder à un ajout* (yuzu, basilic…) — en le
-prolongeant, en le contrastant, ou en explorant/comparant directement le catalogue.
-
-> État : `pytest` vert (200 tests). Toutes les sources tournent contre les sites externes :
-> `crawl_barthhaas`, `crawl_yakima`, `ingest_flavornet`, `ingest_foodb`, `ingest_flavordb2`,
-> `resolve_pubchem_cids`, `ingest_beermaverick` — voir [Feuille de route](#feuille-de-route).
-
 ---
 
 ## Aperçu
