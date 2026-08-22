@@ -165,7 +165,12 @@ def test_app_loads_with_no_exception_default_home_mode(toy_cwd):
     at = _app()
     at.run()
     assert not at.exception
-    assert at.title[0].value == "HopFinder"
+    # T78 addendum (2026-08-22, demande utilisateur explicite) : le
+    # st.title("HopFinder") texte a été retiré (redondant avec le logo
+    # image + le st.header par page, voir app.main) -- le logo (image, pas
+    # de type AppTest dédié distinct de st.image) et le header de la page
+    # restent les signaux vérifiables ici.
+    assert at.header[0].value == "Home"
     assert at.sidebar.radio[0].value == "home"
     assert len(at.button) == 5
 

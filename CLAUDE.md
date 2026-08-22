@@ -1837,35 +1837,111 @@ houblon) désormais visibles séparément.
 
 ## T78 -- Logo HopFinder (2026-08-22, image fournie par l'utilisateur)
 
-`assets/logo.png` (fond crème opaque, 1772×694, uploadé par l'utilisateur --
+`assets/logo.png` (fond crème opaque, 1772×694 à l'origine, remplacé en
+place par l'utilisateur le même jour par une version 2232×802 -- "I updated
+the logo.png inplace with higher resolution" -- uploadé par l'utilisateur --
 confirmé après coup que le fichier inconnu repéré plus tôt dans `git status`
 n'était PAS lié à un incident, juste l'utilisateur ajoutant son propre
-asset). Fond retiré par script one-off (seuillage de distance couleur au
-référentiel des 4 coins + feather linéaire 15-40 pour un bord anti-aliasé,
-PAS un cutout brutal) : vérifié en direct que le fond crème plein cadre
-aurait rendu comme un bloc clair disgracieux sur le thème sombre par défaut
-de l'app -- comparé sur fond sombre ET clair avant de valider. Recadré au
-bbox du contenu (+12px de marge) -> `assets/logo_transparent.png`
-(1512×560). Original (`assets/logo.png`) conservé tel quel, jamais modifié
-ni supprimé.
+asset).
+
+**1ère passe (retirée le jour même, 2e addendum) :** fond retiré par
+seuillage de distance couleur + feather (`assets/logo_transparent.png`),
+validé sur des previews composite statiques (fond uni sombre/clair) avant
+intégration -- **mais constaté par l'utilisateur en direct dans l'app
+déployée que "it doesn't work in dark theme"**. Root cause probable : le
+thème sombre réel de l'app n'est pas un fond uni (contrairement aux
+previews de validation) mais l'image de fond texturée
+(`_BACKGROUND_PATH`/`_inject_background`) -- la transparence y interagit
+autrement qu'sur un composite plat. Leçon : une preview statique composite-
+sur-couleur-unie ne remplace pas une vérification dans l'app RÉELLE avec
+son vrai fond avant de conclure qu'un rendu "marche".
+
+**2e passe (actuelle) : fond crème conservé tel quel, jamais retiré**
+(demande utilisateur explicite : "I don't want you to use the transparent
+logo... Keep the background"). `assets/logo_transparent.png` supprimé
+(dérivé devenu inutile). `_LOGO_PATH` pointe directement sur
+`assets/logo.png` (original, jamais modifié).
 
 Intégré :
-- **GUI** (`app.main`) : `st.logo(_LOGO_PATH, size="large")`, apparaît en
-  haut de la sidebar sur toutes les pages (mécanisme natif Streamlit dédié
-  à cet usage, pas un `st.image` mal placé) -- chemin résolu depuis
-  `__file__` (même pattern que `_BACKGROUND_PATH`), correct quel que soit
-  le cwd d'où `streamlit run` est lancé.
+- **GUI, sidebar** (`app.main`) : `st.sidebar.image(_LOGO_PATH, width=260)`
+  -- PAS `st.logo()` (retiré : son plafond de taille intégré, 32px de haut
+  max même en `size="large"`, rendait un logo minuscule, signalé par
+  l'utilisateur -- "in the sidebar it should be bigger than currently").
+  `st.image` dans le flux normal de la sidebar donne un contrôle de taille
+  complet.
+- **GUI, page principale** (`app.main`) : `st.image(_LOGO_PATH, width=420)`
+  en tête, sur TOUTES les pages (demande utilisateur explicite : "put the
+  logo... also at the top of the main page") -- remplace le
+  `st.title("HopFinder")` + `st.caption("Aroma note → molecules → hops")`
+  retirés (voir ci-dessous).
+- **Titre + caption retirés** (demande utilisateur explicite : "there is
+  already the name of the tool at the top that is enough") : chaque page
+  d'outil affiche déjà `st.header(MODE_LABELS[mode])` (ex. "HopFinder -
+  Amplify") juste après le dispatch -- le `st.title("HopFinder")` générique
+  au-dessus était redondant avec lui ET avec le nouveau logo image.
+- **Favicon** (`page_icon`) : nouvelle image DISTINCTE fournie par
+  l'utilisateur le même jour (`assets/mini_logo.jpeg`, fond noir, icône
+  houblon géométrique seule, 1408×768 -- "Use this for the table logo"
+  [sic, tab]), plus adaptée qu'un lockup horizontal large à un favicon
+  carré minuscule. `st.set_page_config(page_icon=_TAB_ICON_PATH)`, remplace
+  l'emoji `🌿` précédent.
+  - **1er passage** : simple recadrage carré centré sur l'icône (bbox par
+    seuil de luminosité), fond noir laissé OPAQUE -- corrigé le jour même
+    (signalé par l'utilisateur : "you need to remove the background of the
+    miniature logo before using it").
+  - **2e passage (actuel)** : fond retiré par seuillage sur le canal VERT
+    spécifiquement (`lo=60, hi=100`, feather), pas une distance-couleur au
+    noir comme pour le logo principal -- root cause vérifiée en direct
+    (`np.median` sur un transect de pixels) : le fond ET les interstices
+    NOIRS internes au motif (le dessin façon vitrail a des espaces noirs
+    ENTRE les facettes vertes) partagent une teinte quasi identique
+    (glow vert très sombre, RVB≈(10-20, 25-30, 10-15)), donc indissociables
+    par simple distance à une référence "fond". Seuiller sur le VERT
+    (traits ≈180, fond/interstices <50) isole PROPREMENT les traits verts
+    du motif et rend transparent aussi bien l'extérieur QUE les interstices
+    internes -- résultat voulu : une icône "vitrail"/wireframe vert sur
+    transparent, pas un carré noir plein. Recadré au bbox du contenu (+20px)
+    -> `assets/mini_logo_square.png` (745×745, RGBA). Vérifié par preview
+    composite sur fond clair ET sombre avant intégration (mais aussi
+    revérifié dans l'app réelle après coup, PAS seulement la preview --
+    leçon du 1er passage du logo principal, voir plus haut).
 - **GitHub** (`README.md`) : image centrée en tête de fichier (remplace le
-  titre texte `# HopFinder` -- pattern standard des README GitHub avec
-  logo), même asset transparent (rend correctement sur GitHub en thème
-  clair ET sombre, vérifié via les mêmes previews composite).
+  titre texte `# HopFinder`), même asset opaque `assets/logo.png` (pas la
+  version transparente retirée).
 
-Favicon (`page_icon`) laissé à l'emoji `🌿` existant -- pas demandé
-explicitement, et le logo (lockup horizontal large) n'a pas de recadrage
-carré propre pour cet usage (la poignée de la loupe traverse la zone
-texte) ; à reconsidérer si un jour une variante icône seule est fournie.
-Vérifié en direct dans le navigateur : logo lisible en haut de la sidebar,
-transparence propre sur le thème sombre par défaut.
+`tests/test_app.py::test_app_loads_with_no_exception_default_home_mode` :
+assertion `at.title[0].value == "HopFinder"` cassée par le retrait du
+titre -- remplacée par `at.header[0].value == "Home"` (signal encore
+vérifiable, le header de page reste).
+
+Vérifié en direct dans le navigateur, DANS L'APP RÉELLE (pas une preview
+composite statique, leçon de la 1ère passe appliquée) : logo lisible en
+tête de sidebar (plus grand qu'avant) et en tête de page principale, sur
+le thème clair ET le thème sombre via le sélecteur natif Streamlit
+(icône ⋮ -> System/Light/Dark) -- rendu en carte crème nette sur fond
+sombre, PAS un bloc disgracieux (contrairement à la version transparente).
+233 tests, tous verts ; `pyflakes` propre.
+
+**3e addendum, même jour (2026-08-22) : logo retiré du haut des pages
+d'outil, restreint à Home + sidebar.** Demande utilisateur explicite :
+"remove the hopfinder logo from the top of all tools: I want it only on
+i) the left panel on the GUI, ii) on the top of the home page... iii) on
+github." Root cause du problème signalé : le `st.image(_LOGO_PATH,
+width=420)` du 2e addendum était placé dans `main()` EN AMONT du dispatch
+par mode, donc affiché INCONDITIONNELLEMENT sur les 6 pages (Home + les 5
+outils), alors que chaque page d'outil a déjà son propre `st.header`
+(vérifié par erreur "sur toutes les pages" au lieu de suivre l'intention
+initiale, jamais explicitement demandé pour les pages d'outil). Déplacé
+dans la branche `if mode == "home":` de `main()` (juste avant son propre
+`st.header`) -- les 5 autres branches (`by-descriptor`/`contrast`/
+`browse`/`compare`/`amplify`) restent inchangées, plus aucun appel `st.
+image` avant leur `st.header`. Logo de sidebar (`st.sidebar.image`, hors
+du dispatch par mode) inchangé -- reste visible sur TOUTES les pages,
+conforme au point (i) de la demande. Vérifié en direct dans le navigateur :
+Home affiche le logo (nettement plus net avec la version haute résolution)
+au-dessus de son header ; Amplify (et vérifié que la même branche
+s'applique aux 4 autres outils) va directement à son `st.header`, sans
+logo. 233 tests toujours verts, `pyflakes` propre.
 
 Reste :
 1. Jointure FooDB/hop_composition au-delà des ~734 composés Flavornet si le vocabulaire

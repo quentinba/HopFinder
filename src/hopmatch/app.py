@@ -45,14 +45,25 @@ _BACKGROUND_PATH = os.path.join(
     os.path.dirname(__file__), "..", "..", "assets", "background_zoomed.png")
 
 # Logo (demande utilisateur, 2026-08-22) : image fournie par l'utilisateur
-# (assets/logo.png, fond crème opaque). `logo_transparent.png` -- fond retiré
-# par seuillage de distance couleur + feather (voir CLAUDE.md pour la
-# méthode) : le fond crème plein cadre aurait rendu comme un bloc clair
-# disgracieux sur le thème sombre par défaut de l'app (vérifié en direct sur
-# les deux thèmes avant de choisir cette version). Original conservé tel
-# quel (assets/logo.png), jamais modifié.
+# (fond crème opaque). Une version fond-transparent a été essayée puis
+# retirée le même jour (2e addendum) : "it doesn't work in dark theme" --
+# constaté en direct par l'utilisateur dans l'app déployée (contrairement à
+# l'aperçu composité statique utilisé pour la valider, voir CLAUDE.md) ;
+# fond original CONSERVÉ tel quel désormais, jamais modifié.
 _LOGO_PATH = os.path.join(
-    os.path.dirname(__file__), "..", "..", "assets", "logo_transparent.png")
+    os.path.dirname(__file__), "..", "..", "assets", "logo.png")
+
+# Icône d'onglet navigateur (favicon), demande utilisateur explicite le même
+# jour : "Use this for the table logo" [sic, "tab logo"] -- image DISTINCTE
+# du logo principal (assets/mini_logo.jpeg, fond noir, icône houblon seule,
+# fournie par l'utilisateur), plus adaptée qu'un lockup horizontal large à
+# un favicon carré minuscule. `mini_logo_square.png` -- recadrage carré
+# CENTRÉ SUR L'ICÔNE (pas sur le canevas 1408×768, décalé) : bbox du contenu
+# calculé par seuil de luminosité (>25/255) pour trouver le centre réel de
+# l'icône avant de découper, jamais un simple crop au centre géométrique du
+# fichier source.
+_TAB_ICON_PATH = os.path.join(
+    os.path.dirname(__file__), "..", "..", "assets", "mini_logo_square.png")
 
 # Libellés GUI affichés à l'utilisateur, distincts des clés internes ("mode")
 # qui pilotent le dispatch et restent stables (CLI/tests/URLs internes non
@@ -145,8 +156,11 @@ _TOOL_SUMMARIES = [
 # un `git log` en direct exigerait aussi que `.git` soit présent dans le
 # conteneur déployé, ce qui n'est pas garanti.
 _RECENT_UPDATES = [
-    ("2026-08-22", "Added the HopFinder logo, now shown at the top of the "
-                   "sidebar on every page."),
+    ("2026-08-22", "Added the HopFinder logo (sidebar on every page, and "
+                   "the top of the Home page) and a matching browser tab "
+                   "icon; removed the redundant \"HopFinder\" title and "
+                   "\"Aroma note → molecules → hops\" caption that used to "
+                   "sit above each tool's own heading."),
     ("2026-08-22", "\"Sources\" split into \"Composition sources\" and "
                    "\"Descriptor sources\" everywhere both appear (Amplify, "
                    "Contrast, blends, By-descriptor, Browse) — a hop's "
@@ -2509,8 +2523,7 @@ def main():
     # Nom d'affichage GUI = "HopFinder" (demande utilisateur 2026-08-19,
     # renommage d'affichage seulement -- le paquet/CLI restent "hopmatch",
     # voir CLAUDE.md et le sous-titre de README.md).
-    st.set_page_config(page_title="HopFinder", page_icon="🌿")
-    st.logo(_LOGO_PATH, size="large")
+    st.set_page_config(page_title="HopFinder", page_icon=_TAB_ICON_PATH)
     _inject_background()
     if "_next_mode" in st.session_state:
         # Relais utilisé par la page d'accueil (_home) : Streamlit interdit
@@ -2522,8 +2535,16 @@ def main():
         # par des expanders de détail affichés directement sur place — voir
         # `_hop_detail_expanders`.)
         st.session_state["mode"] = st.session_state.pop("_next_mode")
-    st.title("HopFinder")
-    st.caption("Aroma note → molecules → hops")
+    # Titre texte "HopFinder" + caption "Aroma note → molecules → hops"
+    # RETIRÉS (2026-08-22, demande utilisateur explicite) : redondants avec
+    # le logo et avec le `st.header(MODE_LABELS[mode])` déjà affiché par
+    # chaque page d'outil ("HopFinder - Amplify"...) -- "there is already
+    # the name of the tool at the top that is enough". Logo en tête de page
+    # principale d'abord affiché sur TOUTES les pages, puis RESTREINT À LA
+    # SEULE PAGE HOME (même jour, addendum -- demande utilisateur explicite :
+    # "remove the hopfinder logo from the top of all tools... I want it
+    # only on i) the left panel... ii) on the top of the home page...
+    # iii) on github") -- voir la branche `mode == "home"` plus bas.
 
     db_path = _db_path()
     if not os.path.exists(db_path):
@@ -2552,6 +2573,13 @@ def main():
     # sur des données en partie non-commerciales, FooDB/FlavorDB2 CC BY-NC-SA)
     # : la personne concernée par un signalement de licence regarde l'app
     # déployée, pas nécessairement le dépôt GitHub associé.
+    # Logo en tête de sidebar (2026-08-22, demande utilisateur explicite) --
+    # `st.image` directement dans le flux de la sidebar (PAS `st.logo`,
+    # retiré : son plafond de taille intégré, 32px de haut max même en
+    # "large", rendait un logo minuscule -- "in the sidebar it should be
+    # bigger than currently"). `width=260` : large mais reste dans la
+    # largeur par défaut de la sidebar Streamlit (~336px) sans déborder.
+    st.sidebar.image(_LOGO_PATH, width=260)
     st.sidebar.caption(
         "Code MIT · [data licenses](https://github.com/quentinba/HopFinder"
         "#licences) · [quentin4313@gmail.com](mailto:quentin4313@gmail.com)")
@@ -2567,6 +2595,10 @@ def main():
         format_func=lambda m: MODE_LABELS[m], key="mode")
 
     if mode == "home":
+        # Logo affiché seulement ICI (page Home), pas sur les autres pages
+        # d'outil -- voir le commentaire plus haut sur son retrait de
+        # `main()` en tête commune.
+        st.image(_LOGO_PATH, width=420)
         st.header(MODE_LABELS[mode])
         _home(con)
         return
