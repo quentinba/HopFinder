@@ -1835,6 +1835,38 @@ jamais de BarthHaas). Amplify sur "mango" : colonnes "Descriptor sources"
 (beermaverick, yakima) et "Composition sources" (barthhaas/yakima selon le
 houblon) désormais visibles séparément.
 
+## T78 -- Logo HopFinder (2026-08-22, image fournie par l'utilisateur)
+
+`assets/logo.png` (fond crème opaque, 1772×694, uploadé par l'utilisateur --
+confirmé après coup que le fichier inconnu repéré plus tôt dans `git status`
+n'était PAS lié à un incident, juste l'utilisateur ajoutant son propre
+asset). Fond retiré par script one-off (seuillage de distance couleur au
+référentiel des 4 coins + feather linéaire 15-40 pour un bord anti-aliasé,
+PAS un cutout brutal) : vérifié en direct que le fond crème plein cadre
+aurait rendu comme un bloc clair disgracieux sur le thème sombre par défaut
+de l'app -- comparé sur fond sombre ET clair avant de valider. Recadré au
+bbox du contenu (+12px de marge) -> `assets/logo_transparent.png`
+(1512×560). Original (`assets/logo.png`) conservé tel quel, jamais modifié
+ni supprimé.
+
+Intégré :
+- **GUI** (`app.main`) : `st.logo(_LOGO_PATH, size="large")`, apparaît en
+  haut de la sidebar sur toutes les pages (mécanisme natif Streamlit dédié
+  à cet usage, pas un `st.image` mal placé) -- chemin résolu depuis
+  `__file__` (même pattern que `_BACKGROUND_PATH`), correct quel que soit
+  le cwd d'où `streamlit run` est lancé.
+- **GitHub** (`README.md`) : image centrée en tête de fichier (remplace le
+  titre texte `# HopFinder` -- pattern standard des README GitHub avec
+  logo), même asset transparent (rend correctement sur GitHub en thème
+  clair ET sombre, vérifié via les mêmes previews composite).
+
+Favicon (`page_icon`) laissé à l'emoji `🌿` existant -- pas demandé
+explicitement, et le logo (lockup horizontal large) n'a pas de recadrage
+carré propre pour cet usage (la poignée de la loupe traverse la zone
+texte) ; à reconsidérer si un jour une variante icône seule est fournie.
+Vérifié en direct dans le navigateur : logo lisible en haut de la sidebar,
+transparence propre sur le thème sombre par défaut.
+
 Reste :
 1. Jointure FooDB/hop_composition au-delà des ~734 composés Flavornet si le vocabulaire
    s'élargit beaucoup (crawl Yakima déjà réel, plus d'aliments FooDB).

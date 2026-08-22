@@ -44,6 +44,16 @@ DEFAULT_DB = "aromahops.db"
 _BACKGROUND_PATH = os.path.join(
     os.path.dirname(__file__), "..", "..", "assets", "background_zoomed.png")
 
+# Logo (demande utilisateur, 2026-08-22) : image fournie par l'utilisateur
+# (assets/logo.png, fond crème opaque). `logo_transparent.png` -- fond retiré
+# par seuillage de distance couleur + feather (voir CLAUDE.md pour la
+# méthode) : le fond crème plein cadre aurait rendu comme un bloc clair
+# disgracieux sur le thème sombre par défaut de l'app (vérifié en direct sur
+# les deux thèmes avant de choisir cette version). Original conservé tel
+# quel (assets/logo.png), jamais modifié.
+_LOGO_PATH = os.path.join(
+    os.path.dirname(__file__), "..", "..", "assets", "logo_transparent.png")
+
 # Libellés GUI affichés à l'utilisateur, distincts des clés internes ("mode")
 # qui pilotent le dispatch et restent stables (CLI/tests/URLs internes non
 # concernés — habillage d'affichage uniquement, demandé par l'utilisateur).
@@ -135,6 +145,8 @@ _TOOL_SUMMARIES = [
 # un `git log` en direct exigerait aussi que `.git` soit présent dans le
 # conteneur déployé, ce qui n'est pas garanti.
 _RECENT_UPDATES = [
+    ("2026-08-22", "Added the HopFinder logo, now shown at the top of the "
+                   "sidebar on every page."),
     ("2026-08-22", "\"Sources\" split into \"Composition sources\" and "
                    "\"Descriptor sources\" everywhere both appear (Amplify, "
                    "Contrast, blends, By-descriptor, Browse) — a hop's "
@@ -2498,6 +2510,7 @@ def main():
     # renommage d'affichage seulement -- le paquet/CLI restent "hopmatch",
     # voir CLAUDE.md et le sous-titre de README.md).
     st.set_page_config(page_title="HopFinder", page_icon="🌿")
+    st.logo(_LOGO_PATH, size="large")
     _inject_background()
     if "_next_mode" in st.session_state:
         # Relais utilisé par la page d'accueil (_home) : Streamlit interdit

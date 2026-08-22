@@ -1,4 +1,6 @@
-# HopFinder
+<div align="center">
+  <img src="assets/logo_transparent.png" alt="HopFinder" width="480">
+</div>
 
 *Nom d'affichage du projet (GUI, GitHub) ; le paquet Python et la commande CLI restent
 `hopmatch` (décision utilisateur 2026-08-19 — renommage d'affichage seulement, pas de
