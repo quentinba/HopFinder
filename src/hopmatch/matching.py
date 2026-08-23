@@ -355,6 +355,59 @@ def resolve_aroma_intensity(by_source: dict[str, dict[str, float]],
     return values, source
 
 
+def select_aroma_intensity(by_source: dict[str, dict[str, float]], source: str) -> dict[str, float]:
+    """Intensités pour EXACTEMENT la `source` demandée -- JAMAIS de repli
+    automatique vers l'autre source, contrairement à `resolve_aroma_
+    intensity` (qui reste utilisé tel quel pour le SCORE/tri, voir
+    `by_descriptor`/`similar_hops*`). 2026-08-23 (demande utilisateur
+    explicite) : pour l'AFFICHAGE de la roue d'arôme, Yakima/BarthHaas
+    devient un TOGGLE explicite ("Yakima <> BarthHaas") plutôt qu'une
+    préférence avec repli silencieux -- l'appelant doit pouvoir savoir que
+    la source choisie ne couvre PAS ce houblon (pour afficher un
+    avertissement, voir `app._aroma_wheel_missing_warning`) au lieu de
+    voir apparaître l'autre source sans prévenir. `{}` si `source` est
+    absente ou dégénérée (aucune valeur > 0, cas corrompu documenté) pour
+    ce houblon. Remise à l'échelle 0-8->0-100 uniquement pour BarthHaas,
+    comme `resolve_aroma_intensity`."""
+    values = by_source.get(source, {})
+    if not _usable_aroma_readings(values):
+        return {}
+    if source == "barthhaas":
+        return {d: min(100.0, v * 100.0 / BARTHHAAS_AROMA_WHEEL_MAX) for d, v in values.items()}
+    return dict(values)
+
+
+def default_aroma_wheel_source(by_source: dict[str, dict[str, float]]) -> str:
+    """Valeur INITIALE du toggle Yakima<>BarthHaas pour UN houblon affiché
+    seul (Browse, détail Amplify/Contrast/By-descriptor) : Yakima par
+    défaut, sauf si Yakima est absent/dégénéré ET que BarthHaas, lui, est
+    exploitable pour ce houblon précis -- alors BarthHaas (2026-08-23,
+    demande utilisateur explicite, même logique que l'ancien repli
+    automatique de `resolve_aroma_intensity`, désormais exprimée comme un
+    simple choix de valeur par défaut d'un widget explicite plutôt qu'un
+    repli caché à l'affichage)."""
+    if not _usable_aroma_readings(by_source.get("yakima", {})) and \
+            _usable_aroma_readings(by_source.get("barthhaas", {})):
+        return "barthhaas"
+    return "yakima"
+
+
+def default_aroma_wheel_source_for_varieties(
+        all_intensity: dict[str, dict[str, dict[str, float]]], varieties: list[str]) -> str:
+    """Valeur INITIALE du toggle pour Compare Hops (plusieurs houblons sur
+    UN graphique partagé, un SEUL toggle pour tous -- voir `app._compare`) :
+    Yakima par défaut, sauf si AUCUN des houblons sélectionnés n'a de
+    lecture Yakima exploitable ET qu'AU MOINS un a une lecture BarthHaas
+    exploitable -- alors BarthHaas (2026-08-23, demande utilisateur
+    explicite : "if both/all hops are missing from yakima, put brathaas
+    results if at least one hop is existing in this database")."""
+    any_yakima = any(_usable_aroma_readings(all_intensity.get(v, {}).get("yakima", {})) for v in varieties)
+    any_barthhaas = any(_usable_aroma_readings(all_intensity.get(v, {}).get("barthhaas", {})) for v in varieties)
+    if not any_yakima and any_barthhaas:
+        return "barthhaas"
+    return "yakima"
+
+
 def aroma_wheel_vocabulary(con, sources: set[str] | frozenset[str] | None = None) -> list[str]:
     """Catégories distinctes de `hop_aroma_intensity`, éventuellement
     restreintes aux SOURCES données. T79 addendum (signalé en direct par

@@ -156,6 +156,20 @@ _TOOL_SUMMARIES = [
 # un `git log` en direct exigerait aussi que `.git` soit présent dans le
 # conteneur déployé, ce qui n'est pas garanti.
 _RECENT_UPDATES = [
+    ("2026-08-23", "Fixes and refinements to the BarthHaas integration: "
+                   "aroma wheel source is now an explicit Yakima/BarthHaas "
+                   "toggle everywhere a spider chart appears (Browse, "
+                   "Amplify/Contrast/By-descriptor detail, Compare Hops), "
+                   "defaulting to Yakima unless it's missing for that hop "
+                   "(then BarthHaas), with a warning naming any hop missing "
+                   "from the currently selected database instead of just "
+                   "showing an empty chart. Descriptor lists in Browse and "
+                   "hop-detail views are now grouped one line per source "
+                   "instead of annotating every single word. Also corrected "
+                   "two BarthHaas descriptor data issues: a stray \"analyses\" "
+                   "entry from a parsing bug, and \"camomile blossom\" "
+                   "restored as its own term instead of being collapsed into "
+                   "\"chamomile\"."),
     ("2026-08-22", "BarthHaas now contributes real aroma data: a "
                    "qualitative descriptor list and a quantitative aroma "
                    "wheel (rescaled to match Yakima's 0-100 scale), "
@@ -613,6 +627,23 @@ def _purpose_label(purpose: str | None, inferred: bool = False) -> str:
     return label
 
 
+def _descriptors_grouped_by_source(desc_by_source: dict[str, set[str]]) -> dict[str, list[str]]:
+    """Inverse `{descripteur: {sources}}` (voir `matching.descriptor_sources`)
+    en `{source: [descripteurs triés]}` -- demande utilisateur explicite
+    (2026-08-23) : "one line per source (in bold) and list all the
+    descriptors from that source", en remplacement du format `mot (source)`
+    répété (trop verbeux dès qu'un houblon a beaucoup de descripteurs, ex.
+    Citra : 15 mots x annotation individuelle vs 3 lignes groupées). Un
+    descripteur porté par plusieurs sources apparaît sous CHACUNE d'elles
+    (aucune perte d'information par rapport au format mot-par-mot -- juste
+    regroupé différemment)."""
+    by_source: dict[str, list[str]] = {}
+    for d, srcs in desc_by_source.items():
+        for s in (srcs or {"unknown"}):
+            by_source.setdefault(s, []).append(d)
+    return {s: sorted(ds) for s, ds in sorted(by_source.items())}
+
+
 def _purpose_badge(purpose: str | None, inferred: bool = False) -> None:
     if purpose is None:
         st.badge("Unknown", color="gray", icon=":material/help:")
@@ -763,30 +794,52 @@ def _process_survival_legend() -> None:
                 st.write(f"**{annotation}** — {explanation}")
 
 
-# T79 (2026-08-22, demande utilisateur explicite : "I would like a toggle
-# button next to each spider plot to change to barthhaas source if
-# available (single hop spider charts or comparaison)") : jamais un choix
-# PAR HOUBLON dans les vues à N houblons (heatmap by-descriptor, scoring
-# similar_hops) -- résolution automatique là-bas (Yakima si dispo, sinon
-# BarthHaas, voir `matching.resolve_aroma_intensity`). Le toggle n'a de
-# sens QUE là où un houblon (ou une poignée, pour Compare) est affiché
-# individuellement -- Browse, `_hop_detail_expanders`, Compare.
-def _aroma_wheel_source_toggle(by_source: dict[str, dict[str, float]], key: str) -> str | None:
-    """N'affiche le toggle QUE si ce houblon a RÉELLEMENT les deux sources
-    (rien à basculer sinon) -- renvoie la préférence choisie ou None
-    (résolution automatique, voir `matching.resolve_aroma_intensity`)."""
-    if len(by_source) <= 1:
-        return None
-    prefer_bh = st.checkbox("Prefer BarthHaas source (if available)", value=False, key=key)
-    return "barthhaas" if prefer_bh else None
+# T79, 4e addendum (2026-08-23, demande utilisateur explicite : "put a
+# Toggle button Yakima <> Brathaas. Put on Yakima by default... if the hop
+# is missing... a warning message explaining that the hop arome wheel is
+# not in this database") : REMPLACE le mécanisme précédent (résolution
+# automatique + case à cocher "prefer BarthHaas" optionnelle, masquée sauf
+# si les deux sources existent) -- l'utilisateur veut un choix EXPLICITE
+# et TOUJOURS visible, avec un avertissement clair quand la source
+# choisie ne couvre pas le(s) houblon(s) affiché(s), plutôt qu'un repli
+# silencieux vers l'autre source ou une roue qui disparaît sans
+# explication. Toujours PAS de choix par houblon dans les vues à N
+# houblons (heatmap by-descriptor, scoring `similar_hops`) -- la
+# résolution automatique (`matching.resolve_aroma_intensity`) y reste
+# inchangée, ce toggle ne concerne que l'AFFICHAGE d'une roue (houblon
+# unique partout, ou Compare où un seul toggle s'applique à tous les
+# houblons sélectionnés à la fois).
+def _aroma_wheel_toggle(default_source: str, key: str) -> str:
+    """Toggle Yakima<>BarthHaas explicite (`st.segmented_control`, cohérent
+    avec le "How to rank hops?" d'Amplify -- un choix EXCLUSIF entre peu
+    d'options, pas une case à cocher). `default_source` ne fixe que la
+    valeur INITIALE du widget (voir `matching.default_aroma_wheel_source`/
+    `..._for_varieties`) -- l'utilisateur reste libre de basculer,
+    `required=True` pour ne jamais retomber sur `None` (un choix est
+    toujours actif)."""
+    default_label = "BarthHaas" if default_source == "barthhaas" else "Yakima"
+    choice = st.segmented_control("Aroma wheel source", ["Yakima", "BarthHaas"],
+                                  default=default_label, key=key, required=True)
+    return "barthhaas" if choice == "BarthHaas" else "yakima"
 
 
-def _aroma_wheel_source_caption(used_source: str | None) -> str:
-    if used_source == "barthhaas":
+def _aroma_wheel_source_caption(source: str) -> str:
+    if source == "barthhaas":
         return (":material/info: Hover a label for its definition. Aroma wheel source: "
                 "BarthHaas (rescaled to a comparable 0-100 range from their own 0-8 scale).")
     return (":material/info: Hover a label for its definition. Aroma wheel source: "
            "Yakima Chief Hop Sensory Ballot.")
+
+
+def _aroma_wheel_missing_warning(missing_names: list[str], source: str) -> None:
+    """Avertissement listant les houblons affichés qui n'ont PAS de lecture
+    exploitable dans la source ACTUELLEMENT choisie par le toggle --
+    demande utilisateur explicite (2026-08-23), aussi bien pour un houblon
+    unique (liste à 1 élément) que pour Compare Hops (plusieurs)."""
+    if not missing_names:
+        return
+    label = "BarthHaas" if source == "barthhaas" else "Yakima"
+    st.warning(f"Not in the {label} database: {', '.join(missing_names)}.")
 
 
 def _hop_detail_expanders(con, hops: dict, comp: dict, hop_desc: dict, rows: list[dict]) -> None:
@@ -833,21 +886,24 @@ def _hop_detail_expanders(con, hops: dict, comp: dict, hop_desc: dict, rows: lis
             _render_key_stats(comp.get(v, {}))
             descs = sorted(hop_desc.get(v, set()))
             if descs:
-                by_source: dict[str, list[str]] = {}
-                for d in descs:
-                    for s in desc_src.get(v, {}).get(d) or {"unknown"}:
-                        by_source.setdefault(s, []).append(d)
-                st.write("**Descriptors:** " + ", ".join(
-                    f"{d} ({s})" for s, ds in sorted(by_source.items()) for d in sorted(ds)))
+                # T79 addendum (2026-08-23, même demande que Browse : "one
+                # line per source (in bold)... bold for the 'Descriptor' and
+                # the name of the source, not the notes themselves").
+                desc_by_source = _descriptors_grouped_by_source(desc_src.get(v, {}))
+                st.markdown("**Descriptors**  \n" + "  \n".join(
+                    f"**{s}:** " + ", ".join(ds) for s, ds in desc_by_source.items()))
             else:
                 st.write("**Descriptors:** none recorded")
             by_source = all_intensity.get(v, {})
-            prefer = _aroma_wheel_source_toggle(by_source, key=f"prefer_bh_expander_{v}")
-            intensity, used_source = matching.resolve_aroma_intensity(by_source, prefer)
-            if intensity and any(val > 0 for val in intensity.values()):
-                vocab = _intensity_vocabulary_for_sources(con, {used_source} if used_source else set())
+            source = _aroma_wheel_toggle(matching.default_aroma_wheel_source(by_source),
+                                         key=f"aroma_source_expander_{v}")
+            intensity = matching.select_aroma_intensity(by_source, source)
+            if intensity:
+                vocab = _intensity_vocabulary_for_sources(con, {source})
                 st.altair_chart(_aroma_wheel(intensity, vocab), width="content", theme=None)
-                st.caption(_aroma_wheel_source_caption(used_source))
+                st.caption(_aroma_wheel_source_caption(source))
+            else:
+                _aroma_wheel_missing_warning([hops[v]["name"]], source)
             hcomp = comp.get(v, {})
             crows = sorted(
                 ({"Compound": c, "Value": round(cv["mid"], 3), "Unit": cv["unit"],
@@ -1661,37 +1717,31 @@ def _browse(con):
     descs = sorted(hop_desc.get(selected, set()))
     desc_src = matching.descriptor_sources(con)
     if descs:
-        all_desc = ", ".join(
-            f"{d} ({'/'.join(sorted(desc_src.get(selected, {}).get(d) or {'unknown'}))})"
-            for d in descs)
-        st.write("**Descriptors:** " + all_desc)
+        # T79 addendum (2026-08-23, demande utilisateur explicite : "do one
+        # line per source (in bold)... It will reduce the amount of text
+        # and clarity") -- une ligne groupée par source plutôt qu'une
+        # annotation `mot (source)` répétée à chaque descripteur.
+        by_source = _descriptors_grouped_by_source(desc_src.get(selected, {}))
+        st.markdown("**Descriptors**  \n" + "  \n".join(
+            f"**{s}:** " + ", ".join(ds) for s, ds in by_source.items()))
     else:
         st.write("**Descriptors:** none recorded")
     by_source = matching.load_aroma_intensity(con).get(selected, {})
-    prefer = _aroma_wheel_source_toggle(by_source, key=f"prefer_bh_browse_{selected}")
-    intensity, used_source = matching.resolve_aroma_intensity(by_source, prefer)
-    # any(...) > 0, pas juste `if intensity :` : au moins une variété réelle
-    # (admiral, vérifié en direct) a une entrée sensory_values existante mais
-    # entièrement à 0 côté YCH — cohérent avec la corruption déjà documentée
-    # de cette variété précise (voir _is_plausible_brewing_entry) ; un dict
-    # non vide mais tout à zéro n'est pas une donnée exploitable.
-    if intensity and any(v > 0 for v in intensity.values()):
+    source = _aroma_wheel_toggle(matching.default_aroma_wheel_source(by_source),
+                                 key=f"aroma_source_browse_{selected}")
+    intensity = matching.select_aroma_intensity(by_source, source)
+    if intensity:
         # theme=None : par défaut st.altair_chart applique le thème
         # "streamlit" (config Vega-Lite globale) qui écrase les couleurs
         # explicites choisies à la main dans _aroma_wheel pour s'adapter au
         # clair/sombre -- vérifié en direct (labels illisibles en thème
         # sombre malgré la palette choisie) : c'est ce thème global qui gagne
         # sur les couleurs de mark, pas un mauvais choix de couleur.
-        vocab = _intensity_vocabulary_for_sources(con, {used_source} if used_source else set())
+        vocab = _intensity_vocabulary_for_sources(con, {source})
         st.altair_chart(_aroma_wheel(intensity, vocab), width="content", theme=None)
-        st.caption(_aroma_wheel_source_caption(used_source))
+        st.caption(_aroma_wheel_source_caption(source))
     else:
-        # T79 addendum : "Admiral" retiré de l'exemple -- BarthHaas alimente
-        # désormais aussi la roue, ce cas ne s'applique plus à ce houblon
-        # précis (gardé comme exemple de repère jusqu'au 2026-08-22).
-        st.caption("No quantitative aroma wheel for this variety (neither "
-                   "Yakima nor BarthHaas covers it, or the only entry "
-                   "present is a corrupted all-zero YCH reading).")
+        _aroma_wheel_missing_warning([h["name"]], source)
 
     # "Smells like" (T72, 2026-08-21, demande utilisateur explicite : le
     # tooltip Flavornet ajouté sur le barplot Compare Hops (T71) doit AUSSI
@@ -2052,10 +2102,14 @@ def _by_descriptor(con):
             st.caption(f"Matched descriptors sourced from: {', '.join(match_src) or 'unknown'} "
                       f"— composition sourced from: {h['sources']}")
             _render_key_stats(hcomp)
-            all_desc = ", ".join(
-                f"{d} ({'/'.join(sorted(desc_src.get(h['variety'], {}).get(d) or {'unknown'}))})"
-                for d in h["all_descriptors"])
-            st.caption("All descriptors: " + all_desc)
+            # T79 addendum (2026-08-23, même demande que Browse/les
+            # expanders : "one line per source (in bold)... bold for the
+            # 'Descriptor' and the name of the source, not the notes
+            # themselves").
+            desc_by_source = _descriptors_grouped_by_source(
+                {d: desc_src.get(h["variety"], {}).get(d, set()) for d in h["all_descriptors"]})
+            st.caption("**All descriptors**  \n" + "  \n".join(
+                f"**{s}:** " + ", ".join(ds) for s, ds in desc_by_source.items()))
             # Transparence sur le tri quantitatif (2026-08-19, "propose a 2
             # layer results ordering... inside this selection, propose a
             # ordered result... based on the aroma wheel descriptors") --
@@ -2085,12 +2139,15 @@ def _by_descriptor(con):
             # pour le score juste au-dessus -- attendu, chaque caption cite
             # explicitement sa propre source.
             by_source = all_intensity.get(h["variety"], {})
-            prefer = _aroma_wheel_source_toggle(by_source, key=f"prefer_bh_by_desc_{h['variety']}")
-            intensity, used_source = matching.resolve_aroma_intensity(by_source, prefer)
-            if intensity and any(val > 0 for val in intensity.values()):
-                vocab = _intensity_vocabulary_for_sources(con, {used_source} if used_source else set())
+            source = _aroma_wheel_toggle(matching.default_aroma_wheel_source(by_source),
+                                         key=f"aroma_source_by_desc_{h['variety']}")
+            intensity = matching.select_aroma_intensity(by_source, source)
+            if intensity:
+                vocab = _intensity_vocabulary_for_sources(con, {source})
                 st.altair_chart(_aroma_wheel(intensity, vocab), width="content", theme=None)
-                st.caption(_aroma_wheel_source_caption(used_source))
+                st.caption(_aroma_wheel_source_caption(source))
+            else:
+                _aroma_wheel_missing_warning([h["name"]], source)
             if h["compounds"]:
                 st.dataframe(
                     [{"Compound": c["compound"], "Value": round(c["mid"], 2),
@@ -2485,57 +2542,39 @@ def _compare(con):
     colors = {hops[v]["name"]: _COMPARE_PALETTE[i] for i, v in enumerate(selected)}
 
     st.subheader("Aroma wheel")
-    # T79 : jusqu'à 5 houblons superposés sur UN SEUL graphique -- un toggle
-    # PAR houblon n'aurait pas de sens ici (contrairement à Browse/aux
-    # expanders, un houblon à la fois) ; un SEUL toggle affecte tous les
-    # houblons sélectionnés à la fois, retombe automatiquement sur l'autre
-    # source pour ceux qui n'ont pas celle demandée (jamais vidés par un
-    # choix qui ne s'applique pas à eux -- voir `matching.resolve_aroma_
-    # intensity`). N'apparaît que si AU MOINS un houblon sélectionné a
-    # réellement les deux sources (rien à basculer sinon).
+    # T79, 4e addendum (2026-08-23, demande utilisateur explicite) : jusqu'à
+    # 5 houblons superposés sur UN SEUL graphique -- un toggle PAR houblon
+    # n'aurait pas de sens ici, un SEUL toggle s'applique à TOUS les
+    # houblons sélectionnés à la fois (plus de repli automatique par
+    # houblon : la source choisie est UNIFORME sur tout le graphique --
+    # un houblon qui ne l'a pas est explicitement listé en avertissement,
+    # jamais silencieusement replié sur l'autre source).
     all_intensity = matching.load_aroma_intensity(con)
-    prefer = None
-    if any(len(all_intensity.get(v, {})) > 1 for v in selected):
-        prefer_bh = st.checkbox("Prefer BarthHaas source (if available)", value=False,
-                                key="prefer_bh_compare")
-        prefer = "barthhaas" if prefer_bh else None
+    default_source = matching.default_aroma_wheel_source_for_varieties(all_intensity, selected)
+    # `key` dépend de `selected` (comme T57/T61, `contrast_target_pills_...`)
+    # -- `default=` d'un widget Streamlit ne s'applique QU'À LA CRÉATION du
+    # widget sous cette clé, jamais recalculé sur un rerun si la clé ne
+    # change pas. Une clé fixe aurait gelé le premier défaut calculé (ex.
+    # "barthhaas" pour Admiral seul) même après avoir ajouté un houblon
+    # Yakima à la sélection -- changer la sélection doit recalculer le
+    # défaut, tout en gardant un choix manuel tant que la sélection ne
+    # change pas.
+    source = _aroma_wheel_toggle(default_source, key=f"aroma_source_compare_{tuple(sorted(selected))}")
     intensities = {}
-    sources_used = {}
-    no_wheel_data = []
+    missing = []
     for v in selected:
-        intensity, used_source = matching.resolve_aroma_intensity(all_intensity.get(v, {}), prefer)
-        if intensity and any(val > 0 for val in intensity.values()):
+        intensity = matching.select_aroma_intensity(all_intensity.get(v, {}), source)
+        if intensity:
             intensities[hops[v]["name"]] = intensity
-            sources_used[hops[v]["name"]] = used_source
         else:
-            no_wheel_data.append(hops[v]["name"])
-    # T79 addendum : axes restreints à l'UNION des sources RÉELLEMENT
-    # utilisées par les houblons affichés (jamais le vocabulaire complet
-    # 16 catégories) -- calculé APRÈS la boucle ci-dessus, une fois
-    # `sources_used` connu (signalé par l'utilisateur, même correctif que
-    # Browse/les expanders, voir `_intensity_vocabulary_for_sources`).
-    vocabulary = _intensity_vocabulary_for_sources(con, set(sources_used.values()))
+            missing.append(hops[v]["name"])
+    vocabulary = _intensity_vocabulary_for_sources(con, {source} if intensities else set())
     chart = _aroma_wheel_compare(intensities, vocabulary, colors)
     if chart is not None:
         st.altair_chart(chart, width="content", theme=None)
-        # Source par houblon affichée explicitement (pas un simple "Yakima
-        # Ballot" générique) : avec le toggle, des houblons du MÊME
-        # graphique peuvent tout à fait venir de sources différentes (repli
-        # automatique par houblon) -- jamais caché, même principe que T77.
-        if sources_used:
-            per_hop = ", ".join(
-                f"{name}: {'BarthHaas' if s == 'barthhaas' else 'Yakima'}"
-                for name, s in sources_used.items())
-            st.caption(f":material/info: Aroma wheel source per hop — {per_hop}.")
+        st.caption(_aroma_wheel_source_caption(source))
         st.caption(":material/info: Hover a label for its definition.")
-    if no_wheel_data:
-        # T79 addendum : ce n'est PLUS "BarthHaas only" -- BarthHaas alimente
-        # aussi la roue désormais (voir le toggle ci-dessus). N'atterrit ici
-        # que si le houblon n'a VRAIMENT aucune des deux sources, ou une
-        # entrée présente mais entièrement à zéro (voir Browse).
-        st.caption(":material/info: No quantitative aroma wheel data for: "
-                  + ", ".join(no_wheel_data) +
-                  " (neither Yakima nor BarthHaas covers this variety).")
+    _aroma_wheel_missing_warning(missing, source)
 
     st.subheader("Principal info")
     principal_rows = []

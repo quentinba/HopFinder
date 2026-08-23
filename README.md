@@ -275,10 +275,15 @@ et *ce qu'elle vaut*.
   [`data/mappings/barthhaas_aroma_wheel_categories.yaml`](data/mappings/barthhaas_aroma_wheel_categories.yaml)
   et [`data/mappings/barthhaas_descriptor_aliases.yaml`](data/mappings/barthhaas_descriptor_aliases.yaml).
   BarthHaas et Yakima restent deux échelles distinctes (0-8 vs 0-100), **jamais moyennées** dans
-  un même houblon (voir la note "Fusion" ci-dessous) : résolution automatique par houblon
-  (Yakima si disponible, sinon BarthHaas remis à l'échelle), avec un toggle manuel
-  BarthHaas/Yakima sur chaque roue d'arôme houblon-unique de la GUI (Browse, détail
-  Amplify/Contrast/By-descriptor) et un toggle global sur Compare Hops.
+  un même houblon (voir la note "Fusion" ci-dessous). Affichage : toggle Yakima<>BarthHaas
+  EXPLICITE (T79, 2026-08-23) sur chaque roue d'arôme de la GUI (Browse, détail
+  Amplify/Contrast/By-descriptor — un par houblon ; Compare Hops — un seul, uniforme sur tous
+  les houblons affichés), Yakima par défaut sauf si absent/dégénéré pour le(s) houblon(s)
+  affiché(s) ET BarthHaas exploitable, auquel cas BarthHaas — un avertissement nomme
+  explicitement tout houblon absent de la source actuellement choisie, jamais une roue vide
+  sans explication. Le SCORE/tri (`by_descriptor`, `similar_hops`), lui, garde une résolution
+  automatique inchangée (Yakima si exploitable sinon BarthHaas) — jamais de toggle sur un
+  classement.
 - **Symboles commerciaux (®/™/©) et slugs déposés.** Le générateur de slug de BarthHaas
   translittère ® en "r"/™ en "tm" collé sans séparateur ("Citra®" → `citrar`), ce qui créait
   de faux doublons avec Yakima (`ingest._fix_barthhaas_trademark_slug`, ne déclenche que sur
@@ -732,9 +737,10 @@ asc en dernier recours (déterminisme total, même tri secondaire que `contrast`
 roue quantitative (16 catégories fixes, 15 Yakima + `menthol` ajoutée avec BarthHaas T79) est
 proposée comme des pills à cocher séparément du texte libre : si aucun descripteur texte n'est
 choisi, elle sert aussi de filtre (repli), sinon elle ne fait plus que noter les résultats déjà
-filtrés par le texte. Cette résolution automatique pilote aussi bien le score que la roue
-affichée dans chaque expander de détail ; un toggle manuel permet d'y afficher explicitement
-l'autre source si les deux existent pour ce houblon (jamais sur le score lui-même).
+filtrés par le texte. Cette résolution automatique pilote le SCORE ; la roue affichée dans
+chaque expander de détail porte son propre toggle Yakima<>BarthHaas explicite (T79,
+2026-08-23 — voir plus haut), donc peut afficher une source différente de celle qui a servi
+au score juste au-dessus, chaque caption citant la sienne.
 
 Les variantes de descripteurs entre sources (« stone fruit » vs « stonefruit », pluriels…) sont
 normalisées à l'ingestion via `reference.DESCRIPTOR_ALIASES`, appliqué dans
@@ -771,10 +777,11 @@ le houblon choisi : purpose (aromatique/amérisant/les deux, ou "Inferred: ..." 
 BeerMaverick plus haut) affiché en information principale ; alpha/beta acides, co-humulone
 (Yakima uniquement), huile totale en `st.metric` ; descripteurs ; composition détaillée triée
 par valeur ; et, pour les variétés couvertes par la roue quantitative Yakima et/ou BarthHaas
-(voir `docs/DATA_SOURCES.md`), un radar/spider chart sur 16 axes fixes (résolu automatiquement
-par houblon — Yakima si disponible, sinon BarthHaas remis à l'échelle 0-8→0-100, jamais les
-deux mélangés dans un même houblon, voir T79 plus haut — avec un toggle manuel pour afficher
-explicitement l'autre source si les deux existent) — intensité 0-100 réelle,
+(voir `docs/DATA_SOURCES.md`), un radar/spider chart sur des axes restreints à la source
+affichée (12 pour BarthHaas, 15 pour Yakima — jamais les deux mélangés dans un même houblon)
+piloté par un toggle Yakima<>BarthHaas EXPLICITE (T79, 2026-08-23), Yakima par défaut sauf si
+absent/dégénéré pour ce houblon ET BarthHaas exploitable (alors BarthHaas), avec un
+avertissement explicite si la source choisie ne couvre pas ce houblon — intensité 0-100 réelle,
 **pas** une simple présence/absence (contrairement à la heatmap de `by-descriptor` ci-dessus,
 ce radar-ci porte une vraie quantité par axe, d'où le choix justifié d'un radar plutôt qu'une
 grille). Chaque label d'axe affiche sa définition au survol (tooltip Vega-Lite natif), sourcée

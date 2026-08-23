@@ -333,7 +333,23 @@ def crawl_barthhaas(out_db: str, sleep: float = 1.5, limit: int | None = None) -
                 # délibérément gardé, voir data/mappings/*.yaml).
                 tastes = parsers.parse_barthhaas_tastes(html)
                 descriptors = sorted({desc_map.get(word, word) for _, word in tastes})
-                descriptors += parsers.parse_descriptors(text)  # quasi toujours [], voir docstring
+                # T79 (2026-08-23, bug trouvé en direct par l'utilisateur : un
+                # descripteur "analyses" sans rapport avec l'arôme, présent sur
+                # 4 houblons). `parsers.parse_descriptors(text)` -- l'ancien
+                # parseur "paragraphe AROMA PROFILE" -- retiré d'ici : sur le
+                # texte APLATI de la page réelle (`soup.get_text`), la barre
+                # d'onglets ("Aroma Profile" / "Analyses", tabs SANS rapport
+                # avec le contenu arôme) suit immédiatement le sous-titre
+                # "Typical Aroma Profile" que la fonction saute déjà -- "Analyses"
+                # (un seul mot, ni virgule ni point) passe alors ses deux
+                # garde-fous et ressort comme un faux descripteur à un mot.
+                # Vérifié en direct (bobek/brewers-gold/pahtotm/saaz-late) :
+                # confirmé, ce n'est JAMAIS le vrai contenu "AROMA PROFILE"
+                # (le site n'expose plus cette section en liste courte depuis
+                # T79, voir le docstring de la fonction) -- toujours redondant
+                # ou faux sur le crawl réel, jamais une perte de données utile.
+                # `parse_descriptors` reste utilisé par `build_from_fixtures`
+                # (fixtures figées, contrôlées, format court d'origine).
                 wheel = parsers.parse_barthhaas_aroma_wheel(html) or {}
                 aroma_intensity = {category_map[cat]: val for cat, val in wheel.items()
                                    if cat in category_map}

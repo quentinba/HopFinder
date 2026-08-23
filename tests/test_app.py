@@ -66,7 +66,12 @@ def _build_toy_db(path):
     ]
     con.executemany("INSERT INTO hop_composition VALUES (?,?,?,?,?,?,?,?)", rows)
     con.executemany("INSERT INTO hop_aroma_intensity VALUES (?,?,?,?)", [
-        ("hopa", "citrus", 80.0, "toy"), ("hopa", "woody", 20.0, "toy"),
+        # T79 4e addendum (2026-08-23) : source "yakima" (pas "toy" comme le
+        # reste de la fixture) -- le toggle GUI Yakima<>BarthHaas de
+        # `app._aroma_wheel_toggle` ne reconnaît que ces deux noms de source
+        # littéraux (seuls noms réels en production), une source "toy"
+        # générique y serait invisible.
+        ("hopa", "citrus", 80.0, "yakima"), ("hopa", "woody", 20.0, "yakima"),
     ])
     con.executemany("INSERT INTO aroma_notes VALUES (?,?,?,?)", [
         ("mynote", "molx", 1.0, "toy"), ("mynote", "moly", 0.5, "toy"),
@@ -565,16 +570,17 @@ def test_compare_requires_at_least_one_hop(toy_cwd):
 
 def test_compare_shows_no_wheel_data_caption_for_hops_without_intensity(toy_cwd):
     # hopa a une roue d'arôme (citrus/woody, voir _build_toy_db) ; hopc n'en
-    # a aucune -- doit apparaître explicitement dans la légende "no data",
+    # a aucune -- doit apparaître explicitement en avertissement (T79, 4e
+    # addendum, 2026-08-23 : st.warning plutôt qu'une caption discrète),
     # jamais un polygone à 0 fabriqué (T58, 2026-08-19).
     at = _app()
     at.run()
     at.sidebar.radio[0].set_value("compare").run()
     at.multiselect[0].select("Hopa").select("Hopc").run()
     assert not at.exception
-    caption = next(c.value for c in at.caption if "No quantitative aroma wheel data" in c.value)
-    assert "Hopc" in caption
-    assert "Hopa" not in caption
+    warning = next(w.value for w in at.warning if "Not in the Yakima database" in w.value)
+    assert "Hopc" in warning
+    assert "Hopa" not in warning
 
 def test_compare_renders_principal_barplot_when_data_present(toy_cwd):
     # hopc a alpha_acid/beta_acid/co_humulone/total_oil complets (voir
