@@ -2379,6 +2379,166 @@ changement touche uniquement le fichier de mapping et des données, aucun
 code de parsing/ingestion modifié pour ce correctif-ci). Reboot Streamlit
 Cloud requis (même geste, voir ci-dessus).
 
+## Refonte esthétique GUI -- spec "Claude Design" / système Organic (2026-08-23)
+
+**Contexte.** Après un premier essai en direct dans la conversation (T80, panels/
+voile/contour de texte codés à la main, ~30 min de travail) jugé insatisfaisant
+et **entièrement abandonné sur demande explicite de l'utilisateur** ("drop all
+changes... except the logo.png update"), l'utilisateur a fourni une spec produite
+par un outil séparé ("Claude Design") : `DESIGN_SPEC.md` (diagnostic + langage
+Organic + patterns de composants) et `DESIGN_TICKETS.md` (15 tickets T-D01-T-D15
+en 4 phases, à travailler DANS L'ORDRE selon le fichier lui-même). Contrainte de
+départ de la spec, respectée : ne jamais toucher `matching`/`ingest`/`parsers`/
+`reference`/`schema`/`cli`, garder les clés de mode internes, garder la "couche
+honnêteté" (avertissements/attributions), conventions anglais GUI / français
+commentaires inchangées. `.streamlit/config.toml` (thème natif Streamlit,
+palette Organic crème/terracotta/sauge, Caprasimo+Figtree) et `pyproject.toml`
+(streamlit>=1.50) copiés depuis les fichiers fournis.
+
+**Deux découvertes qui contredisent la spec elle-même, vérifiées EN DIRECT avant
+de coder un contournement (jamais supposées) :**
+1. **Streamlit (1.60.0) n'expose PAS les couleurs du thème en variables CSS**
+   (`var(--secondary-background-color)`, proposé par la spec pour le fond
+   d'écran) -- `getPropertyValue` sur `:root`/`.stApp` renvoie `""`, scan complet
+   des feuilles de style chargées sans trouver la moindre `--*color*`. Contourné
+   via `light-dark(clair, sombre)` (fonction CSS native) calée sur la propriété
+   CSS calculée `color-scheme` de `.stApp` -- CETTE propriété, elle, se met à
+   jour INSTANTANÉMENT (sans rerun Python) au clic sur Light/Dark/System dans le
+   menu Streamlit natif, `color-scheme` étant héritée par tous les descendants,
+   y compris le `::before` du masque de fond. Zéro JavaScript, contrairement au
+   mécanisme précédent (`_BACKGROUND_SCRIPT_TEMPLATE`/`st.iframe`, retiré).
+2. **`st.container(border=True)`/`st.expander` n'ont PAS de fond opaque natif**
+   (`background-color: rgba(0,0,0,0)`, vérifié par `getComputedStyle`) -- seuls
+   la bordure/le radius viennent du thème. D'où `app._panel()`/`_panel_expander()`
+   (`key=f"panel_{next(_panel_counter)}"`, hook CSS `st-key-panel_*` documenté
+   par la skill Streamlit officielle du projet comme le seul usage de `key`
+   sanctionné pour du CSS custom) -- fond `light-dark(#ebddc5, #2e2b25)` injecté
+   dans le SEUL `st.html()` de la page (`_TYPOGRAPHY_STYLE` + `_BACKGROUND_
+   STYLE_TEMPLATE`, jamais plusieurs balises `<style>` séparées).
+
+**Tickets Phase 1-2 (T-D01-T-D09) implémentés, dans l'ordre.** Points notables :
+- **T-D04 (hiérarchie de surfaces)** : UNE carte `_panel()` par section logique
+  (jamais autour d'une seule ligne, jamais imbriquée) sur les 6 pages -- pas la
+  boîte-par-ligne-de-texte du premier essai T80 abandonné.
+- **T-D05 (confidence strip)** : `_confidence_strip(chips)` -- ligne de
+  `st.badge` (sage="fine", terracotta="read this", **jamais de rouge**,
+  explication en `help=` plutôt qu'en paragraphe) remplace la pile `st.metric`/
+  `st.caption`/`st.warning` sur Amplify (couverture moléculaire, couverture
+  --oav, molécules orphelines, troncature -- 4 chips sur une ligne, vérifié en
+  direct). `matching.amplify()` gagne un nouveau champ `total_matches` (même
+  pattern que T56/T63 pour contrast/by_descriptor) pour permettre la chip de
+  troncature. Le seul avertissement partagé restant (`_aroma_wheel_missing_
+  warning`, houblon absent de la source de roue choisie) converti de
+  `st.warning` en chip `st.badge` -- **plus un seul `st.warning` dans tout
+  `app.py`** après ce ticket.
+- **T-D06 (chips purpose/descriptor/source)** : `_PURPOSE_COLORS` -- vert
+  (sage) et orange (terracotta) inchangés, mais **"both" passe de violet à
+  gris neutre** (`_PURPOSE_COLORS["both"]`) : `violetColor` du thème Organic
+  (`#728157`) s'est avéré, une fois vérifié, quasi identique à `greenColor`
+  (`#7a8a5e`) -- "both" et "aromatic" étaient donc déjà visuellement
+  indissociables avant ce ticket, pas juste "pas encore sage/terracotta". Un
+  purpose `Inferred:` se rend désormais en ITALIQUE dans le badge (Markdown
+  supporté par le label `st.badge`, vérifié) -- substitut au "outlined"
+  demandé par la spec, **jamais atteignable avec `st.badge`** (pas de `key=`,
+  donc pas de hook CSS par instance pour un vrai contour bicolore). Nouveaux
+  helpers `_descriptor_chips`/`_source_chips` : pas un appel `st.badge` par
+  mot, mais la directive Markdown `:color-badge[texte]` (dont `st.badge` est
+  documenté comme un simple raccourci) concaténée dans une seule chaîne
+  `st.markdown`/`st.caption` -- confirmé en direct que `st.caption` rend aussi
+  ces directives (mêmes règles Markdown que `st.markdown`).
+- **T-D07 (tables via `column_config`)** : `_render_hop_rows` réécrite --
+  `ProgressColumn` (score/similarités 0-100), `NumberColumn(format="percent")`
+  (fractions Mol./Desc. 0-1), `ListColumn` (contributeurs/sources -- les
+  champs correspondants doivent maintenant être de VRAIES listes Python, plus
+  des `", ".join(...)` pré-jointes et tronquées à l'affichage). 4 sites
+  d'appel mis à jour (Amplify, blends, Contrast, `_similar_hops_section`) ;
+  au passage, un commentaire STALE de `_render_blends` (prétendait encore que
+  `_render_hop_rows` rendait le Purpose en `st.badge` par cellule, faux depuis
+  T66) corrigé.
+- **T-D09 (palette de graphiques partagée)** : `_COMPARE_PALETTE` (Vega
+  "tableau10" bleu/orange/rouge générique) et `_INTENSITY_BUCKET_COLORS`
+  (dégradé de bleu de la heatmap) remplacés par `chartCategoricalColors`/
+  `chartSequentialColors` (config.toml, terracotta/sauge). Accent de la roue
+  d'arôme mono-houblon (`_aroma_wheel`, bleu `#2a78d6` codé en dur) recoloré
+  en terracotta pour la même raison. AUCUN `theme=None` à réintroduire : une
+  vérification live (déjà faite lors de T-D01, reconfirmée ici) montre que
+  `theme="streamlit"` (par défaut depuis le retrait de `theme=None`) respecte
+  les couleurs EXPLICITES d'un `alt.Scale(domain=..., range=[...])` -- seules
+  les couleurs implicites/par défaut sont écrasées par le thème Streamlit.
+  Conséquence positive non cherchée : gridlines/police/fond de graphique
+  suivent déjà nativement le thème Organic via `theme="streamlit"`, donc
+  AUCUN `_chart_theme()` séparé n'a été construit -- le seul gap réel de T-D09
+  était la couleur, pas le chrome (gridlines/frame/font), déjà couvert.
+
+**T-D08 (bloc roue d'arôme)** : acceptance ("toggle jamais séparé du graphique
+par un autre contenu ; avertissement nommant le houblon, dans le bloc") déjà
+satisfaite par le mécanisme T79 existant (toggle+graphique+avertissement dans
+UN `_panel()`/`st.expander`) -- **positionnement "top-right" du toggle
+délibérément PAS implémenté** (description de la spec, pas un critère
+d'acceptance testable ; le label natif du widget ("Aroma wheel source") sert
+déjà d'ancrage visuel du bloc) : jugé hors scope pour le gain visuel/risque
+sur 4 sites d'appel.
+
+**T-D10 (ordre fixe du détail houblon)** : restructuré `_browse`/
+`_hop_detail_expanders`/`_by_descriptor` vers "purpose -> key stats -> wheel
+-> descriptors -> composition table -> sources" (les trois avaient déjà le
+MÊME ordre entre elles avant ce ticket, juste pas celui demandé par la spec --
+"sources" venait juste après purpose, pas en dernier). `_browse` : la carte
+d'identité unique éclatée en 4 `_panel()` séparées (une par étape T-D10,
+cohérent avec T-D04 "one card per logical section" -- une seule carte
+fourre-tout aurait mélangé plusieurs sections logiques). Vérifié en direct
+(Admiral) : Composition en dernière carte, juste avant "Database similarity
+and substitution".
+
+**T-D11/T-D12/T-D13** : déjà conformes à l'acceptance (relu contre le ticket,
+aucun changement nécessaire) -- radio unique + préfixe de groupe par
+`format_func` (fallback explicitement sanctionné par la spec elle-même après
+qu'un premier essai à deux `st.radio` synchronisés ait été jugé fragile et
+abandonné avant même d'être testé, voir plus haut dans ce fichier), popover
+"Database" replié, page shell par outil (h1 sans préfixe + tagline +
+expander "How does this work?"), Home en lanceur avec "Recent updates"
+replié.
+
+**T-D14 (densité des inputs)** : Amplify (Ingredient + "How to rank hops?"
+sur une ligne ; --oav + "Number of results" sur une autre, via `st.columns(2)`
+avec les objets colonnes créés AVANT le calcul des valeurs qui les remplissent
+-- Streamlit permet d'écrire dans un conteneur déjà créé hors de son ordre
+d'apparition dans le code, même principe que la réouverture répétée de
+`panel_a`) et Contrast ("Complementary notes to target" + "Purpose" pills sur
+une ligne) -- les deux outils explicitement nommés prioritaires par le
+ticket. Browse/By-descriptor/Compare Hops laissés inchangés (moins de
+contrôles, gain marginal plus faible). **Vérification 390px non faite avec
+un vrai viewport réduit** (l'outil de resize de fenêtre du navigateur
+disponible dans cette session n'a pas réussi à réduire la fenêtre sous
+~1512px, probablement une contrainte du gestionnaire de fenêtres macOS) --
+confiance placée à la place sur le comportement natif DÉJÀ vérifié et
+documenté dans ce fichier (T65/T66) : `st.columns` s'empile automatiquement à
+la verticale sous une largeur d'écran donnée, jamais un chevauchement/bris de
+mise en page, seulement un empilement -- comportement Streamlit natif, pas
+quelque chose que ce ticket pourrait casser.
+
+**Vérification finale (T-D15).** `pytest -q` : **256 tests, tous verts**
+(quelques assertions réécrites en cours de route pour suivre les nouveaux
+mécanismes -- badges rendus en `st.markdown`/directive `:color-badge[...]`
+en AppTest, `st.segmented_control` remplaçant les anciennes cases à cocher,
+etc. -- jamais un test affaibli pour le faire passer). `pyflakes` propre sur
+tout `src/`. Les 4 informations que la spec demandait explicitement de
+vérifier encore présentes après la refonte : couverture moléculaire/--oav
+(chips), molécules orphelines (chip), troncature "Showing N of M" (chip sur
+Amplify, restée en `st.caption` simple sur Contrast/By-descriptor -- seule
+Amplify était dans l'acceptance explicite de T-D05, pas une régression),
+préfixe `Inferred:` (toujours présent, désormais en italique). Vérifié en
+direct dans le navigateur, thème clair ET sombre, sur les 6 pages : logo,
+panels, chips, tables `column_config`, palette de graphiques Organic, ordre
+fixe du détail houblon, colonnes d'inputs.
+
+**Non fait, signalé plutôt que deviné :** T-D08 top-right (voir plus haut),
+la troncature `st.caption` non convertie en chip sur Contrast/By-descriptor
+(cohérence visuelle mineure avec Amplify, jamais demandé explicitement),
+vérification 390px par redimensionnement réel du navigateur (outil
+disponible non coopératif dans cette session, repli sur le comportement déjà
+établi).
+
 Reste :
 1. Jointure FooDB/hop_composition au-delà des ~734 composés Flavornet si le vocabulaire
    s'élargit beaucoup (crawl Yakima déjà réel, plus d'aliments FooDB).

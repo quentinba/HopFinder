@@ -1,0 +1,111 @@
+# HopFinder GUI — theme configuration
+#
+# Place at `.streamlit/config.toml` (repo root, next to `pyproject.toml`).
+# Requires streamlit >= 1.50 (bump the `[ui]` extra in pyproject.toml).
+# Fonts use the "Name:CSS-URL" form on purpose: no static file serving
+# required, so it works unchanged on Streamlit Community Cloud.
+#
+# Palette = Organic design system tokens. Do not add hexes outside these.
+
+[theme]
+base = "light"
+
+font = "Figtree:https://fonts.googleapis.com/css2?family=Figtree:wght@400;600;700&display=swap"
+headingFont = "Figtree:https://fonts.googleapis.com/css2?family=Figtree:wght@400;600;700&display=swap"
+# Caprasimo is applied to h1 only, via the single injected <style> block
+# (Streamlit has no per-level font option). Loaded here so it is available:
+codeFont = "monospace"
+
+baseFontSize = 16
+baseFontWeight = 400
+headingFontSizes = ["2rem", "1.5rem", "1.25rem", "1.0625rem", "1rem", "1rem"]
+headingFontWeights = [400, 700, 600, 600, 600, 600]   # h1 = Caprasimo, needs no bold
+
+baseRadius = "16px"
+buttonRadius = "full"
+showWidgetBorder = true
+showSidebarBorder = false
+
+# Charts. Categorical: up to 5 hops compared side by side, so the first five
+# entries alternate hue AND value to stay separable (and to survive
+# greyscale). Chart colours cannot be set per light/dark mode.
+chartCategoricalColors = [
+  "#c67139",  # terracotta
+  "#7a8a5e",  # sage
+  "#8c491a",  # deep terracotta
+  "#aebf92",  # light sage
+  "#82796a",  # warm neutral
+  "#f6a06b",
+  "#56633f",
+  "#402310",
+  "#ccdbb2",
+  "#c0b6a5",
+]
+chartSequentialColors = [
+  "#fff2eb", "#ffe1d0", "#ffc6a5", "#f6a06b", "#d67f48",
+  "#b2622d", "#8c491a", "#643312", "#402310", "#2e2b25",
+]
+chartDivergingColors = [
+  "#272e1b", "#3d472b", "#56633f", "#8fa073", "#ccdbb2",
+  "#ffc6a5", "#f6a06b", "#b2622d", "#643312", "#402310",
+]
+
+# --- Light -------------------------------------------------------------
+[theme.light]
+backgroundColor = "#f5ead8"           # ground
+secondaryBackgroundColor = "#ebddc5"  # raised surface: widgets, cards
+textColor = "#201e1d"
+primaryColor = "#c67139"              # terracotta — interactive
+linkColor = "#8c491a"                 # accent-700: safe at body size
+linkUnderline = false
+borderColor = "#dcd3c4"
+dataframeBorderColor = "#dcd3c4"
+dataframeHeaderBackgroundColor = "#ebddc5"
+codeBackgroundColor = "#f9f4ed"
+codeTextColor = "#56633f"
+# Semantic palette remapped onto the two Organic voices, so st.badge /
+# coloured markdown / alerts stop introducing a third colour system.
+greenColor = "#7a8a5e"                # sage — descriptor / aroma layer, "fine"
+orangeColor = "#c67139"               # terracotta — "read this"
+redColor = "#8c491a"                  # deep accent — genuine errors only
+violetColor = "#728157"
+blueColor = "#645c50"
+yellowColor = "#d67f48"
+grayColor = "#a19786"
+
+[theme.light.sidebar]
+backgroundColor = "#ebddc5"
+secondaryBackgroundColor = "#f5ead8"
+textColor = "#201e1d"
+primaryColor = "#b2622d"
+linkColor = "#8c491a"
+borderColor = "#dcd3c4"
+
+# --- Dark --------------------------------------------------------------
+[theme.dark]
+backgroundColor = "#201e1d"
+secondaryBackgroundColor = "#2e2b25"
+textColor = "#f9f4ed"
+primaryColor = "#f6a06b"              # one step lighter on a dark ground
+linkColor = "#ffc6a5"
+linkUnderline = false
+borderColor = "#474238"
+dataframeBorderColor = "#474238"
+dataframeHeaderBackgroundColor = "#2e2b25"
+codeBackgroundColor = "#2e2b25"
+codeTextColor = "#ccdbb2"
+greenColor = "#aebf92"
+orangeColor = "#f6a06b"
+redColor = "#ffc6a5"
+violetColor = "#ccdbb2"
+blueColor = "#c0b6a5"
+yellowColor = "#ffc6a5"
+grayColor = "#82796a"
+
+[theme.dark.sidebar]
+backgroundColor = "#2e2b25"
+secondaryBackgroundColor = "#201e1d"
+textColor = "#f9f4ed"
+primaryColor = "#f6a06b"
+linkColor = "#ffc6a5"
+borderColor = "#474238"

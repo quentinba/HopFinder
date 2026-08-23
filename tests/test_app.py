@@ -172,10 +172,12 @@ def test_app_loads_with_no_exception_default_home_mode(toy_cwd):
     assert not at.exception
     # T78 addendum (2026-08-22, demande utilisateur explicite) : le
     # st.title("HopFinder") texte a été retiré (redondant avec le logo
-    # image + le st.header par page, voir app.main) -- le logo (image, pas
-    # de type AppTest dédié distinct de st.image) et le header de la page
-    # restent les signaux vérifiables ici.
-    assert at.header[0].value == "Home"
+    # image + le titre de page, voir app.main) -- le logo (image, pas
+    # de type AppTest dédié distinct de st.image) et le titre de la page
+    # restent les signaux vérifiables ici. T-D03 (2026-08-23, spec Claude
+    # Design) : le titre de page est passé de `st.header` (h2) à `st.title`
+    # (h1, un seul par page, exigence de la spec).
+    assert at.title[0].value == "Home"
     assert at.sidebar.radio[0].value == "home"
     assert len(at.button) == 5
 
@@ -307,7 +309,13 @@ def test_amplify_warns_on_low_molecular_coverage(toy_cwd):
     at.selectbox[0].set_value("lownote").run()
     at.segmented_control[0].set_value("Both").run()  # T76 3e addendum : segmented_control remplace les 2 cases
     assert not at.exception
-    assert any("producible molecule" in w.value for w in at.warning)
+    # T-D05 (2026-08-23, spec Claude Design) : la pile st.warning est devenue
+    # une ligne de chips `st.badge` (`app._confidence_strip`) -- `st.badge`
+    # se rend en AppTest comme un élément markdown portant la directive
+    # `:color-badge[label]`, le texte d'explication n'est plus affiché en
+    # dur (déplacé dans `help=`, non exposé par AppTest) : on vérifie donc
+    # le LABEL du chip, plus la phrase complète.
+    assert any("Single-molecule ranking" in md.value for md in at.markdown)
 
 def test_amplify_no_low_coverage_warning_when_coverage_high(toy_cwd):
     # "lownote" trie avant "mynote" alphabétiquement -> sélection explicite,
@@ -412,7 +420,11 @@ def test_contrast_unticking_a_pill_narrows_results_to_that_note_only(toy_cwd):
     assert any("Hopc" in e.label for e in at.expander)  # avant : hopc matche via "resinous"
     at.pills[0].set_value(["woody", "herbal"]).run()
     assert not at.exception
-    assert any("affinity target: herbal, woody" in c.value.lower() for c in at.caption)
+    # T-D06 (spec Claude Design) : la cible d'affinité est désormais rendue
+    # en pills sage (`app._descriptor_chips`, directives Markdown
+    # `:green-badge[...]`) plutôt qu'une liste "a, b" en texte brut.
+    assert any(":green-badge[herbal]" in c.value and ":green-badge[woody]" in c.value
+              for c in at.caption)
     assert any("Hopa" in e.label for e in at.expander)
     assert not any("Hopc" in e.label for e in at.expander)  # exclu : ne matchait que "resinous"
 
@@ -495,15 +507,13 @@ def test_by_descriptor_heatmap_separates_wheel_and_other_descriptor_sections(toy
 
 def test_by_descriptor_mode_hides_heatmap_for_single_hop(toy_cwd):
     # Un seul houblon recoupé -> rien à comparer, pas de grille (juste
-    # l'expander habituel). Exactement 2 UnknownElement attendus : l'iframe
-    # toujours présente de `app._inject_background` (ce n'est plus un
-    # st.markdown/CSS mais un st.iframe, seul moyen de faire réagir le fond au
-    # sélecteur de thème Streamlit sans dépendre d'un rerun Python, voir
-    # CLAUDE.md) -- présent sur CHAQUE page, indépendamment du mode -- PLUS la
-    # roue d'arôme (st.altair_chart, Vega-Lite non structuré par AppTest) de
+    # l'expander habituel). Exactement 1 UnknownElement attendu : la roue
+    # d'arôme (st.altair_chart, Vega-Lite non structuré par AppTest) de
     # hopa dans l'expander de détail, ajoutée au tool by-descriptor le
     # 2026-08-19 (demande utilisateur : "The aroma wheel is missing from the
-    # from descriptor tool").
+    # from descriptor tool"). T-D02 (2026-08-23, spec Claude Design) :
+    # `app._inject_background` est passé de `st.iframe` (JS) à `st.html`
+    # (CSS pure, `light-dark()`) -- ne compte plus comme UnknownElement.
     from streamlit.testing.v1.element_tree import UnknownElement
     at = _app()
     at.run()
@@ -512,7 +522,7 @@ def test_by_descriptor_mode_hides_heatmap_for_single_hop(toy_cwd):
     assert not at.exception
     assert not any("Aroma wheel descriptors" in c.value for c in at.caption)
     assert not any("Other descriptors" in c.value for c in at.caption)
-    assert len([n for n in at.main if isinstance(n, UnknownElement)]) == 2
+    assert len([n for n in at.main if isinstance(n, UnknownElement)]) == 1
 
 def test_browse_mode_shows_hop_composition_and_descriptors(toy_cwd):
     # T5 backlog : consulter un houblon (composition + descripteurs) sans
@@ -571,14 +581,15 @@ def test_compare_requires_at_least_one_hop(toy_cwd):
 def test_compare_shows_no_wheel_data_caption_for_hops_without_intensity(toy_cwd):
     # hopa a une roue d'arôme (citrus/woody, voir _build_toy_db) ; hopc n'en
     # a aucune -- doit apparaître explicitement en avertissement (T79, 4e
-    # addendum, 2026-08-23 : st.warning plutôt qu'une caption discrète),
-    # jamais un polygone à 0 fabriqué (T58, 2026-08-19).
+    # addendum, 2026-08-23 : d'abord st.warning, puis T-D05 -- spec Claude
+    # Design -- converti en chip `st.badge`, rendu comme markdown en
+    # AppTest, jamais un polygone à 0 fabriqué, T58, 2026-08-19).
     at = _app()
     at.run()
     at.sidebar.radio[0].set_value("compare").run()
     at.multiselect[0].select("Hopa").select("Hopc").run()
     assert not at.exception
-    warning = next(w.value for w in at.warning if "Not in the Yakima database" in w.value)
+    warning = next(md.value for md in at.markdown if "Not in the Yakima database" in md.value)
     assert "Hopc" in warning
     assert "Hopa" not in warning
 
