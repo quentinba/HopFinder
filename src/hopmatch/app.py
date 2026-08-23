@@ -16,6 +16,7 @@ Lancer : streamlit run src/hopmatch/app.py [-- --db chemin/vers/aromahops.db]
 from __future__ import annotations
 import base64
 import io
+import itertools
 import math
 import os
 import sys
@@ -68,13 +69,18 @@ _TAB_ICON_PATH = os.path.join(
 # Libellés GUI affichés à l'utilisateur, distincts des clés internes ("mode")
 # qui pilotent le dispatch et restent stables (CLI/tests/URLs internes non
 # concernés — habillage d'affichage uniquement, demandé par l'utilisateur).
+# T-D12 (2026-08-23, spec Claude Design : "drop the 'HopFinder - ' prefix in
+# page titles (the logo is right there)") -- libellés RACCOURCIS, utilisés à
+# la fois pour le h1 de chaque page et le libellé de nav en sidebar (spec :
+# "Sidebar labels stay descriptive"). Clés internes (`mode`) inchangées --
+# voir la règle §0 de la spec, "Internal mode keys... may not [change]".
 MODE_LABELS = {
     "home": "Home",
-    "amplify": "HopFinder - Amplify",
-    "contrast": "HopFinder - Contrast",
-    "by-descriptor": "HopFinder from Descriptors",
-    "browse": "Browse hop informations",
-    "compare": "Compare Hops",
+    "amplify": "Amplify",
+    "contrast": "Contrast",
+    "by-descriptor": "From descriptors",
+    "browse": "Browse a hop",
+    "compare": "Compare hops",
 }
 
 # Page d'accueil (front page) : résumé des outils, avec accès direct à chacun.
@@ -142,6 +148,13 @@ _TOOL_SUMMARIES = [
     },
 ]
 
+# T-D12 (2026-08-23, spec Claude Design) : lookup mode -> résumé, pour le
+# "one-line purpose" + l'expander "How does this work?" affichés en tête de
+# CHAQUE page d'outil (`main()`) -- avant, `_TOOL_SUMMARIES` n'était consommé
+# que par `_home` (la longue description ne vivait QUE sur Home, jamais sur
+# la page de l'outil lui-même).
+_TOOL_SUMMARY_BY_MODE = {t["mode"]: t for t in _TOOL_SUMMARIES}
+
 # "Recent updates" en bas de la page d'accueil (2026-08-21, demande
 # utilisateur explicite : "add ... a summary of last implemented features
 # from the most recent to the oldest ... rely on github commit for that").
@@ -156,6 +169,19 @@ _TOOL_SUMMARIES = [
 # un `git log` en direct exigerait aussi que `.git` soit présent dans le
 # conteneur déployé, ce qui n'est pas garanti.
 _RECENT_UPDATES = [
+    ("2026-08-23", "New visual design across the whole app (warm cream/"
+                   "terracotta/sage palette, new typography, a redesigned "
+                   "background): coverage/orphan-molecule/truncation "
+                   "warnings are now compact colored chips instead of "
+                   "stacked alert boxes; purpose, descriptors and data "
+                   "sources render as small pills everywhere; result "
+                   "tables show a real progress bar for scores and no "
+                   "longer truncate long contributor/source lists; charts "
+                   "share one consistent color palette; hop detail panels "
+                   "follow the same fixed order everywhere; and the "
+                   "busiest tool pages (Amplify, Contrast) group their "
+                   "inputs into side-by-side columns to fit more on "
+                   "screen."),
     ("2026-08-23", "Fixes and refinements to the BarthHaas integration: "
                    "aroma wheel source is now an explicit Yakima/BarthHaas "
                    "toggle everywhere a spider chart appears (Browse, "
@@ -264,14 +290,20 @@ _RECENT_UPDATES = [
 
 def _home(con) -> None:
     stats = _stats(con)
-    st.write(f"{stats['hops']} hops, {stats['notes']} notes, "
-            f"{stats['descriptors']} descriptors available. Choose a tool:")
+    st.caption(f"{stats['hops']} hops, {stats['notes']} notes, "
+              f"{stats['descriptors']} descriptors available. Choose a tool:")
+    # T-D13 (2026-08-23, spec Claude Design : "Home is a launcher, not a
+    # changelog page... 2 lines max of description") -- la longue prose par
+    # outil (`tool["description"]`) est retirée d'ici, déplacée dans
+    # l'expander "How does this work?" de CHAQUE page d'outil (`main()`,
+    # voir `_TOOL_SUMMARY_BY_MODE`) : la carte Home ne garde que titre +
+    # tagline + bouton, le lecteur qui clique "Open" trouve le détail
+    # au bon endroit plutôt que de le lire deux fois.
     cols = st.columns(2)
     for i, tool in enumerate(_TOOL_SUMMARIES):
-        with cols[i % 2].container(border=True):
+        with _panel(cols[i % 2]):
             st.subheader(f"{tool['icon']} {MODE_LABELS[tool['mode']]}")
             st.caption(tool["tagline"])
-            st.write(tool["description"])
             if st.button("Open", key=f"home_open_{tool['mode']}",
                         icon=":material/arrow_forward:"):
                 # Streamlit interdit de modifier st.session_state["mode"] une
@@ -281,11 +313,15 @@ def _home(con) -> None:
                 st.session_state["_next_mode"] = tool["mode"]
                 st.rerun()
 
-    st.divider()
-    st.subheader("Recent updates")
-    st.caption("Most recent first.")
-    st.markdown("\n\n".join(f"**{date}** — {summary}"
-                            for date, summary in _RECENT_UPDATES))
+    # T-D13 (2026-08-23, spec Claude Design) : "Recent updates" replié dans
+    # un expander plutôt qu'une section pleine page en bas de Home ("Home is
+    # a launcher, not a changelog page") -- contenu de `_RECENT_UPDATES`
+    # inchangé, juste replié par défaut. Plus de `st.divider()` (spec §3 :
+    # "no st.divider() at all -- the surface change already separates").
+    with _panel_expander("Recent updates"):
+        st.caption("Most recent first.")
+        st.markdown("\n\n".join(f"**{date}** — {summary}"
+                                for date, summary in _RECENT_UPDATES))
 
 
 def _db_path() -> str:
@@ -446,152 +482,192 @@ def _stats(con) -> dict:
 
 
 @st.cache_data
-def _background_data_uri(path: str, _version: float, invert: bool) -> str | None:
-    """Convertit l'image de fond en data URI base64 (JPEG), mise en cache
-    par (mtime, invert) (même schéma que `_cached_stats`/etc.). Recompressé
-    en JPEG qualité 82 : le PNG fourni (~3.1 Mo, texture papier + hachures
-    fines qui compressent mal en PNG) tombe à ~360 Ko une fois réencodé,
-    négligeable une fois inliné en base64 dans le HTML d'une app locale.
-    None si le fichier est absent (image optionnelle, pas d'erreur bloquante
-    si `assets/background.png` n'existe pas).
-
-    `invert` (2026-08-19, signalé par l'utilisateur : l'image ne convenait
-    qu'au thème clair, un simple voile sombre par-dessus ne suffisait pas en
-    thème sombre) : négatif couleur (`ImageOps.invert`) plutôt qu'un
-    deuxième fichier statique à maintenir -- l'illustration fournie est un
-    dessin au trait noir sur fond crème, son négatif exact est un fond
-    quasi-noir avec un trait clair, ce qui donne un résultat propre pour le
-    thème sombre (vérifié visuellement, pas de dominante de teinte
-    parasite malgré la teinte sépia d'origine)."""
+def _background_mask_data_uri(path: str, _version: float) -> str | None:
+    """Convertit l'image de fond en MASQUE alpha (PNG, alpha = 255 -
+    luminance, RGB non pertinent pour un `mask-image`) au lieu d'une photo
+    couleur -- Design Claude (T-D02, 2026-08-23, spec `DESIGN_SPEC.md` §4).
+    Remplace l'ancien double payload couleur/négatif (`_background_data_uri`,
+    JPEG normal + JPEG inversé par PIL) : un seul asset, la COULEUR vient
+    désormais du thème CSS (`var(--secondary-background-color)` posée par
+    `_inject_background`), pas de l'image -- la gravure se reteinte donc
+    seule par thème, en CSS pur, sans script ni deuxième fichier. Mis en
+    cache par mtime (même schéma que `_cached_stats`/etc.) ; `None` si le
+    fichier est absent (image optionnelle, pas d'erreur bloquante)."""
     if not os.path.exists(path):
         return None
-    im = Image.open(path).convert("RGB")
-    if invert:
-        from PIL import ImageOps
-        im = ImageOps.invert(im)
+    luminance = Image.open(path).convert("L")
+    alpha = luminance.point(lambda p: 255 - p)
+    mask = Image.merge("RGBA", (alpha, alpha, alpha, alpha))
     buf = io.BytesIO()
-    im.save(buf, format="JPEG", quality=82, optimize=True)
+    mask.save(buf, format="PNG", optimize=True)
     encoded = base64.b64encode(buf.getvalue()).decode("ascii")
-    return f"data:image/jpeg;base64,{encoded}"
+    return f"data:image/png;base64,{encoded}"
 
 
-_BACKGROUND_SCRIPT_TEMPLATE = """
-<script>
-(function() {
-    var doc = window.parent.document;
-    var lightVeil = "__LIGHT_VEIL__";
-    var darkVeil = "__DARK_VEIL__";
-    var normalUri = "__NORMAL_URI__";
-    var invertedUri = "__INVERTED_URI__";
+# T-D03 (2026-08-23, spec Claude Design `DESIGN_SPEC.md` §3) : Caprasimo
+# (h1 SEULEMENT -- "at h3 inside a dense results panel it becomes noise")
+# et `tabular-nums` (alignement des chiffres en colonne, tableaux/metrics)
+# sont les deux seules choses que `.streamlit/config.toml` ne peut pas
+# exprimer (une seule police de titre pour TOUS les niveaux). INCONDITIONNEL
+# (pas dans le template du masque ci-dessous, qui lui dépend de la présence
+# du fichier image) -- la typographie ne doit jamais dépendre d'un asset
+# optionnel.
+_TYPOGRAPHY_STYLE = """
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Caprasimo&display=swap');
+[data-testid="stAppViewContainer"] h1 { font-family: 'Caprasimo', Figtree, sans-serif; }
+[data-testid="stDataFrame"], [data-testid="stMetricValue"] {
+    font-variant-numeric: tabular-nums;
+}
+/* T-D04 (2026-08-23, spec Claude Design §5) : fond opaque des cartes de
+   section `_panel()`/`_panel_expander()` -- `st.container(border=True)`/
+   `st.expander` n'ont PAS de fond opaque nativement (vérifié en direct :
+   background rgba(0,0,0,0) même sous le thème Organic), seule la bordure
+   et le radius (`baseRadius`, config.toml) viennent du thème. `light-dark()`
+   plutôt qu'une variable CSS de thème (aucune n'existe, voir le docstring
+   de `_inject_background`) -- même valeurs que la surface "raised" du
+   thème (`secondaryBackgroundColor`, §3 : "Raised surface (widgets, cards,
+   table header)"). Ciblage par SOUS-CHAÎNE de classe `st-key-panel_...`
+   (seul hook stable pour un `st.container(border=True)`, voir `_panel`). */
+div[class*="st-key-panel_"], details[class*="st-key-panel_"] {
+    background-color: light-dark(#ebddc5, #2e2b25);
+}
+</style>
+"""
 
-    function apply() {
-        var stApp = doc.querySelector(".stApp");
-        var target = doc.querySelector('[data-testid="stAppViewContainer"]');
-        if (!stApp || !target) return;
-        var dark = getComputedStyle(stApp).colorScheme === "dark";
-        var veil = dark ? darkVeil : lightVeil;
-        var uri = dark ? invertedUri : normalUri;
-        target.style.backgroundImage =
-            'linear-gradient(' + veil + ', ' + veil + '), url("' + uri + '")';
-        target.style.backgroundSize = "cover";
-        target.style.backgroundPosition = "center center";
-        target.style.backgroundAttachment = "fixed";
-        target.style.backgroundRepeat = "no-repeat";
-    }
-
-    apply();
-    var stApp = doc.querySelector(".stApp");
-    if (stApp) {
-        new MutationObserver(apply).observe(stApp, {attributes: true, attributeFilter: ["class"]});
-    }
-    window.parent.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", apply);
-})();
-</script>
+_BACKGROUND_STYLE_TEMPLATE = """
+<style>
+[data-testid="stAppViewContainer"] { position: relative; }
+[data-testid="stAppViewContainer"]::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background-color: light-dark(__LIGHT_GROUND__, __DARK_GROUND__);
+    opacity: 0.35;
+    mask-image: url("__MASK_URI__");
+    -webkit-mask-image: url("__MASK_URI__");
+    mask-size: cover;
+    -webkit-mask-size: cover;
+    mask-position: center;
+    -webkit-mask-position: center;
+    mask-repeat: no-repeat;
+    -webkit-mask-repeat: no-repeat;
+    pointer-events: none;
+    z-index: 0;
+}
+[data-testid="stAppViewContainer"] > .stAppViewBlockContainer,
+[data-testid="stHeader"] { position: relative; z-index: 1; }
+</style>
 """
 
 
+# Ground colors du thème (`.streamlit/config.toml`, `secondaryBackgroundColor`
+# clair/sombre) -- dupliqués ici en dur car AUCUNE variable CSS équivalente
+# n'existe pour les récupérer sans JS (vérifié en direct, voir le docstring
+# de `_inject_background`). Garder synchronisé avec `.streamlit/config.toml`
+# si la palette change.
+_GROUND_LIGHT = "#ebddc5"
+_GROUND_DARK = "#2e2b25"
+
+
 def _inject_background() -> None:
-    """Image de fond derrière le contenu principal (demande utilisateur).
+    """Image de fond derrière le contenu principal (demande utilisateur,
+    T50). Réécrite en pure CSS (T-D02, 2026-08-23, spec Claude Design
+    `DESIGN_SPEC.md` §4) : remplace le pipeline JS/PIL précédent (script
+    injecté dans un `st.iframe` lisant `getComputedStyle` sur `.stApp` pour
+    détecter le thème, deux images base64 -- normale et négatif couleur --
+    voir l'historique complet de CE choix dans les versions antérieures de
+    ce docstring, conservées dans l'historique git).
 
-    **Troisième passage (2026-08-19) : les deux correctifs précédents ne
-    marchaient toujours pas, signalé par l'utilisateur ("changing theme
-    doesn't change the image used"). Root cause enfin identifiée pour de bon,
-    en inspectant le DOM/CSS réel en direct plutôt qu'en supposant :**
+    **La spec proposait `var(--secondary-background-color)` -- vérifié en
+    direct que cette variable (et toute variable CSS de couleur de thème)
+    N'EXISTE PAS dans le DOM Streamlit réel (1.60.0)** : Streamlit peint ses
+    couleurs via des classes "Emotion" (CSS-in-JS) qui embarquent des hex
+    littéraux dans les règles générées, jamais de variable CSS exposée sur
+    `:root`/`.stApp` (`getPropertyValue` renvoie `""` pour les 4 noms
+    plausibles testés). Contournement qui respecte quand même la contrainte
+    "aucun JS" de la spec : la fonction CSS native `light-dark(clair,
+    sombre)`, qui résout sur la propriété CSS `color-scheme` -- OR `.stApp`
+    a déjà un `color-scheme` calculé qui se met à jour INSTANTANÉMENT au
+    sélecteur Light/Dark/System de Streamlit (fait déjà établi lors du
+    premier pipeline JS, voir l'historique) et `color-scheme` est une
+    propriété HÉRITÉE : le pseudo-élément `::before` du masque, descendant
+    de `.stApp`, en hérite directement, sans script. `_GROUND_LIGHT`/
+    `_GROUND_DARK` : les mêmes hex que `secondaryBackgroundColor` du thème
+    (`.streamlit/config.toml`), dupliqués en dur puisqu'aucune variable ne
+    les expose.
 
-    Le passage précédent utilisait `@media (prefers-color-scheme: dark)` en
-    CSS pur -- ça suit la préférence OS, PAS le sélecteur Light/Dark/System
-    du menu Streamlit. Or `st.context.theme.type` (tenté avant ça, tout
-    premier passage) ne se synchronise qu'après plusieurs reruns réels (le
-    sélecteur est un état 100% côté client, aucun rerun immédiat). AUCUNE
-    des deux méthodes ne suit donc le sélecteur Streamlit de façon fiable et
-    instantanée.
+    La gravure n'est plus qu'un MASQUE alpha (voir `_background_mask_data_
+    uri`) peint de la couleur du thème à 35% d'opacité -- un seul asset pour
+    les deux thèmes, jamais de négatif couleur à générer. `position: fixed`
+    sur un pseudo-élément `::before` (pas `background-image` direct sur
+    `stAppViewContainer`) : évite tout recalcul de `background-size: cover`
+    au changement de contenu (le piège de zoom déjà rencontré avec
+    `background-attachment: local`, voir l'historique) -- `position: fixed`
+    sur un pseudo-élément est stable par construction, ancré au viewport.
+    `z-index` posé sur le contenu (`stAppViewBlockContainer`) et l'en-tête
+    (`stHeader`) pour rester au-dessus du masque, qui n'occupe que
+    `z-index: 0`."""
+    html = _TYPOGRAPHY_STYLE
+    if os.path.exists(_BACKGROUND_PATH):
+        version = os.path.getmtime(_BACKGROUND_PATH)
+        mask_uri = _background_mask_data_uri(_BACKGROUND_PATH, version)
+        if mask_uri is not None:
+            html += (
+                _BACKGROUND_STYLE_TEMPLATE
+                .replace("__MASK_URI__", mask_uri)
+                .replace("__LIGHT_GROUND__", _GROUND_LIGHT)
+                .replace("__DARK_GROUND__", _GROUND_DARK)
+            )
+    st.html(html)
 
-    Trouvé en inspectant le DOM en direct (`getComputedStyle`) : l'élément
-    `.stApp` a une propriété CSS `color-scheme` calculée qui, elle,
-    se met à jour INSTANTANÉMENT quand on choisit Light/Dark/System dans le
-    menu Streamlit (vérifié : "dark" -> clic "Light" -> "light", sans AUCUN
-    rerun Python entretemps) -- Streamlit la pilote par une classe
-    Emotion générée dynamiquement (nom non stable d'une session à l'autre,
-    donc pas utilisable comme sélecteur CSS direct), mais la propriété
-    CSS *calculée* qui en résulte, elle, est stable et lisible.
 
-    `color-scheme` n'est cependant utilisable qu'en valeur `<color>` (via
-    `light-dark()`), pas pour choisir entre deux `background-image`/`url()`
-    entières -- aucune solution CSS pure ne permet ce choix. Solution
-    retenue : `st.iframe` (PAS `st.markdown` -- un `<script>` injecté via
-    `st.markdown(unsafe_allow_html=True)` NE S'EXÉCUTE JAMAIS, vérifié en
-    direct) avec une chaîne HTML brute, qui exécute du JS avec accès
-    same-origin à la page parente (documenté : "HTML strings... are
-    embedded as-is in an iframe that allows JavaScript execution and
-    same-origin access to the Streamlit app"). Le script lit `color-scheme`
-    sur `.stApp` DANS LE PARENT (`window.parent.document`), applique le
-    fond directement en JS (pas de CSS injecté séparément), et observe les
-    changements de `class` sur `.stApp` (`MutationObserver`) -- c'est ce
-    changement de classe Emotion qui accompagne chaque bascule de thème,
-    réagit donc instantanément à CHAQUE bascule (System/Light/Dark), sans
-    dépendre d'un rerun Python. Écoute aussi le changement OS
-    (`matchMedia(...).addEventListener`) pour le cas "System" + OS qui
-    change en cours de session. Iframe rendue à hauteur quasi nulle (pas de
-    contenu visible voulu, juste le script).
+_panel_counter = itertools.count()
 
-    Fond scindé en deux variantes (normale/négatif, voir
-    `_background_data_uri`) choisies par le script selon `dark`, jamais par
-    médiaquery CSS ni par `st.context.theme.type` désormais.
 
-    **Quatrième passage (2026-08-19, même jour) : l'utilisateur a signalé que
-    le niveau de zoom de l'image changeait à chaque interaction.** Cause :
-    `background-attachment: local` sur `stMain` (le passage précédent) fait
-    recalculer `background-size: cover` contre le `scrollHeight` RÉEL de
-    `stMain`, qui change à chaque page/résultat affiché -- l'image "respire"
-    visiblement d'une interaction à l'autre, jamais un vrai zoom figé.
-    Corrigé en repassant `background-attachment: fixed` (ancré au VIEWPORT,
-    constant tant que la fenêtre n'est pas redimensionnée) sur
-    `[data-testid="stAppViewContainer"]` -- PAS `stMain` : `fixed` sur un
-    élément qui défile lui-même (`overflow-y: auto`) a un rendu
-    cross-browser incohérent (le fond peut soit rester figé soit défiler
-    selon le moteur) ; `stAppViewContainer`, qui fait toujours exactement la
-    hauteur du viewport et ne défile jamais lui-même (voir passage
-    précédent), est la cible correcte pour un fond réellement figé.
-    Utilise désormais `background_zoomed.png` (pas `background.png`) --
-    demande utilisateur explicite : un crop déjà recadré par l'utilisateur,
-    affiché tel quel (`background-position: center center`) plutôt que
-    recadré côté CSS (`right top` n'a plus de sens ici, cible déjà cadrée en
-    amont)."""
-    if not os.path.exists(_BACKGROUND_PATH):
+def _panel(host=None, **kwargs):
+    """Carte de SECTION à fond opaque (voir `_TYPOGRAPHY_STYLE`) -- T-D04
+    (2026-08-23, spec Claude Design `DESIGN_SPEC.md` §5) : "one card per
+    *logical section*... Never around a single st.write/st.caption. Never
+    nested inside another card." Contrairement au premier passage de ce
+    mécanisme (T80, abandonné -- voir CLAUDE.md), `_panel()` n'est PLUS
+    appelé autour de chaque ligne de texte : seulement autour d'un bloc de
+    section complet (inputs d'un outil, résultats, blends...). Clé
+    `panel_N` (compteur réinitialisé à chaque rerun -- `app.py` est le
+    script principal, réexécuté en entier à chaque interaction, donc l'ordre
+    d'appel -- et les clés qui en découlent -- reste stable pour un état de
+    page donné). `host` (optionnel) : conteneur/colonne parent, par défaut
+    `st` (top niveau de la page) -- `_panel(cols[i])` pour une carte à
+    l'intérieur d'une colonne."""
+    host = host or st
+    return host.container(border=True, key=f"panel_{next(_panel_counter)}", **kwargs)
+
+
+def _panel_expander(label: str, **kwargs):
+    """Même traitement que `_panel()` mais pour `st.expander` (accepte
+    directement `key=`) -- le niveau "Detail" de la hiérarchie à trois
+    surfaces (spec §5) : TOUJOURS à l'intérieur d'une carte de section,
+    jamais imbriqué (pas d'expander dans un expander)."""
+    return st.expander(label, key=f"panel_{next(_panel_counter)}", **kwargs)
+
+
+def _confidence_strip(chips: list[tuple[str, str, str]]) -> None:
+    """T-D05 (spec Claude Design §7) : remplace la pile `st.warning`/
+    `st.caption` (couverture moléculaire, couverture --oav, troncature de
+    résultats, avertissements de source) par UNE ligne de chips `st.badge`
+    sous la carte d'inputs. `chips` : liste de (label, color, help) --
+    `color` sage="green" ("fine", qualification honnête normale) ou
+    terracotta="orange" ("read this", vaut la peine d'être noté) -- JAMAIS
+    rouge, aucune de ces informations n'est une erreur. L'explication
+    complète va dans `help=` (tooltip natif `st.badge`, pas un paragraphe
+    affiché en dur). Rien n'est rendu si `chips` est vide (pas de carte
+    vide)."""
+    if not chips:
         return
-    version = os.path.getmtime(_BACKGROUND_PATH)
-    normal_uri = _background_data_uri(_BACKGROUND_PATH, version, invert=False)
-    inverted_uri = _background_data_uri(_BACKGROUND_PATH, version, invert=True)
-    if normal_uri is None or inverted_uri is None:
-        return
-    html = (
-        _BACKGROUND_SCRIPT_TEMPLATE
-        .replace("__LIGHT_VEIL__", "rgba(255,255,255,0.86)")
-        .replace("__DARK_VEIL__", "rgba(14,17,23,0.72)")
-        .replace("__NORMAL_URI__", normal_uri)
-        .replace("__INVERTED_URI__", inverted_uri)
-    )
-    st.iframe(html, height=1)
+    with _panel():
+        with st.container(horizontal=True):
+            for label, color, help_text in chips:
+                st.badge(label, color=color, help=help_text)
 
 
 # purpose (aromatic/bittering/both) : SEULE donnée BeerMaverick classant un
@@ -603,7 +679,18 @@ def _inject_background() -> None:
 # `pandas.Styler`/CSS littéral ne le ferait pas (couleur figée, ne s'inverse
 # pas avec le thème).
 _PURPOSE_LABELS = {"aromatic": "Aromatic", "bittering": "Bittering", "both": "Aromatic + Bittering"}
-_PURPOSE_COLORS = {"aromatic": "green", "bittering": "orange", "both": "violet"}
+# T-D06 (spec Claude Design §7) : "aromatic = sage, bittering = terracotta,
+# both = outlined with both" -- `st.badge` n'a qu'une seule variante remplie
+# (pas de vrai contour bicolore possible sans CSS par instance, hors de
+# portée de `st.badge` qui n'accepte pas de `key=`) : "both" passe donc en
+# gris neutre (ni sage ni terracotta, jamais confondu avec un seul rôle),
+# `Inferred:` rendu en italique (Markdown supporté par le label `st.badge`)
+# pour rester "visuellement plus faible qu'une donnée mesurée" comme demandé,
+# sans inventer une 4e couleur. Remplace l'ancien vert/orange/VIOLET --
+# `violetColor` du thème Organic (`#728157`) est en réalité un ton sauge
+# quasi identique à `greenColor` (`#7a8a5e`), "both" et "aromatic" étaient
+# donc déjà visuellement indissociables avant ce ticket.
+_PURPOSE_COLORS = {"aromatic": "green", "bittering": "orange", "both": "gray"}
 _PURPOSE_ICONS = {"aromatic": ":material/local_florist:", "bittering": ":material/local_bar:",
                   "both": ":material/join_full:"}
 
@@ -644,11 +731,33 @@ def _descriptors_grouped_by_source(desc_by_source: dict[str, set[str]]) -> dict[
     return {s: sorted(ds) for s, ds in sorted(by_source.items())}
 
 
+def _descriptor_chips(labels: list[str]) -> str:
+    """Pills de descripteur (T-D06, spec Claude Design §7) -- "sage pill,
+    used for every descriptor everywhere". `st.badge` est documenté comme un
+    simple raccourci pour la directive Markdown `:color-badge[texte]` (voir
+    sa docstring) : on l'utilise directement en chaîne plutôt qu'un appel
+    `st.badge` par mot, pour pouvoir aligner N chips sur une seule ligne
+    `st.markdown`/`st.caption` sans conteneur horizontal séparé."""
+    return " ".join(f":green-badge[{label}]" for label in labels)
+
+
+def _source_chips(labels: list[str]) -> str:
+    """Pills de provenance (T-D06) -- "muted pills, one per source" : gris
+    neutre, même mécanisme que `_descriptor_chips`."""
+    return " ".join(f":gray-badge[{label}]" for label in labels)
+
+
 def _purpose_badge(purpose: str | None, inferred: bool = False) -> None:
     if purpose is None:
         st.badge("Unknown", color="gray", icon=":material/help:")
         return
     label = _purpose_label(purpose, inferred)
+    # T-D06 : italique pour un purpose INFÉRÉ -- "visually weaker than
+    # measured data, on purpose" (spec §7) -- `_purpose_label` (texte brut,
+    # partagé avec `_render_hop_rows`/`st.dataframe`, où le Markdown ne se
+    # rend pas) reste inchangé, l'italique n'est appliquée qu'ici, au badge.
+    if inferred:
+        label = f"*{label}*"
     st.badge(label, color=_PURPOSE_COLORS.get(purpose, "gray"), icon=_PURPOSE_ICONS.get(purpose))
 
 
@@ -664,7 +773,7 @@ def _row_with_purpose(entry: dict, hops: dict, comp: dict) -> dict:
     return dict(entry, purpose=purpose, purpose_inferred=inferred)
 
 
-def _render_hop_rows(rows: list[dict], columns: list[tuple[str, str]]) -> None:
+def _render_hop_rows(rows: list[dict], columns: list[tuple]) -> None:
     """Rendu en vrai tableau (`st.dataframe`) -- PAS `st.columns` par ligne
     comme avant (2026-08-20, signalé par l'utilisateur sur téléphone : "the
     table result of amplify and contrast does not render as table on mobile
@@ -679,28 +788,50 @@ def _render_hop_rows(rows: list[dict], columns: list[tuple[str, str]]) -> None:
 
     Contrepartie acceptée par l'utilisateur : la colonne Purpose perd son
     `st.badge` coloré (un tableau ne peut pas rendre un widget arbitraire
-    par cellule, seulement du texte/nombre) au profit d'un texte simple
+    par cellule, seulement du texte/nombre/liste) au profit d'un texte simple
     ("Aromatic"/"Inferred: Bittering"/...) via `_purpose_label` -- partagé
     avec `_purpose_badge`, qui reste inchangé et utilisé partout ailleurs
     (Browse, expanders de détail amplify/contrast/by-descriptor) : ces
     emplacements affichent un SEUL purpose à la fois, pas un tableau, donc
     le problème d'empilement mobile ne s'y pose pas.
 
-    Réutilisé par les tableaux de résultats amplify/contrast ET les tableaux
-    de blend. `rows` : dicts avec une clé "name" + les clés référencées par
-    `columns` ([(en-tête, clé)]) ; une colonne dont la clé est "purpose" est
-    résolue en texte (utilise aussi "purpose_inferred" si présent, voir
-    `_row_with_purpose`)."""
+    T-D07 (spec Claude Design §7, 2026-08-23) : `column_config` explicite au
+    lieu d'une jointure `", ".join(...)` tronquée à l'affichage --
+    `ProgressColumn` pour un score 0-100 ("score"), `NumberColumn` (format
+    percent) pour une fraction 0-1 ("fraction"), `ListColumn` pour une liste
+    de contributeurs/sources (les valeurs correspondantes doivent être de
+    vraies listes Python désormais, plus des chaînes pré-jointes), Purpose
+    en colonne étroite dédiée ("purpose").
+
+    Réutilisé par les tableaux de résultats amplify/contrast/similar-hops ET
+    les tableaux de blend. `rows` : dicts avec une clé "name" + les clés
+    référencées par `columns`. Chaque entrée de `columns` : `(en-tête, clé)`
+    pour du texte simple, ou `(en-tête, clé, kind)` avec `kind` dans
+    {"score", "fraction", "list", "purpose"} pour un rendu typé -- "purpose"
+    résout la clé en texte via `_purpose_label` (utilise aussi
+    "purpose_inferred" si présent, voir `_row_with_purpose`), les autres
+    passent la valeur telle quelle à `column_config`."""
+    column_config: dict = {"Hop": st.column_config.TextColumn(pinned=True)}
     table_rows = []
     for row in rows:
         entry = {"Hop": row["name"]}
-        for header, field in columns:
-            if field == "purpose":
+        for col in columns:
+            header, field = col[0], col[1]
+            kind = col[2] if len(col) > 2 else "text"
+            if kind == "purpose":
                 entry[header] = _purpose_label(row.get("purpose"), row.get("purpose_inferred", False))
+                column_config[header] = st.column_config.TextColumn(width="small")
             else:
                 entry[header] = row.get(field, "")
+                if kind == "score":
+                    column_config[header] = st.column_config.ProgressColumn(
+                        format="%.1f", min_value=0, max_value=100)
+                elif kind == "fraction":
+                    column_config[header] = st.column_config.NumberColumn(format="percent")
+                elif kind == "list":
+                    column_config[header] = st.column_config.ListColumn()
         table_rows.append(entry)
-    st.dataframe(table_rows, width="stretch", hide_index=True)
+    st.dataframe(table_rows, width="stretch", hide_index=True, column_config=column_config)
 
 
 def _render_key_stats(hcomp: dict) -> None:
@@ -832,14 +963,19 @@ def _aroma_wheel_source_caption(source: str) -> str:
 
 
 def _aroma_wheel_missing_warning(missing_names: list[str], source: str) -> None:
-    """Avertissement listant les houblons affichés qui n'ont PAS de lecture
-    exploitable dans la source ACTUELLEMENT choisie par le toggle --
-    demande utilisateur explicite (2026-08-23), aussi bien pour un houblon
-    unique (liste à 1 élément) que pour Compare Hops (plusieurs)."""
+    """Chip listant les houblons affichés qui n'ont PAS de lecture exploitable
+    dans la source ACTUELLEMENT choisie par le toggle -- demande utilisateur
+    explicite (2026-08-23), aussi bien pour un houblon unique (liste à 1
+    élément) que pour Compare Hops (plusieurs). T-D05 (spec Claude Design) :
+    `st.badge` terracotta au lieu d'un `st.warning` plein cadre -- appelée
+    depuis des surfaces variées (panel, expander) qui fournissent déjà leur
+    propre carte, donc pas de `_confidence_strip`/`_panel()` ici (jamais de
+    carte imbriquée)."""
     if not missing_names:
         return
     label = "BarthHaas" if source == "barthhaas" else "Yakima"
-    st.warning(f"Not in the {label} database: {', '.join(missing_names)}.")
+    st.badge(f"Not in the {label} database: {', '.join(missing_names)}",
+             color="orange", icon=":material/info:")
 
 
 def _hop_detail_expanders(con, hops: dict, comp: dict, hop_desc: dict, rows: list[dict]) -> None:
@@ -867,23 +1003,38 @@ def _hop_detail_expanders(con, hops: dict, comp: dict, hop_desc: dict, rows: lis
     compound_smells = _all_compound_descriptors(con, comp)
     # T77 (2026-08-22, demande utilisateur explicite -- confusion vérifiée
     # en direct sur "enigma" : "the source is barthhaas... does berry come
-    # from this only?") : `st.caption(f"Sources: {hops[v]['sources']}")`
-    # juste au-dessus de la liste des descripteurs laissait clairement
-    # entendre que cette provenance couvrait AUSSI les descripteurs --
-    # `hops[v]['sources']` n'a toujours été que la provenance de la
-    # COMPOSITION (`hops` table). Descripteurs groupés par LEUR PROPRE
-    # source (`hop_descriptors.source`, jamais gardée par `hop_desc` --
-    # simple `set[str]` utilisé pour des opérations d'ensemble ailleurs,
-    # voir `matching.descriptor_sources`).
+    # from this only?") : `st.caption(f"Sources: {hops[v]['sources']}")`,
+    # affichée juxtaposée à la liste des descripteurs, laissait croire que
+    # cette provenance couvrait AUSSI les descripteurs -- `hops[v]['sources']`
+    # n'a toujours été que la provenance de la COMPOSITION (`hops` table).
+    # Descripteurs groupés par LEUR PROPRE source (`hop_descriptors.source`,
+    # jamais gardée par `hop_desc` -- simple `set[str]` utilisé pour des
+    # opérations d'ensemble ailleurs, voir `matching.descriptor_sources`).
+    # T-D10 (2026-08-23) a depuis déplacé "Composition: ..." en dernier dans
+    # l'ordre fixe (voir plus bas) -- toujours sa PROPRE ligne, jamais
+    # rapprochée des descripteurs, pour la même raison.
     desc_src = matching.descriptor_sources(con)
     all_intensity = matching.load_aroma_intensity(con)
     for row in rows:
         v = row["variety"]
         with st.expander(f"{row['name']} — {row['caption']}"):
+            # T-D10 (2026-08-23, spec Claude Design §7) : ordre FIXE -- "purpose
+            # chip -> key stats -> wheel block -> descriptors by source ->
+            # composition table -> sources" -- identique dans
+            # `_hop_detail_expanders`/`_browse`/`_by_descriptor`.
             purpose, inferred = matching.resolve_purpose(hops[v].get("purpose"), comp.get(v, {}))
             _purpose_badge(purpose, inferred)
-            st.caption(f"Composition sources: {hops[v]['sources']}")
             _render_key_stats(comp.get(v, {}))
+            by_source = all_intensity.get(v, {})
+            source = _aroma_wheel_toggle(matching.default_aroma_wheel_source(by_source),
+                                         key=f"aroma_source_expander_{v}")
+            intensity = matching.select_aroma_intensity(by_source, source)
+            if intensity:
+                vocab = _intensity_vocabulary_for_sources(con, {source})
+                st.altair_chart(_aroma_wheel(intensity, vocab), width="content")
+                st.caption(_aroma_wheel_source_caption(source))
+            else:
+                _aroma_wheel_missing_warning([hops[v]["name"]], source)
             descs = sorted(hop_desc.get(v, set()))
             if descs:
                 # T79 addendum (2026-08-23, même demande que Browse : "one
@@ -891,19 +1042,9 @@ def _hop_detail_expanders(con, hops: dict, comp: dict, hop_desc: dict, rows: lis
                 # the name of the source, not the notes themselves").
                 desc_by_source = _descriptors_grouped_by_source(desc_src.get(v, {}))
                 st.markdown("**Descriptors**  \n" + "  \n".join(
-                    f"**{s}:** " + ", ".join(ds) for s, ds in desc_by_source.items()))
+                    f"**{s}:** " + _descriptor_chips(ds) for s, ds in desc_by_source.items()))
             else:
                 st.write("**Descriptors:** none recorded")
-            by_source = all_intensity.get(v, {})
-            source = _aroma_wheel_toggle(matching.default_aroma_wheel_source(by_source),
-                                         key=f"aroma_source_expander_{v}")
-            intensity = matching.select_aroma_intensity(by_source, source)
-            if intensity:
-                vocab = _intensity_vocabulary_for_sources(con, {source})
-                st.altair_chart(_aroma_wheel(intensity, vocab), width="content", theme=None)
-                st.caption(_aroma_wheel_source_caption(source))
-            else:
-                _aroma_wheel_missing_warning([hops[v]["name"]], source)
             hcomp = comp.get(v, {})
             crows = sorted(
                 ({"Compound": c, "Value": round(cv["mid"], 3), "Unit": cv["unit"],
@@ -915,6 +1056,8 @@ def _hop_detail_expanders(con, hops: dict, comp: dict, hop_desc: dict, rows: lis
                 key=lambda r: -r["Value"])
             if crows:
                 st.dataframe(crows[:8], width="stretch", hide_index=True)
+            # T-D06 (spec Claude Design §7) : pills grises, une par source.
+            st.caption("Composition: " + _source_chips(hops[v]["sources"].split(",")))
 
 
 def _select_base_hop(ranked: list[dict], key: str) -> str:
@@ -1082,15 +1225,29 @@ def _amplify(con):
     if not notes:
         st.error("No notes in the database.")
         st.stop()
+    # T-D04 (2026-08-23, spec Claude Design) : "one card per logical
+    # section... the input block". `panel_a` réutilisé (Streamlit permet de
+    # rouvrir un `with` sur le MÊME conteneur plusieurs fois) à travers toute
+    # la zone d'input de cet outil, malgré la logique métier interposée.
+    panel_a = _panel()
+    # T-D14 (2026-08-23, spec Claude Design §5, "group each tool's controls
+    # into columns inside the inputs card") : Ingredient + "How to rank
+    # hops?" côte à côte -- `rank_mode_col` créée ici, remplie plus bas (une
+    # fois `rank_mode` calculé), Streamlit permet d'écrire dans un
+    # conteneur déjà créé hors de son ordre d'apparition dans le code (même
+    # principe que la réouverture de `panel_a` lui-même).
+    with panel_a:
+        note_col, rank_mode_col = st.columns(2)
     # T76 (2026-08-22, demande utilisateur explicite -- reframe complet du
     # tool) : "Note" renommé "Ingredient" en GUI ("note" ne parlait pas à
     # l'utilisateur -- c'est l'ADDITION réellement mise dans la recette,
     # ex. mangue, basilic). `note`/`aroma_notes`/le paramètre CLI restent
     # inchangés en interne (portée du renommage = label GUI uniquement,
     # même principe déjà appliqué au vocabulaire anglais de app.py).
-    note = st.selectbox("Ingredient", notes,
-                        help="The actual addition put in the beer recipe "
-                             "(a fruit, herb, spice...).")
+    with note_col:
+        note = st.selectbox("Ingredient", notes,
+                            help="The actual addition put in the beer recipe "
+                                 "(a fruit, herb, spice...).")
 
     hops, comp, hop_desc, _ = matching.load(con)
     # T77 (2026-08-22, demande utilisateur explicite -- confusion vérifiée
@@ -1116,15 +1273,16 @@ def _amplify(con):
     # (mémorisé via session_state, même mécanisme que `use_oav_{note}` T76).
     _suggested_desc = [d for d in matching.reference.INGREDIENT_DESCRIPTORS.get(note, [])
                        if d in _descriptors(con)]
-    if _suggested_desc:
-        st.caption(f"Prefilled from {note}'s typical aroma (AI-assisted "
-                  "suggestion, not measured data) — feel free to edit.")
-    else:
-        st.caption(f"No auto-suggested descriptors for {note} yet — add any "
-                  "that apply manually, or rely on the molecular layer below.")
-    selected_desc = st.multiselect(
-        "Aroma descriptors", _descriptors(con), default=_suggested_desc,
-        key=f"desc_{note}")
+    with panel_a:
+        if _suggested_desc:
+            st.caption(f"Prefilled from {note}'s typical aroma (AI-assisted "
+                      "suggestion, not measured data) — feel free to edit.")
+        else:
+            st.caption(f"No auto-suggested descriptors for {note} yet — add any "
+                      "that apply manually, or rely on the molecular layer below.")
+        selected_desc = st.multiselect(
+            "Aroma descriptors", _descriptors(con), default=_suggested_desc,
+            key=f"desc_{note}")
 
     # T76 3e addendum (2026-08-22, demande utilisateur explicite : "I have
     # the feeling these two buttons are not super clear/ergonomic" -- au
@@ -1140,16 +1298,17 @@ def _amplify(con):
     # est toujours actif). Défaut "Descriptors" (couche principale, T76) --
     # PAS "Both", pour ne rien changer au comportement par défaut déjà en
     # place (moléculaire toujours opt-in).
-    rank_mode = st.segmented_control(
-        "How to rank hops?", ["Descriptors", "Both", "Molecular only"],
-        default="Descriptors", required=True, key=f"rank_mode_{note}",
-        help="**Descriptors** — aroma tags only (see above), the default, "
-             "most reliable signal. **Both** — blends in molecular "
-             "similarity too (which hops share this ingredient's actual "
-             "aroma MOLECULES, not just its descriptor tags — see the "
-             "explainer below). **Molecular only** — ranks purely by "
-             "shared molecules, ignoring descriptor tags entirely, without "
-             "losing your descriptor selection above.")
+    with rank_mode_col:
+        rank_mode = st.segmented_control(
+            "How to rank hops?", ["Descriptors", "Both", "Molecular only"],
+            default="Descriptors", required=True, key=f"rank_mode_{note}",
+            help="**Descriptors** — aroma tags only (see above), the default, "
+                 "most reliable signal. **Both** — blends in molecular "
+                 "similarity too (which hops share this ingredient's actual "
+                 "aroma MOLECULES, not just its descriptor tags — see the "
+                 "explainer below). **Molecular only** — ranks purely by "
+                 "shared molecules, ignoring descriptor tags entirely, without "
+                 "losing your descriptor selection above.")
     use_molecular = rank_mode in ("Both", "Molecular only")
     molecular_only = rank_mode == "Molecular only"
 
@@ -1160,24 +1319,30 @@ def _amplify(con):
     # (avant, dans le `if use_molecular:` ci-dessous, donc invisibles tant
     # que la case n'était pas déjà cochée -- à l'envers de leur but, qui est
     # d'aider À DÉCIDER de cocher ou non).
-    _molecular_score_explainer()
-    # T76 : distribution RÉELLE mesurée sur 44 ingrédients effectivement
-    # courants en brassage (étude T76) -- remplace l'ancien `st.warning`
-    # "Low molecular coverage" qui se déclenchait pour LITTÉRALEMENT
-    # toutes les notes de toute la base (`LOW_COVERAGE_WARNING_
-    # THRESHOLD`=20%, or la couverture ne dépasse jamais ~12% nulle part,
-    # y compris sur les ingrédients réellement pertinents -- un
-    # "avertissement" qui ne varie jamais n'avertit de rien). Contexte
-    # factuel affiché systématiquement plutôt qu'un seuil binaire alarmant.
-    st.caption(
-        "For reference: on real beer ingredients (fruits, herbs, "
-        "spices), molecular coverage typically falls between 4% and "
-        "12% (measured on a curated sample) — hop oil chemistry only "
-        "ever tracks a handful of any ingredient's real aroma "
-        "molecules, so a low number here is normal, not a sign of "
-        "missing data. The descriptor layer above is the more "
-        "reliable signal on its own.")
+    with panel_a:
+        _molecular_score_explainer()
+        # T76 : distribution RÉELLE mesurée sur 44 ingrédients effectivement
+        # courants en brassage (étude T76) -- remplace l'ancien `st.warning`
+        # "Low molecular coverage" qui se déclenchait pour LITTÉRALEMENT
+        # toutes les notes de toute la base (`LOW_COVERAGE_WARNING_
+        # THRESHOLD`=20%, or la couverture ne dépasse jamais ~12% nulle part,
+        # y compris sur les ingrédients réellement pertinents -- un
+        # "avertissement" qui ne varie jamais n'avertit de rien). Contexte
+        # factuel affiché systématiquement plutôt qu'un seuil binaire alarmant.
+        st.caption(
+            "For reference: on real beer ingredients (fruits, herbs, "
+            "spices), molecular coverage typically falls between 4% and "
+            "12% (measured on a curated sample) — hop oil chemistry only "
+            "ever tracks a handful of any ingredient's real aroma "
+            "molecules, so a low number here is normal, not a sign of "
+            "missing data. The descriptor layer above is the more "
+            "reliable signal on its own.")
 
+    # T-D14 (spec Claude Design §5) : --oav (si applicable) + "Number of
+    # results" côte à côte -- même mécanisme de colonne différée que
+    # Ingredient/"How to rank hops?" ci-dessus.
+    with panel_a:
+        oav_col, results_col = st.columns(2)
     use_oav = False
     if use_molecular:
         # T76 (2026-08-22, demande utilisateur explicite) : la case --oav se
@@ -1200,22 +1365,24 @@ def _amplify(con):
         default_oav = bool(producible) and _oav_cov_preview is not None \
             and _oav_cov_preview >= matching.OAV_LOW_COVERAGE_WARNING_THRESHOLD
 
-        use_oav = st.checkbox(
-            "--oav (olfactory power prior)", value=default_oav, key=f"use_oav_{note}",
-            help="Weights each molecule by 1/threshold when that threshold is "
-                 "known. Thresholds are resolved live from FlavorDB2 (PubChem "
-                 "CID → CAS → sourced threshold), never from a hardcoded value — "
-                 "molecules without a sourced FlavorDB2 threshold get a neutral "
-                 "weight (1x), never a guessed one. Approximate: not "
-                 "a real concentration measurement, just a correction so a very "
-                 "potent molecule with a low threshold isn't drowned out by a "
-                 "ubiquitous but barely odorous one. Changes the ranking on "
-                 "about 1 note in 6 (measured on the real database). Pre-checked "
-                 "only when this note's own --oav coverage is high enough to "
-                 "trust (see the caption below once enabled) — untick/tick "
-                 "freely to compare.")
+        with oav_col:
+            use_oav = st.checkbox(
+                "--oav (olfactory power prior)", value=default_oav, key=f"use_oav_{note}",
+                help="Weights each molecule by 1/threshold when that threshold is "
+                     "known. Thresholds are resolved live from FlavorDB2 (PubChem "
+                     "CID → CAS → sourced threshold), never from a hardcoded value — "
+                     "molecules without a sourced FlavorDB2 threshold get a neutral "
+                     "weight (1x), never a guessed one. Approximate: not "
+                     "a real concentration measurement, just a correction so a very "
+                     "potent molecule with a low threshold isn't drowned out by a "
+                     "ubiquitous but barely odorous one. Changes the ranking on "
+                     "about 1 note in 6 (measured on the real database). Pre-checked "
+                     "only when this note's own --oav coverage is high enough to "
+                     "trust (see the caption below once enabled) — untick/tick "
+                     "freely to compare.")
 
-    top = st.slider("Number of results", 1, 30, 8)
+    with results_col:
+        top = st.slider("Number of results", 1, 30, 8)
 
     # T76 : plus de repli implicite "pas de descripteurs -> 100% moléculaire"
     # ici -- ce repli reste dans `matching.amplify` (`has_descriptors`) pour
@@ -1226,9 +1393,10 @@ def _amplify(con):
     # moléculaire malgré la case décochée (ce qui contredirait le choix
     # explicite de l'utilisateur).
     if not use_molecular and not selected_desc:
-        st.write("No descriptors selected and the molecular layer is off — "
-                 "nothing to rank. Add descriptors above, or enable the "
-                 "molecular layer.")
+        with _panel():
+            st.write("No descriptors selected and the molecular layer is off — "
+                     "nothing to rank. Add descriptors above, or enable the "
+                     "molecular layer.")
         return
 
     if not use_molecular:
@@ -1240,46 +1408,67 @@ def _amplify(con):
     r = matching.amplify(con, note, w_mol=w_mol, w_desc=w_desc, use_oav=use_oav,
                          descriptors=selected_desc or None, top=top)
 
+    # T-D05 (spec Claude Design §7) : la pile `st.metric`/`st.caption`/
+    # `st.warning` d'origine devient une ligne de chips `_confidence_strip`
+    # sous la carte d'inputs -- sage="fine", terracotta="read this", jamais
+    # de rouge (aucune de ces qualifications n'est une erreur), explication
+    # complète dans `help=` plutôt qu'en paragraphe affiché en dur.
+    chips: list[tuple[str, str, str]] = []
     if use_molecular:
-        st.metric("Molecular coverage", f"{r['coverage']*100:.0f}%")
+        chips.append((
+            f"Molecular coverage {r['coverage']*100:.0f}%", "green",
+            "Share of this ingredient's producible molecules that real hop "
+            "composition data actually covers. For real brewing additions this "
+            "typically sits at 4-12% (measured across 44 common additions) — hop "
+            "oil chemistry simply doesn't overlap most food aromas. Not a warning "
+            "by itself, the descriptor layer above is always the primary signal."))
         if not r.get("has_descriptors", True):
-            st.caption("No descriptors for this note: 100% molecular score "
-                      "(w_desc not applied).")
+            chips.append((
+                "100% molecular (no descriptors)", "orange",
+                "This ingredient has no descriptors selected: the score is 100% "
+                "molecular (w_desc not applied)."))
         if use_oav and r.get("oav_coverage") is not None:
-            st.caption(
-                f"--oav coverage: {r['oav_coverage']*100:.0f}% of the molecular "
-                "score comes from molecules with a threshold sourced live from "
-                "FlavorDB2 (PubChem CID → CAS → threshold); the rest gets a "
-                "neutral (1x) weight, never a guessed threshold.")
-            if r["oav_coverage"] < matching.OAV_LOW_COVERAGE_WARNING_THRESHOLD:
-                st.warning(
-                    f"--oav is active, but {(1 - r['oav_coverage'])*100:.0f}% of "
-                    "the molecular score comes from molecules without a sourced "
-                    f"threshold (including {', '.join(r['oav_uncovered'])}): for "
-                    "those, --oav has no effect (neutral 1x weight) — its "
-                    "correction here is only partial.")
+            oav_ok = r["oav_coverage"] >= matching.OAV_LOW_COVERAGE_WARNING_THRESHOLD
+            oav_help = (
+                "Share of the molecular score coming from molecules with a "
+                "threshold sourced live from FlavorDB2 (PubChem CID → CAS → "
+                "threshold); the rest gets a neutral (1x) weight, never a guessed "
+                "threshold.")
+            if not oav_ok:
+                oav_help += (f" Uncovered here: {', '.join(r['oav_uncovered'])} — "
+                            "for those, --oav has no effect (neutral 1x weight), "
+                            "so its correction is only partial.")
+            chips.append((f"OAV coverage {r['oav_coverage']*100:.0f}%",
+                         "green" if oav_ok else "orange", oav_help))
         # T76 : avertissement recentré sur le VRAI cas dégénéré (1 seule
         # molécule productible -- le classement se réduit alors à un simple
         # tri par quantité brute de CETTE molécule, cf. le cas géraniol/
         # Talus/Ekuanot documenté en T69) plutôt que sur un seuil de
         # pourcentage qui se déclenchait pour toute la base sans exception.
         if len(producible) <= 1:
-            st.warning(
-                f"Only {next(iter(producible)) if producible else 'no molecule'} "
-                "is a producible molecule for this ingredient: the molecular "
-                "ranking alone just reflects who has the most of it, not this "
-                "ingredient's real signature. The descriptor layer above is "
-                "the more reliable signal here.")
+            chips.append((
+                "Single-molecule ranking", "orange",
+                f"Only {next(iter(producible)) if producible else 'no molecule'} is "
+                "a producible molecule for this ingredient: the molecular ranking "
+                "alone just reflects who has the most of it, not this ingredient's "
+                "real signature. The descriptor layer above is the more reliable "
+                "signal here."))
         # T76 addendum : orphelines = molécules de la note qu'AUCUN houblon ne
-        # produit -- un concept purement moléculaire (`coverage()`), sans
-        # rapport avec la couche descripteurs. N'a de sens que si la couche
-        # moléculaire est activée (déplacé depuis en dehors de `if use_
-        # molecular`, où il s'affichait même case décochée).
+        # produit -- un concept purement moléculaire (`coverage()`), sans rapport
+        # avec la couche descripteurs. N'a de sens que si la couche moléculaire
+        # est activée.
         if r["orphan"]:
-            st.warning("Orphans (carried by the addition, not the hop): "
-                       + ", ".join(r["orphan"]))
+            chips.append((f"{len(r['orphan'])} orphan molecule(s)", "orange",
+                         "Carried by the addition, not the hop: " + ", ".join(r["orphan"])))
+    if r["total_matches"] > len(r["ranked"]):
+        chips.append((
+            f"Showing {len(r['ranked'])} of {r['total_matches']}", "orange",
+            "More hops overlap this ingredient than are shown — raise \"Number of "
+            "results\" above to see them all."))
+    _confidence_strip(chips)
     if not r["ranked"]:
-        st.write("No hop overlaps with this note.")
+        with _panel():
+            st.write("No hop overlaps with this note.")
         return
     # T76 addendum (2026-08-22, demande utilisateur explicite : "we are
     # missing the descriptor contribution... create two distinctive columns
@@ -1305,30 +1494,32 @@ def _amplify(con):
     show_mol_col = use_molecular
     show_desc_col = r.get("has_descriptors", False) and w_desc > 0
     desc_set = set(selected_desc)
-    _columns = [("Score", "score")]
+    # T-D07 (spec Claude Design §7) : "score" -> ProgressColumn 0-100,
+    # "fraction" -> NumberColumn percent (0-1), "list" -> ListColumn (vraies
+    # listes Python, plus de `", ".join(...)` tronqué à l'affichage).
+    _columns = [("Score", "score", "score")]
     if show_mol_col:
-        _columns.append(("Mol.", "mol"))
+        _columns.append(("Mol.", "mol", "fraction"))
     if show_desc_col:
-        _columns.append(("Desc.", "desc"))
-    _columns.append(("Purpose", "purpose"))
+        _columns.append(("Desc.", "desc", "fraction"))
+    _columns.append(("Purpose", "purpose", "purpose"))
     if show_mol_col:
-        _columns.append(("Molecular contributors", "mol_why_str"))
+        _columns.append(("Molecular contributors", "mol_why", "list"))
     if show_desc_col:
-        _columns.append(("Descriptor contributors", "desc_why_str"))
-        _columns.append(("Descriptor sources", "desc_src_str"))
+        _columns.append(("Descriptor contributors", "desc_why", "list"))
+        _columns.append(("Descriptor sources", "desc_src", "list"))
     # T77 addendum : "Sources" renommée "Composition sources" -- n'a
     # toujours été que la provenance de la COMPOSITION (`hops.sources`,
     # ex. "barthhaas"), jamais celle des descripteurs -- le nom générique
     # laissait croire le contraire (source de la confusion signalée).
-    _columns.append(("Composition sources", "sources"))
+    _columns.append(("Composition sources", "sources_list", "list"))
 
     def _row(h):
         overlap = sorted(desc_set & hop_desc.get(h["variety"], set()))
         d_src = sorted({s for d in overlap for s in desc_src.get(h["variety"], {}).get(d, set())})
         return dict(_row_with_purpose(h, hops, comp),
-                   mol_why_str=", ".join(h["why"]) or "—",
-                   desc_why_str=", ".join(overlap) or "—",
-                   desc_src_str=", ".join(d_src) or "—")
+                   mol_why=h["why"], desc_why=overlap, desc_src=d_src,
+                   sources_list=h["sources"].split(","))
 
     _render_hop_rows([_row(h) for h in r["ranked"]], _columns)
 
@@ -1345,12 +1536,14 @@ def _amplify(con):
         {"variety": h["variety"], "name": h["name"], "caption": _contrib_caption(h)}
         for h in r["ranked"]])
 
-    st.subheader("Propose a blend")
-    if not r["has_descriptors"]:
-        st.caption("No descriptors for this note: no blend possible "
-                  "(select descriptors above).")
-    else:
-        base = _select_base_hop(r["ranked"], key="amplify_base_hop")
+    with _panel():
+        st.subheader("Propose a blend")
+        if not r["has_descriptors"]:
+            st.caption("No descriptors for this note: no blend possible "
+                      "(select descriptors above).")
+        else:
+            base = _select_base_hop(r["ranked"], key="amplify_base_hop")
+    if r["has_descriptors"]:
         # Toujours 5 (décision utilisateur) : pas de curseur, un blend à 5
         # tailles complet reste peu coûteux à calculer et laisse voir toutes
         # les options d'un coup plutôt que de forcer un choix a priori.
@@ -1384,32 +1577,30 @@ def _render_blends(blends: list[dict], hops: dict, comp: dict,
     `_pairing_grown_blends`), jamais l'inférence : ceci est un affichage
     a posteriori, pas une entrée du mécanisme de sélection."""
     if not blends:
-        st.write("No combination found.")
+        with _panel():
+            st.write("No combination found.")
         return
-    # Un st.container(border=True) par taille de blend (demande utilisateur,
-    # "it's visually difficult to separate blend n1/n2...n5" -- pas de
-    # séparation visuelle entre les tailles avant, juste des blocs
-    # st.write/_render_hop_rows qui s'enchaînaient). Pas un st.dataframe/
-    # st.table : `_render_hop_rows` rend le Purpose en st.badge par cellule
-    # (seul widget qui s'adapte aux deux thèmes clair/sombre, voir plus
-    # haut) -- un vrai tableau perdrait cette coloration. Le conteneur
-    # bordé délimite chaque blend au moins aussi clairement que des lignes
-    # horizontales, sans ce compromis.
+    # Une carte de section `_panel()` par taille de blend (demande
+    # utilisateur, "it's visually difficult to separate blend n1/n2...n5" --
+    # pas de séparation visuelle entre les tailles avant, juste des blocs
+    # st.write/_render_hop_rows qui s'enchaînaient). La carte délimite chaque
+    # blend au moins aussi clairement que des lignes horizontales.
     for b in blends:
-        with st.container(border=True):
+        with _panel():
             st.write(f"**Size {b['size']}**")
             rows = []
             for h in b["hops"]:
                 d_src = sorted({s for d in h["covers"] for s in desc_src.get(h["variety"], {}).get(d, set())})
                 rows.append(dict(_row_with_purpose(h, hops, comp),
-                                covers_str=", ".join(h["covers"]) or "(nothing new)",
-                                desc_src_str=", ".join(d_src) or "—",
-                                via_label=_VIA_LABELS[h["via"]]))
+                                covers=sorted(h["covers"]), desc_src=d_src,
+                                via_label=_VIA_LABELS[h["via"]],
+                                sources_list=h["sources"].split(",")))
             # T77 (2026-08-22) : même split composition/descripteurs -- voir
-            # `matching.descriptor_sources`.
-            _render_hop_rows(rows, [("Covers", "covers_str"), ("Purpose", "purpose"),
-                                    ("Origin", "via_label"), ("Descriptor sources", "desc_src_str"),
-                                    ("Composition sources", "sources")])
+            # `matching.descriptor_sources`. T-D07 : listes Python typées
+            # ("list") au lieu de chaînes pré-jointes -- voir `_render_hop_rows`.
+            _render_hop_rows(rows, [("Covers", "covers", "list"), ("Purpose", "purpose", "purpose"),
+                                    ("Origin", "via_label"), ("Descriptor sources", "desc_src", "list"),
+                                    ("Composition sources", "sources_list", "list")])
             if b["residual"]:
                 st.caption("Not covered: " + ", ".join(b["residual"]))
 
@@ -1430,21 +1621,24 @@ def _contrast(con):
     # contrairement à Amplify, contrast n'a jamais eu besoin d'un ingrédient
     # précis (juste des descripteurs), donc pas question d'en imposer un ;
     # ne sert qu'à préremplir la liste ci-dessous, toujours éditable.
-    ingredient = st.selectbox(
-        "Ingredient (optional)", _notes(con), index=None,
-        placeholder="Pick an ingredient to prefill descriptors below — or skip "
-                   "and choose descriptors directly")
+    panel_a = _panel()
+    with panel_a:
+        ingredient = st.selectbox(
+            "Ingredient (optional)", _notes(con), index=None,
+            placeholder="Pick an ingredient to prefill descriptors below — or skip "
+                       "and choose descriptors directly")
     _suggested_desc = [d for d in matching.reference.INGREDIENT_DESCRIPTORS.get(ingredient, [])
                        if d in _descriptors(con)] if ingredient else []
-    if ingredient:
-        if _suggested_desc:
-            st.caption(f"Prefilled from {ingredient}'s typical aroma (AI-assisted "
-                      "suggestion, not measured data) — feel free to edit.")
-        else:
-            st.caption(f"No auto-suggested descriptors for {ingredient} yet — "
-                      "add any that apply manually below.")
-    selected = st.multiselect("Descriptors of the note to contrast", _descriptors(con),
-                              default=_suggested_desc, key=f"contrast_desc_{ingredient}")
+    with panel_a:
+        if ingredient:
+            if _suggested_desc:
+                st.caption(f"Prefilled from {ingredient}'s typical aroma (AI-assisted "
+                          "suggestion, not measured data) — feel free to edit.")
+            else:
+                st.caption(f"No auto-suggested descriptors for {ingredient} yet — "
+                          "add any that apply manually below.")
+        selected = st.multiselect("Descriptors of the note to contrast", _descriptors(con),
+                                  default=_suggested_desc, key=f"contrast_desc_{ingredient}")
 
     # Cible d'affinité MODIFIABLE (2026-08-19, demande utilisateur explicite :
     # "we should orient the complementary aroma by pre-selecting them but let
@@ -1468,13 +1662,19 @@ def _contrast(con):
     target_selected = sorted(proposed_target)
     purposes_selected = ["aromatic", "bittering"]
     if selected:
-        st.caption("Complementary notes to target (pre-selected from the affinity map — "
-                  "untick to exclude, or add more)")
-        target_selected = st.pills(
-            "Complementary notes to target", matching.CONTRAST_CORE_CATEGORIES,
-            selection_mode="multi",
-            default=sorted(proposed_target), label_visibility="collapsed",
-            key=f"contrast_target_pills_{tuple(sorted(selected))}") or []
+        # T-D14 (2026-08-23, spec Claude Design §5) : les deux jeux de pills
+        # côte à côte -- les seuls deux "filtres" de la carte d'inputs, une
+        # paire naturelle.
+        with panel_a:
+            target_col, purpose_col = st.columns(2)
+        with target_col:
+            st.caption("Complementary notes to target (pre-selected from the affinity map — "
+                      "untick to exclude, or add more)")
+            target_selected = st.pills(
+                "Complementary notes to target", matching.CONTRAST_CORE_CATEGORIES,
+                selection_mode="multi",
+                default=sorted(proposed_target), label_visibility="collapsed",
+                key=f"contrast_target_pills_{tuple(sorted(selected))}") or []
 
         # Filtre par purpose (T61, 2026-08-19, demande utilisateur explicite :
         # "add another menu for purpose, it would be pre-selecting both
@@ -1487,11 +1687,12 @@ def _contrast(con):
         # Un purpose totalement inconnu (ni réel ni inférable depuis l'acide
         # alpha) est exclu dès qu'un filtre est actif, quel qu'il soit --
         # jamais inclus par défaut faute de donnée.
-        st.caption("Purpose (pre-selected on both — untick to keep only one)")
-        purposes_selected = st.pills(
-            "Purpose", ["aromatic", "bittering"], selection_mode="multi",
-            default=["aromatic", "bittering"], label_visibility="collapsed",
-            key="contrast_purpose_pills") or []
+        with purpose_col:
+            st.caption("Purpose (pre-selected on both — untick to keep only one)")
+            purposes_selected = st.pills(
+                "Purpose", ["aromatic", "bittering"], selection_mode="multi",
+                default=["aromatic", "bittering"], label_visibility="collapsed",
+                key="contrast_purpose_pills") or []
 
     # Plafond relevé de 30 à 100 (2026-08-19, signalé par l'utilisateur :
     # Saaz introuvable pour "tropical"/"mango" même au plafond précédent) --
@@ -1505,28 +1706,36 @@ def _contrast(con):
     # `matching.contrast` (rend l'égalité déterministe, pas seulement le
     # plafond relevé). Page principale, pas la sidebar (2026-08-20, voir le
     # commentaire de `_amplify` -- même correctif mobile pour les 3 outils).
-    top = st.slider("Number of results", 1, 100, 8)
+    with panel_a:
+        top = st.slider("Number of results", 1, 100, 8)
     if not selected:
-        st.write("Choose at least one descriptor."); return
+        with _panel():
+            st.write("Choose at least one descriptor.")
+        return
     r = matching.contrast(con, descriptors=selected, target_descriptors=target_selected,
                          purposes=purposes_selected, top=top)
 
-    st.caption("Affinity target: " + (", ".join(r["affinity_target"]) or "(none selected)"))
-    if r["unmapped"]:
-        st.caption(":material/info: No affinity mapping for: "
-                  + ", ".join(r["unmapped"]) + " (ignored, no effect on the target).")
+    with _panel():
+        # T-D06 (spec Claude Design §7) : "descriptor chip -- ... used for
+        # every descriptor everywhere (..., contrast targets)".
+        st.caption("Affinity target: "
+                  + (_descriptor_chips(sorted(r["affinity_target"])) or "(none selected)"))
+        if r["unmapped"]:
+            st.caption(":material/info: No affinity mapping for: "
+                      + ", ".join(r["unmapped"]) + " (ignored, no effect on the target).")
+        if not r["ranked"]:
+            st.write("No hop overlaps with this target.")
+        if r["total_matches"] > len(r["ranked"]):
+            # Transparence sur la troncature (2026-08-19, demande utilisateur) :
+            # jamais laisser croire que `top` couvre tout le recoupement réel --
+            # même principe que la couverture moléculaire faible ou les
+            # molécules orphelines ailleurs dans la GUI.
+            st.caption(f"Showing {len(r['ranked'])} of {r['total_matches']} hops overlapping "
+                      "this target — raise \"Number of results\" above to see more "
+                      "(many hops often tie on score; see Contrasts via below for what each "
+                      "one actually matches).")
     if not r["ranked"]:
-        st.write("No hop overlaps with this target.")
         return
-    if r["total_matches"] > len(r["ranked"]):
-        # Transparence sur la troncature (2026-08-19, demande utilisateur) :
-        # jamais laisser croire que `top` couvre tout le recoupement réel --
-        # même principe que la couverture moléculaire faible ou les
-        # molécules orphelines ailleurs dans la GUI.
-        st.caption(f"Showing {len(r['ranked'])} of {r['total_matches']} hops overlapping "
-                  "this target — raise \"Number of results\" above to see more "
-                  "(many hops often tie on score; see Contrasts via below for what each "
-                  "one actually matches).")
     hops, comp, hop_desc, _ = matching.load(con)
     # T77 (2026-08-22) : même split composition/descripteurs qu'Amplify --
     # voir `matching.descriptor_sources`.
@@ -1534,21 +1743,25 @@ def _contrast(con):
 
     def _contrast_row(h):
         d_src = sorted({s for d in h["contrast_via"] for s in desc_src.get(h["variety"], {}).get(d, set())})
-        return dict(_row_with_purpose(h, hops, comp), contrast_via_str=", ".join(h["contrast_via"]),
-                   desc_src_str=", ".join(d_src) or "—")
+        return dict(_row_with_purpose(h, hops, comp), contrast_via=h["contrast_via"],
+                   desc_src=d_src, sources_list=h["sources"].split(","))
 
+    # T-D07 (spec Claude Design §7) : listes Python typées ("list") au lieu
+    # de chaînes pré-jointes -- voir `_render_hop_rows`.
     _render_hop_rows(
         [_contrast_row(h) for h in r["ranked"]],
-        [("Score", "score"), ("Purpose", "purpose"), ("Contrasts via", "contrast_via_str"),
-        ("Descriptor sources", "desc_src_str"), ("Composition sources", "sources")])
+        [("Score", "score", "score"), ("Purpose", "purpose", "purpose"),
+        ("Contrasts via", "contrast_via", "list"),
+        ("Descriptor sources", "desc_src", "list"), ("Composition sources", "sources_list", "list")])
 
     _hop_detail_expanders(con, hops, comp, hop_desc, [
         {"variety": h["variety"], "name": h["name"],
          "caption": f"score {h['score']} — contrasts via {', '.join(h['contrast_via'])}"}
         for h in r["ranked"]])
 
-    st.subheader("Propose a blend")
-    base = _select_base_hop(r["ranked"], key="contrast_base_hop")
+    with _panel():
+        st.subheader("Propose a blend")
+        base = _select_base_hop(r["ranked"], key="contrast_base_hop")
     # Toujours 5 (décision utilisateur) : pas de curseur. `target_descriptors`/
     # `purposes` propagés (2026-08-19) : le blend doit viser la même cible et
     # respecter le même filtre purpose que le tableau de résultats ci-dessus.
@@ -1608,7 +1821,11 @@ def _aroma_wheel(intensity: dict[str, float], vocabulary: list[str]):
     dark = st.context.theme.type == "dark"
     text_color = "#f2f2f0" if dark else "#1a1a18"
     grid_color = "#5a5a56" if dark else "#3a3a38"
-    accent = "#4da3ff" if dark else "#2a78d6"
+    # T-D09 (2026-08-23, spec Claude Design §8) : accent terracotta (config.toml
+    # `primaryColor`) au lieu d'un bleu générique sans rapport avec la palette
+    # Organic -- un ton par thème (comme avant), pas de `light-dark()` ici (marks
+    # Altair "libres", voir docstring de la fonction).
+    accent = "#f6a06b" if dark else "#c67139"
 
     n = len(vocabulary)
     r_max = 170.0  # agrandi (demande utilisateur) — était 130
@@ -1697,51 +1914,61 @@ def _browse(con):
                             key="browse_hop")
     h = hops[selected]
     hcomp = comp.get(selected, {})
-    st.subheader(h["name"])
-    # purpose EN PREMIER, avant région/sources (demande utilisateur explicite :
-    # "should appear in the browser information as a main/top information").
-    purpose, inferred = matching.resolve_purpose(h.get("purpose"), hcomp)
-    _purpose_badge(purpose, inferred)
-    st.caption(f"Region: {h['region'] or 'unknown'} · Composition sources: {h['sources']}")
-    # Alpha/beta acids, co-humulone, total oil : demande utilisateur explicite
-    # (2026-08-19), "il manque un élément principal : les infos les plus
-    # importantes de yakima" -- voir `_render_key_stats`.
-    _render_key_stats(hcomp)
+    # T-D04/T-D10 (2026-08-23, spec Claude Design) : ordre FIXE -- "purpose
+    # chip -> key stats -> wheel block -> descriptors by source ->
+    # composition table -> sources" -- identique dans
+    # `_browse`/`_hop_detail_expanders`/`_by_descriptor`. Une carte par étape
+    # (T-D04, "one card per logical section") plutôt qu'une seule carte
+    # fourre-tout comme avant T-D10.
+    with _panel():
+        st.subheader(h["name"])
+        # purpose EN PREMIER (demande utilisateur explicite : "should appear
+        # in the browser information as a main/top information").
+        purpose, inferred = matching.resolve_purpose(h.get("purpose"), hcomp)
+        _purpose_badge(purpose, inferred)
+        st.caption(f"Region: {h['region'] or 'unknown'}")
+        # Alpha/beta acids, co-humulone, total oil : demande utilisateur explicite
+        # (2026-08-19), "il manque un élément principal : les infos les plus
+        # importantes de yakima" -- voir `_render_key_stats`.
+        _render_key_stats(hcomp)
+    # T-D08 (2026-08-23, spec Claude Design) : "chart and its Yakima/BarthHaas
+    # toggle in one bordered block, ... source caption directly under the
+    # chart, missing-source warning inside the block".
+    with _panel():
+        by_source = matching.load_aroma_intensity(con).get(selected, {})
+        source = _aroma_wheel_toggle(matching.default_aroma_wheel_source(by_source),
+                                     key=f"aroma_source_browse_{selected}")
+        intensity = matching.select_aroma_intensity(by_source, source)
+        if intensity:
+            # T-D01 (2026-08-23, spec Claude Design) : `theme=None` retiré --
+            # `_aroma_wheel` prend désormais ses couleurs de `_chart_theme()`
+            # (palette du thème natif Streamlit, voir T-D09), plus besoin
+            # d'écarter le thème Vega-Lite par défaut pour éviter un conflit de
+            # couleurs codées en dur.
+            vocab = _intensity_vocabulary_for_sources(con, {source})
+            st.altair_chart(_aroma_wheel(intensity, vocab), width="content")
+            st.caption(_aroma_wheel_source_caption(source))
+        else:
+            _aroma_wheel_missing_warning([h["name"]], source)
 
     # T77 (2026-08-22, demande utilisateur explicite -- confusion vérifiée en
     # direct sur "enigma" : "the source is barthhaas... does berry come from
-    # this only?") : la ligne "Sources" ci-dessus juste au-dessus des
-    # descripteurs laissait croire qu'elle les couvrait aussi -- provenance
-    # de COMPOSITION uniquement. Chaque descripteur annoté par SA PROPRE
-    # source (`hop_descriptors.source`, voir `matching.descriptor_sources`).
-    descs = sorted(hop_desc.get(selected, set()))
-    desc_src = matching.descriptor_sources(con)
-    if descs:
-        # T79 addendum (2026-08-23, demande utilisateur explicite : "do one
-        # line per source (in bold)... It will reduce the amount of text
-        # and clarity") -- une ligne groupée par source plutôt qu'une
-        # annotation `mot (source)` répétée à chaque descripteur.
-        by_source = _descriptors_grouped_by_source(desc_src.get(selected, {}))
-        st.markdown("**Descriptors**  \n" + "  \n".join(
-            f"**{s}:** " + ", ".join(ds) for s, ds in by_source.items()))
-    else:
-        st.write("**Descriptors:** none recorded")
-    by_source = matching.load_aroma_intensity(con).get(selected, {})
-    source = _aroma_wheel_toggle(matching.default_aroma_wheel_source(by_source),
-                                 key=f"aroma_source_browse_{selected}")
-    intensity = matching.select_aroma_intensity(by_source, source)
-    if intensity:
-        # theme=None : par défaut st.altair_chart applique le thème
-        # "streamlit" (config Vega-Lite globale) qui écrase les couleurs
-        # explicites choisies à la main dans _aroma_wheel pour s'adapter au
-        # clair/sombre -- vérifié en direct (labels illisibles en thème
-        # sombre malgré la palette choisie) : c'est ce thème global qui gagne
-        # sur les couleurs de mark, pas un mauvais choix de couleur.
-        vocab = _intensity_vocabulary_for_sources(con, {source})
-        st.altair_chart(_aroma_wheel(intensity, vocab), width="content", theme=None)
-        st.caption(_aroma_wheel_source_caption(source))
-    else:
-        _aroma_wheel_missing_warning([h["name"]], source)
+    # this only?") : jamais juxtaposer la provenance de COMPOSITION à celle
+    # des descripteurs. Chaque descripteur annoté par SA PROPRE source
+    # (`hop_descriptors.source`, voir `matching.descriptor_sources`).
+    with _panel():
+        descs = sorted(hop_desc.get(selected, set()))
+        desc_src = matching.descriptor_sources(con)
+        if descs:
+            # T79 addendum (2026-08-23, demande utilisateur explicite : "do one
+            # line per source (in bold)... It will reduce the amount of text
+            # and clarity") -- une ligne groupée par source plutôt qu'une
+            # annotation `mot (source)` répétée à chaque descripteur.
+            by_source = _descriptors_grouped_by_source(desc_src.get(selected, {}))
+            st.markdown("**Descriptors**  \n" + "  \n".join(
+                f"**{s}:** " + _descriptor_chips(ds) for s, ds in by_source.items()))
+        else:
+            st.write("**Descriptors:** none recorded")
 
     # "Smells like" (T72, 2026-08-21, demande utilisateur explicite : le
     # tooltip Flavornet ajouté sur le barplot Compare Hops (T71) doit AUSSI
@@ -1756,22 +1983,29 @@ def _browse(con):
     if rows:
         st.dataframe(rows, width="stretch", hide_index=True)
         if any(r["Process"] != "—" for r in rows):
-            st.caption(":material/info: \"Process\" is a qualitative prior (Scott Janish, "
-                      "The New IPA), not a measured transfer rate — it depends on equipment, "
-                      "contact time, temperature and yeast. Never used in any score.")
-            _process_survival_legend()
+            with _panel():
+                st.caption(":material/info: \"Process\" is a qualitative prior (Scott Janish, "
+                          "The New IPA), not a measured transfer rate — it depends on equipment, "
+                          "contact time, temperature and yeast. Never used in any score.")
+                _process_survival_legend()
     else:
-        st.write("No composition recorded.")
+        with _panel():
+            st.write("No composition recorded.")
+    # T-D06/T-D10 (spec Claude Design §7) : "source attribution" en DERNIER
+    # dans l'ordre fixe -- pills grises, une par source. `h['sources']` :
+    # chaîne "barthhaas,yakima" (table `hops`, voir `matching.load`).
+    with _panel():
+        st.caption("Composition: " + _source_chips(h["sources"].split(",")))
 
-    st.divider()
     # Titre commun aux 3 relations éditoriales (2026-08-21, demande
     # utilisateur explicite : "the 'Similar varieties (Yakima)' is not a
     # main title as compared with 'Similar hops (by molecular
     # composition)'... add a title 'Database similarity and
     # substitution'") -- ce titre couvre `_hop_associations` (3 sous-titres
     # de poids égal, `st.write("**...**")`, inchangé).
-    st.subheader("Database similarity and substitution")
-    _hop_associations(con, hops, selected)
+    with _panel():
+        st.subheader("Database similarity and substitution")
+        _hop_associations(con, hops, selected)
 
     # Section calculée à PART, même niveau de titre que ci-dessus (T68
     # addendum, 2026-08-21, demande utilisateur explicite : "'Similar hops
@@ -1782,8 +2016,8 @@ def _browse(con):
     # CALCULÉE (`similar_hops`), toutes deux `st.subheader` désormais :
     # deux sections soeurs plutôt qu'une section unique où la calculée
     # ressortait comme un sous-item parmi les éditoriales.
-    st.divider()
-    _similar_hops_section(con, hops, comp, selected)
+    with _panel():
+        _similar_hops_section(con, hops, comp, selected)
 
 
 # Libellés GUI -> clés `matching.similar_hops(use_molecular=/use_aroma_wheel=)`.
@@ -1841,29 +2075,29 @@ def _similar_hops_section(con, hops: dict, comp: dict, selected: str) -> None:
     # ambigu, à tort lisible comme un mismatch entre le score affiché et le
     # nom de la couche sélectionnée). Aucune ambiguïté possible désormais :
     # le nom de la couche est TOUJOURS dans le libellé de sa propre colonne.
+    # T-D07 (spec Claude Design §7) : "score" -> ProgressColumn 0-100 (les 3
+    # similarités sont déjà des pourcentages 0-100, `None` si la couche est
+    # inactive pour ce houblon -- rendu en cellule vide, jamais un 0
+    # fabriqué), "list" -> ListColumn -- voir `_render_hop_rows`.
     if len(layers) == 2:
-        columns = [("Combined similarity", "similarity"),
-                  ("Molecular similarity", "mol_str"), ("Aroma wheel similarity", "wheel_str")]
+        columns = [("Combined similarity", "similarity", "score"),
+                  ("Molecular similarity", "molecular_similarity", "score"),
+                  ("Aroma wheel similarity", "aroma_wheel_similarity", "score")]
     elif layers == {"molecular"}:
-        columns = [("Molecular similarity", "similarity")]
+        columns = [("Molecular similarity", "similarity", "score")]
     else:
-        columns = [("Aroma wheel similarity", "similarity")]
-    columns.append(("Purpose", "purpose"))
+        columns = [("Aroma wheel similarity", "similarity", "score")]
+    columns.append(("Purpose", "purpose", "purpose"))
     if "molecular" in layers:
-        columns.append(("Shared signature compounds", "shared_compounds_str"))
+        columns.append(("Shared signature compounds", "shared_compounds", "list"))
     if "aroma_wheel" in layers:
-        columns.append(("Shared aroma categories", "shared_descriptors_str"))
-    columns.append(("Sources", "sources"))
+        columns.append(("Shared aroma categories", "shared_descriptors", "list"))
+    columns.append(("Sources", "sources_list", "list"))
 
     rows = []
     for h in similar:
         row = dict(_row_with_purpose(h, hops, comp))
-        row["mol_str"] = ("—" if h["molecular_similarity"] is None
-                          else str(h["molecular_similarity"]))
-        row["wheel_str"] = ("—" if h["aroma_wheel_similarity"] is None
-                            else str(h["aroma_wheel_similarity"]))
-        row["shared_compounds_str"] = ", ".join(h["shared_compounds"]) or "—"
-        row["shared_descriptors_str"] = ", ".join(h["shared_descriptors"]) or "—"
+        row["sources_list"] = h["sources"].split(",")
         rows.append(row)
     _render_hop_rows(rows, columns)
 
@@ -1914,12 +2148,17 @@ _MAX_HEATMAP_HOPS = 12
 # catégories de la roue, qui n'aura JAMAIS de donnée quantitative). NOIR
 # (pas gris, cf. addendum 2026-08-19 -- retour utilisateur : le gris se
 # lisait comme un NaN/valeur manquante plutôt que comme "présent") ; 5
-# paliers de bleu croissant (0-100 réel, `hop_aroma_intensity`) pour les
-# cellules avec donnée -- discrétisé plutôt qu'un dégradé continu Vega, pour
-# rester lisible sur une petite cellule de grille (mêmes tons que
-# `_aroma_wheel`/l'accent existant #2a78d6, palier le plus saturé = ce bleu).
+# paliers croissants (0-100 réel, `hop_aroma_intensity`) pour les cellules
+# avec donnée -- discrétisé plutôt qu'un dégradé continu Vega, pour rester
+# lisible sur une petite cellule de grille (voir T-D09 ci-dessous pour la
+# palette).
 _INTENSITY_BUCKET_ORDER = ["absent", "present", "0-20", "20-40", "40-60", "60-80", "80-100"]
-_INTENSITY_BUCKET_COLORS = ["#f2f1ee", "#000000", "#dbe9fb", "#aecdf2", "#7fb0e8", "#4d92dd", "#2a78d6"]
+# T-D09 (2026-08-23, spec Claude Design §8, "heatmap on the sequential
+# accent ramp") : 5 paliers pris de `chartSequentialColors` (config.toml,
+# rampe terracotta crème -> brun foncé) à la place de l'ancien dégradé de
+# bleu codé en dur ; "absent" aligné sur le fond Organic (`#f5ead8`) plutôt
+# qu'un gris neutre générique, "present" (noir) inchangé (voir ci-dessus).
+_INTENSITY_BUCKET_COLORS = ["#f5ead8", "#000000", "#ffe1d0", "#f6a06b", "#b2622d", "#643312", "#2e2b25"]
 
 
 def _intensity_bucket(value: float) -> str:
@@ -2026,7 +2265,9 @@ def _by_descriptor(con):
     # aroma descriptor selected"). Un houblon DOIT recouper au moins un
     # descripteur texte pour apparaître, dès qu'il y en a un de choisi.
     descriptors = _descriptors(con)
-    text_selected = st.multiselect("Descriptors", descriptors)
+    panel_a = _panel()
+    with panel_a:
+        text_selected = st.multiselect("Descriptors", descriptors)
 
     # Roue d'arôme QUANTITATIVE : ne FILTRE plus, sert uniquement à NOTER
     # (moyenne d'intensité mesurée) les houblons déjà retenus par les
@@ -2038,30 +2279,34 @@ def _by_descriptor(con):
     # visible/cliquable que de les chercher dans le multiselect texte.
     intensity_vocab = _intensity_vocabulary(con)
     wheel_selected = []
-    if intensity_vocab:
-        st.caption("Aroma wheel flavors (optional — scores the results above by measured "
-                  "intensity; does not filter them, except as a fallback when no text "
-                  "descriptor is chosen)")
-        wheel_selected = st.pills("Aroma wheel flavors", intensity_vocab,
-                                  selection_mode="multi", label_visibility="collapsed",
-                                  key="by_descriptor_wheel_pills") or []
-    # Page principale, pas la sidebar (2026-08-20, voir le commentaire de
-    # `_amplify` -- même correctif mobile pour les 3 outils).
-    top = st.slider("Number of hops shown", 1, 30, 10)
+    with panel_a:
+        if intensity_vocab:
+            st.caption("Aroma wheel flavors (optional — scores the results above by measured "
+                      "intensity; does not filter them, except as a fallback when no text "
+                      "descriptor is chosen)")
+            wheel_selected = st.pills("Aroma wheel flavors", intensity_vocab,
+                                      selection_mode="multi", label_visibility="collapsed",
+                                      key="by_descriptor_wheel_pills") or []
+        # Page principale, pas la sidebar (2026-08-20, voir le commentaire de
+        # `_amplify` -- même correctif mobile pour les 3 outils).
+        top = st.slider("Number of hops shown", 1, 30, 10)
     if not text_selected and not wheel_selected:
-        st.write("Choose at least one descriptor.")
+        with _panel():
+            st.write("Choose at least one descriptor.")
         return
     r = matching.by_descriptor(con, text_selected, wheel_descriptors=wheel_selected, top=top)
     ranked = r["ranked"]
     if not ranked:
-        st.write("No hop overlaps with these descriptors.")
+        with _panel():
+            st.write("No hop overlaps with these descriptors.")
         return
     if r["total_matches"] > len(ranked):
         # Transparence sur la troncature (2026-08-20, revue de code — même
         # principe que `contrast`/T56 : jamais laisser croire que "Number of
         # hops shown" couvre tout le recoupement réel).
-        st.caption(f"Showing {len(ranked)} of {r['total_matches']} hops overlapping these "
-                  "descriptors — raise \"Number of hops shown\" above to see more.")
+        with _panel():
+            st.caption(f"Showing {len(ranked)} of {r['total_matches']} hops overlapping these "
+                      "descriptors — raise \"Number of hops shown\" above to see more.")
 
     _, comp, _, _ = matching.load(con)
     compound_smells = _all_compound_descriptors(con, comp)
@@ -2078,13 +2323,15 @@ def _by_descriptor(con):
         wheel_chart, other_chart, hidden = heatmap
         suffix = f" (first 12 of {len(ranked)})" if hidden else ""
         if wheel_chart is not None:
-            st.caption("Aroma wheel descriptors — shaded by measured intensity (Yakima), "
-                      "black where a hop carries the descriptor but has no quantitative "
-                      "reading for it" + suffix)
+            with _panel():
+                st.caption("Aroma wheel descriptors — shaded by measured intensity (Yakima), "
+                          "black where a hop carries the descriptor but has no quantitative "
+                          "reading for it" + suffix)
             st.altair_chart(wheel_chart, width="stretch")
         if other_chart is not None:
-            st.caption("Other descriptors — categorical only, no quantitative intensity "
-                      "data exists for these (black = present)" + suffix)
+            with _panel():
+                st.caption("Other descriptors — categorical only, no quantitative intensity "
+                          "data exists for these (black = present)" + suffix)
             st.altair_chart(other_chart, width="stretch")
 
     # T79 (2026-08-22) : `all_intensity` chargé une seule fois pour toute la
@@ -2095,28 +2342,21 @@ def _by_descriptor(con):
     for h in ranked:
         hcomp = comp.get(h["variety"], {})
         with st.expander(f"{h['name']} — matches {', '.join(h['matched_descriptors'])}"):
+            # T-D10 (2026-08-23, spec Claude Design §7) : ordre FIXE -- "purpose
+            # chip -> key stats -> wheel block -> descriptors by source ->
+            # composition table -> sources" -- identique dans
+            # `_browse`/`_hop_detail_expanders`/`_by_descriptor`.
             purpose, inferred = matching.resolve_purpose(h.get("purpose"), hcomp)
             _purpose_badge(purpose, inferred)
-            match_src = sorted({s for d in h["matched_descriptors"]
-                               for s in desc_src.get(h["variety"], {}).get(d, set())})
-            st.caption(f"Matched descriptors sourced from: {', '.join(match_src) or 'unknown'} "
-                      f"— composition sourced from: {h['sources']}")
             _render_key_stats(hcomp)
-            # T79 addendum (2026-08-23, même demande que Browse/les
-            # expanders : "one line per source (in bold)... bold for the
-            # 'Descriptor' and the name of the source, not the notes
-            # themselves").
-            desc_by_source = _descriptors_grouped_by_source(
-                {d: desc_src.get(h["variety"], {}).get(d, set()) for d in h["all_descriptors"]})
-            st.caption("**All descriptors**  \n" + "  \n".join(
-                f"**{s}:** " + ", ".join(ds) for s, ds in desc_by_source.items()))
             # Transparence sur le tri quantitatif (2026-08-19, "propose a 2
             # layer results ordering... inside this selection, propose a
             # ordered result... based on the aroma wheel descriptors") --
             # jamais un réordonnancement silencieux : dit explicitement CE
             # QUI a été moyenné, ou l'absence de donnée exploitable, pour que
             # l'utilisateur puisse vérifier pourquoi ce houblon est classé où
-            # il est parmi ceux à même nombre de descripteurs recoupés.
+            # il est parmi ceux à même nombre de descripteurs recoupés. Restée
+            # collée au bloc roue (juste avant) : ce texte l'explique.
             if h["quant_score"] is not None:
                 src_label = "BarthHaas" if h.get("intensity_source") == "barthhaas" else "Yakima"
                 st.caption(f"Quantitative refinement: {h['quant_score']:.0f}/100 avg. "
@@ -2127,8 +2367,7 @@ def _by_descriptor(con):
                           "only entry present is a corrupted all-zero YCH reading).")
             # Roue d'arôme quantitative (demande utilisateur 2026-08-19 : "The
             # aroma wheel is missing from the from descriptor tool") -- même
-            # rendu que `_browse`/`_hop_detail_expanders` (theme=None, voir
-            # leur commentaire pour la raison). T79 (2026-08-22) : le score de
+            # rendu que `_browse`/`_hop_detail_expanders`. T79 (2026-08-22) : le score de
             # classement (`h["intensity"]`/`h["intensity_source"]`, ci-dessus)
             # reste la résolution AUTOMATIQUE de `matching.by_descriptor`
             # (jamais de toggle sur le classement lui-même, voir T79) -- ce
@@ -2144,10 +2383,18 @@ def _by_descriptor(con):
             intensity = matching.select_aroma_intensity(by_source, source)
             if intensity:
                 vocab = _intensity_vocabulary_for_sources(con, {source})
-                st.altair_chart(_aroma_wheel(intensity, vocab), width="content", theme=None)
+                st.altair_chart(_aroma_wheel(intensity, vocab), width="content")
                 st.caption(_aroma_wheel_source_caption(source))
             else:
                 _aroma_wheel_missing_warning([h["name"]], source)
+            # T79 addendum (2026-08-23, même demande que Browse/les
+            # expanders : "one line per source (in bold)... bold for the
+            # 'Descriptor' and the name of the source, not the notes
+            # themselves").
+            desc_by_source = _descriptors_grouped_by_source(
+                {d: desc_src.get(h["variety"], {}).get(d, set()) for d in h["all_descriptors"]})
+            st.caption("**All descriptors**  \n" + "  \n".join(
+                f"**{s}:** " + _descriptor_chips(ds) for s, ds in desc_by_source.items()))
             if h["compounds"]:
                 st.dataframe(
                     [{"Compound": c["compound"], "Value": round(c["mid"], 2),
@@ -2156,15 +2403,29 @@ def _by_descriptor(con):
                       "Process": _process_survival_label(c["compound"]) or "—"}
                      for c in h["compounds"][:8]],
                     width="stretch", hide_index=True)
+            match_src = sorted({s for d in h["matched_descriptors"]
+                               for s in desc_src.get(h["variety"], {}).get(d, set())})
+            # T-D06/T-D10 (spec Claude Design §7) : "source attribution" en
+            # DERNIER dans l'ordre fixe -- pills grises, une par source.
+            st.caption("Matched descriptors sourced from: "
+                      + (_source_chips(match_src) if match_src else "unknown")
+                      + " — composition sourced from: "
+                      + _source_chips(h["sources"].split(",")))
 
 
 # T58 (2026-08-19, demande utilisateur, inspiré de
 # https://beermaverick.com/hops/hop-comparison-tool/) : palette CATÉGORIELLE
 # (pas divergente -- "Spectral" suggéré par l'utilisateur est une palette
 # ColorBrewer pensée pour un gradient autour d'un centre neutre, pas adaptée
-# à des houblons sans ordre naturel entre eux) -- Vega/Altair "tableau10",
-# moderne et conçue pour du nominal, 5 premières teintes (max 5 houblons).
-_COMPARE_PALETTE = ["#4c78a8", "#f58518", "#e45756", "#72b7b2", "#54a24b"]
+# à des houblons sans ordre naturel entre eux) -- 5 premières teintes (max 5
+# houblons). T-D09 (2026-08-23, spec Claude Design §8, "stable per-hop
+# colour... shared _chart_theme()") : remplace l'ancienne palette Vega
+# "tableau10" (bleu/orange/rouge/sarcelle/vert générique) par
+# `chartCategoricalColors` (config.toml) -- alterne teinte ET valeur dès les
+# 2 premières entrées (terracotta/sauge) pour rester distinguable même en
+# niveaux de gris, cohérent avec le reste de la palette Organic plutôt qu'un
+# jeu de couleurs sans rapport avec le thème.
+_COMPARE_PALETTE = ["#c67139", "#7a8a5e", "#8c491a", "#aebf92", "#82796a"]
 _COMPARE_MAX_HOPS = 5
 
 # Largeur PARTAGÉE, littérale (pas de Step ni de "stretch") des 3 graphiques
@@ -2533,15 +2794,18 @@ def _compare(con):
     voir `_COMPARE_PALETTE`."""
     hops, comp, hop_desc, _ = matching.load(con)
     options = sorted(hops, key=lambda v: hops[v]["name"].lower())
-    selected = st.multiselect(
-        f"Hops to compare (up to {_COMPARE_MAX_HOPS})", options,
-        format_func=lambda v: hops[v]["name"], max_selections=_COMPARE_MAX_HOPS)
+    with _panel():
+        selected = st.multiselect(
+            f"Hops to compare (up to {_COMPARE_MAX_HOPS})", options,
+            format_func=lambda v: hops[v]["name"], max_selections=_COMPARE_MAX_HOPS)
+        if not selected:
+            st.write("Choose at least one hop.")
     if not selected:
-        st.write("Choose at least one hop.")
         return
     colors = {hops[v]["name"]: _COMPARE_PALETTE[i] for i, v in enumerate(selected)}
 
-    st.subheader("Aroma wheel")
+    with _panel():
+        st.subheader("Aroma wheel")
     # T79, 4e addendum (2026-08-23, demande utilisateur explicite) : jusqu'à
     # 5 houblons superposés sur UN SEUL graphique -- un toggle PAR houblon
     # n'aurait pas de sens ici, un SEUL toggle s'applique à TOUS les
@@ -2559,7 +2823,8 @@ def _compare(con):
     # Yakima à la sélection -- changer la sélection doit recalculer le
     # défaut, tout en gardant un choix manuel tant que la sélection ne
     # change pas.
-    source = _aroma_wheel_toggle(default_source, key=f"aroma_source_compare_{tuple(sorted(selected))}")
+    source = _aroma_wheel_toggle(default_source,
+                                 key=f"aroma_source_compare_{tuple(sorted(selected))}")
     intensities = {}
     missing = []
     for v in selected:
@@ -2571,12 +2836,16 @@ def _compare(con):
     vocabulary = _intensity_vocabulary_for_sources(con, {source} if intensities else set())
     chart = _aroma_wheel_compare(intensities, vocabulary, colors)
     if chart is not None:
-        st.altair_chart(chart, width="content", theme=None)
-        st.caption(_aroma_wheel_source_caption(source))
-        st.caption(":material/info: Hover a label for its definition.")
-    _aroma_wheel_missing_warning(missing, source)
+        st.altair_chart(chart, width="content")
+        with _panel():
+            st.caption(_aroma_wheel_source_caption(source))
+            st.caption(":material/info: Hover a label for its definition.")
+    if missing:
+        with _panel():
+            _aroma_wheel_missing_warning(missing, source)
 
-    st.subheader("Principal info")
+    with _panel():
+        st.subheader("Principal info")
     principal_rows = []
     for v in selected:
         name = hops[v]["name"]
@@ -2589,9 +2858,11 @@ def _compare(con):
     if principal_chart is not None:
         st.altair_chart(principal_chart, width="content")
     else:
-        st.write("No principal composition data for the selected hops.")
+        with _panel():
+            st.write("No principal composition data for the selected hops.")
 
-    st.subheader("Detailed composition")
+    with _panel():
+        st.subheader("Detailed composition")
     # Bascule relatif/absolu (2026-08-21, demande utilisateur explicite,
     # suggestion reprise telle quelle : "Compare Hops separates total oil...
     # from composition (% of oil)... the reader has both numbers in front of
@@ -2604,9 +2875,10 @@ def _compare(con):
     # (même valeur que la barre "Total oil" du barplot principal). Thiols
     # exclus de la conversion (déjà en µg/kg, absolu dans les deux modes --
     # `_compare_detail_value` ne convertit que l'unité `pct_oil`).
-    show_absolute = st.toggle(
-        "Show absolute amount (ml/100g) instead of % of oil",
-        value=True, key="compare_absolute_oil")
+    with _panel():
+        show_absolute = st.toggle(
+            "Show absolute amount (ml/100g) instead of % of oil",
+            value=True, key="compare_absolute_oil")
     present_oil_compounds = [c for c in _COMPARE_DETAIL_OIL_COMPOUNDS
                              if any(comp.get(v, {}).get(c, {}).get("mid") is not None
                                     for v in selected)]
@@ -2651,19 +2923,22 @@ def _compare(con):
     if detail_chart is not None:
         st.altair_chart(detail_chart, width="content")
         if descriptors or process_notes:
-            st.caption(":material/info: Hover a bar, or the space near/below "
-                      "a compound's label, for its Flavornet odor descriptors "
-                      "and process survival notes (not every compound has an "
-                      "entry). \"Process\" is a qualitative prior (Scott "
-                      "Janish, The New IPA) — never a measured transfer rate, "
-                      "never used in any score.")
+            with _panel():
+                st.caption(":material/info: Hover a bar, or the space near/below "
+                          "a compound's label, for its Flavornet odor descriptors "
+                          "and process survival notes (not every compound has an "
+                          "entry). \"Process\" is a qualitative prior (Scott "
+                          "Janish, The New IPA) — never a measured transfer rate, "
+                          "never used in any score.")
         if process_notes:
             _process_survival_legend()
     else:
-        st.write("No detailed composition data for the selected hops.")
+        with _panel():
+            st.write("No detailed composition data for the selected hops.")
     if missing_oil:
-        st.caption(":material/info: Total oil unknown for: " + ", ".join(sorted(set(missing_oil)))
-                  + " — their % of oil composition can't be converted to an absolute amount.")
+        with _panel():
+            st.caption(":material/info: Total oil unknown for: " + ", ".join(sorted(set(missing_oil)))
+                      + " — their % of oil composition can't be converted to an absolute amount.")
 
 
 def main():
@@ -2684,7 +2959,7 @@ def main():
         st.session_state["mode"] = st.session_state.pop("_next_mode")
     # Titre texte "HopFinder" + caption "Aroma note → molecules → hops"
     # RETIRÉS (2026-08-22, demande utilisateur explicite) : redondants avec
-    # le logo et avec le `st.header(MODE_LABELS[mode])` déjà affiché par
+    # le logo et avec le `st.title(MODE_LABELS[mode])` déjà affiché par
     # chaque page d'outil ("HopFinder - Amplify"...) -- "there is already
     # the name of the tool at the top that is enough". Logo en tête de page
     # principale d'abord affiché sur TOUTES les pages, puis RESTREINT À LA
@@ -2727,54 +3002,87 @@ def main():
     # bigger than currently"). `width=260` : large mais reste dans la
     # largeur par défaut de la sidebar Streamlit (~336px) sans déborder.
     st.sidebar.image(_LOGO_PATH, width=260)
+
+    # T-D11 (2026-08-23, spec Claude Design §6) : "Sidebar order: logo ->
+    # navigation -> collapsed 'Database' popover... -> licence/contact
+    # caption at the very bottom, muted, small. The DB line is diagnostic
+    # information; it should not be the second thing in the panel."
+    # `st.navigation`/`st.Page` essayé et écarté (demanderait de retravailler
+    # le relais `_next_mode` pour un gain surtout cosmétique), et le repli
+    # "deux `st.radio` groupés" AUSSI écarté après coup : deux widgets
+    # Streamlit distincts ne partagent pas d'état visuel -- cliquer un mode
+    # dans un groupe laisse l'AUTRE radio affiché comme sélectionné même
+    # après un changement de page (état chacun pour soi côté frontend),
+    # source de confusion pire que l'absence de groupement. Repli plus
+    # simple et sûr, toujours dans l'esprit de la spec (garder LE radio
+    # existant, un seul widget = un seul état) : `format_func` préfixe
+    # chaque libellé par son groupe ("HopFinder — Amplify", "Explore —
+    # Browse a hop") -- la lecture reste groupée sans dupliquer le widget.
+    _MODE_GROUP_PREFIX = {"amplify": "HopFinder — ", "contrast": "HopFinder — ",
+                          "by-descriptor": "HopFinder — ", "browse": "Explore — ",
+                          "compare": "Explore — "}
+    mode = st.sidebar.radio(
+        "Mode", ["home", "amplify", "contrast", "by-descriptor", "browse", "compare"],
+        format_func=lambda m: _MODE_GROUP_PREFIX.get(m, "") + MODE_LABELS[m], key="mode")
+
+    with st.sidebar.popover("Database", icon=":material/database:", width="stretch"):
+        stats = _stats(con)
+        modified = datetime.fromtimestamp(_db_version(db_path)).strftime("%Y-%m-%d %H:%M")
+        st.caption(
+            f"**{db_path}** — {stats['hops']} hops, {stats['notes']} notes, "
+            f"{stats['descriptors']} descriptors · modified {modified}")
+        # Signalé par l'utilisateur (2026-08-23) : la popover ne nommait que
+        # le fichier local (`aromahops.db`), aucune des sources externes
+        # réellement utilisées pour le construire -- voir CLAUDE.md, section
+        # "Réalité des données", pour le détail complet de chacune.
+        st.caption(
+            "Built from: **BarthHaas** & **Yakima Chief** (hop composition, "
+            "aroma wheels) · **BeerMaverick** (pairings, substitutions, "
+            "purpose, descriptor tags) · **FooDB** (ingredient molecules) · "
+            "**Flavornet** & **FlavorDB2** (odor-active compounds, "
+            "thresholds) · **PubChem** (compound identity).")
+
     st.sidebar.caption(
         "Code MIT · [data licenses](https://github.com/quentinba/HopFinder"
         "#licences) · [quentin4313@gmail.com](mailto:quentin4313@gmail.com)")
-
-    stats = _stats(con)
-    modified = datetime.fromtimestamp(_db_version(db_path)).strftime("%Y-%m-%d %H:%M")
-    st.sidebar.caption(
-        f"**{db_path}** — {stats['hops']} hops, {stats['notes']} notes, "
-        f"{stats['descriptors']} descriptors · modified {modified}")
-
-    mode = st.sidebar.radio(
-        "Mode", ["home", "amplify", "contrast", "by-descriptor", "browse", "compare"],
-        format_func=lambda m: MODE_LABELS[m], key="mode")
 
     if mode == "home":
         # Logo affiché seulement ICI (page Home), pas sur les autres pages
         # d'outil -- voir le commentaire plus haut sur son retrait de
         # `main()` en tête commune.
         st.image(_LOGO_PATH, width=420)
-        st.header(MODE_LABELS[mode])
+        st.title(MODE_LABELS[mode])
         _home(con)
         return
 
+    # T-D12 (2026-08-23, spec Claude Design) : "h1 title... + one-line
+    # purpose from _TOOL_SUMMARIES[...]['tagline'] + inputs card +
+    # confidence strip + result cards... Move the long method prose out of
+    # the page body into each tool's own 'How does this work?' expander."
+    # Identique pour les 5 pages d'outil -- factorisé ici plutôt que répété
+    # dans chaque `if mode == ...`.
+    st.title(MODE_LABELS[mode])
+    summary = _TOOL_SUMMARY_BY_MODE[mode]
+    st.caption(summary["tagline"])
+    with _panel_expander("How does this work?"):
+        st.write(summary["description"])
+
     if mode == "by-descriptor":
-        st.header(MODE_LABELS[mode])
         _by_descriptor(con)
         return
-
     if mode == "contrast":
-        st.header(MODE_LABELS[mode])
         _contrast(con)
         return
-
     if mode == "browse":
-        st.header(MODE_LABELS[mode])
         _browse(con)
         return
-
     if mode == "compare":
-        st.header(MODE_LABELS[mode])
         _compare(con)
         return
-
     # "amplify" : seul mode restant après les dispatches explicites
     # ci-dessus -- la sélection de note vit désormais DANS `_amplify` (page
     # principale, pas la sidebar, voir son commentaire), donc plus rien à
     # faire ici que le header, comme les autres modes.
-    st.header(MODE_LABELS[mode])
     _amplify(con)
 
 

@@ -748,7 +748,7 @@ def amplify(con, note: str, w_mol: float = 0.5, w_desc: float = 0.5, use_oav=Fal
     return {"mode": "amplify", "note": note, "coverage": cov, "orphan": orphan,
            "use_oav": use_oav, "has_descriptors": has_descriptors,
            "oav_coverage": oav_cov, "oav_uncovered": oav_uncovered,
-           "ranked": ranked[:top]}
+           "total_matches": len(ranked), "ranked": ranked[:top]}
 
 
 # --------------------------------------------------------------------------- #
