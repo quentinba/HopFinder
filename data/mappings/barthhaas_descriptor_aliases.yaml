@@ -12,9 +12,16 @@
 #   - A word absent from this file is used AS-IS, lowercased — either it
 #     already matches the existing ~105-term vocabulary (e.g. "lemon"),
 #     or it's a genuinely new term worth keeping on its own merit
-#     (e.g. "bergamot", "cognac", "tonka bean", "apple blossom" — the
-#     last one deliberately NOT aliased to the generic "blossom", since
-#     the apple-specific character is the point, per user review).
+#     (e.g. "bergamot", "cognac", "tonka bean", "apple blossom"/"camomile
+#     blossom" — kept as their own terms rather than collapsed to a
+#     generic "blossom"/base plant name, since a flower/blossom note is a
+#     genuinely different aroma from the plant's other common reference
+#     [apple the fruit vs. apple blossom the flower] — never assume a
+#     qualifier is redundant without that specific check, see T79: "camomile
+#     blossom" was originally aliased to "chamomile" by pattern-matching it
+#     with "fennel seeds"/"honeydew melon" [qualifiers with no distinguishing
+#     aroma] instead of testing it against the apple-blossom rule — reverted
+#     2026-08-23 once the inconsistency was flagged by the user).
 #   - A word listed here maps to the term on the right: either a spelling/
 #     phrasing variant of an EXISTING term (e.g. "aniseed" -> "anise"),
 #     or a near-duplicate concept judged close enough to merge rather
@@ -31,7 +38,6 @@
 "liquorice": licorice
 "lemon grass": lemongrass
 "dried fruits": dried fruit
-"camomile blossom": chamomile
 "fennel seeds": fennel
 "honeydew melon": honeydew
 "green grassy": grassy

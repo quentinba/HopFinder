@@ -2194,6 +2194,191 @@ Compare Hops Admiral+Citra montre les 16 axes (Citra y a de vraies
 valeurs Yakima sur les 4 catégories qu'Admiral ne peut pas porter).
 Suite complète : 244 -> **248 tests, tous verts** ; `pyflakes` propre.
 
+**Addendum T79 -- Descripteurs regroupés par source + toggle
+Yakima<>BarthHaas explicite avec avertissement (2026-08-23, demande
+utilisateur explicite, suite directe de T79 -- des correctifs sur
+l'intégration BarthHaas, pas un nouveau ticket).**
+
+**Descripteurs regroupés par source.** Signalé après usage réel de T79 sur
+Citra ("Descriptors: blackberry (barthhaas), citrus (beermaverick/yakima),
+...") : trop de texte, une annotation par mot. Demande explicite : "one
+line per source (in bold) and list all the descriptors from that source"
+puis "bold for the 'Descriptor' and the name of the source, not the notes
+themselves". `app._descriptors_grouped_by_source` (nouveau) inverse
+`{descripteur: {sources}}` (`matching.descriptor_sources`) en `{source:
+[descripteurs triés]}` -- un descripteur porté par plusieurs sources
+apparaît sous CHACUNE (aucune perte d'info vs l'ancien format mot-par-mot).
+Câblé aux 3 sites qui juxtaposaient déjà `mot (source)` (T77) :
+`_browse`, `_hop_detail_expanders` (partagé Amplify/Contrast), `_by_
+descriptor` ("All descriptors").
+
+**Toggle Yakima<>BarthHaas explicite, remplace la résolution automatique +
+case "prefer BarthHaas" de T79.** Demande utilisateur, verbatim complet
+important pour la logique de défaut :
+> "put a Toggle button Yakima <> Brathaas. Put on Yakima by default. If
+> the hop is missing... a warning message... For single hop arome wheel
+> ... yakima by default, except if the hop is missing in yakima but
+> exists in brathaas, then... brathaas by default for this hop. For
+> comparison, if both/all hops are missing from yakima, put brathaas
+> results if at least one hop is existing... Put a warning message... "
+
+Root cause du besoin : le mécanisme T79 (case à cocher "prefer BarthHaas",
+masquée sauf si les deux sources existaient, résolution auto invisible en
+cas d'absence) ne disait JAMAIS explicitement à l'utilisateur "ce houblon
+n'est pas dans CETTE base" -- une roue manquante se lisait comme un bug,
+pas comme une absence de donnée attendue.
+
+`matching.select_aroma_intensity(by_source, source)` (nouveau) : intensités
+pour EXACTEMENT la source demandée, **jamais de repli automatique**
+(contrairement à `resolve_aroma_intensity`, qui reste inchangé et continue
+de piloter le SCORE/tri -- `by_descriptor`, `similar_hops*` -- une
+distinction volontaire : le classement reste déterministe/automatique,
+seul l'AFFICHAGE devient un choix explicite). `{}` si absente/dégénérée
+pour ce houblon -- l'appelant peut alors avertir plutôt que masquer.
+`matching.default_aroma_wheel_source(by_source)` : défaut Yakima, sauf
+Yakima absent/dégénéré ET BarthHaas exploitable -> BarthHaas (exactement
+la logique de repli T79, réexprimée comme valeur INITIALE d'un widget
+explicite plutôt qu'un repli cause caché). `matching.default_aroma_wheel_
+source_for_varieties(all_intensity, varieties)` : même logique appliquée à
+l'ensemble des houblons sélectionnés dans Compare (Yakima sauf si AUCUN
+n'a de lecture Yakima exploitable ET qu'au moins un a du BarthHaas).
+
+`app._aroma_wheel_toggle(default_source, key)` : `st.segmented_control`
+(cohérent avec "How to rank hops?" d'Amplify -- un choix exclusif entre
+deux options, pas une case à cocher), `required=True` (toujours un choix
+actif). `app._aroma_wheel_missing_warning(missing_names, source)` :
+`st.warning` nommant explicitement le(s) houblon(s) absent(s) de la
+source ACTUELLEMENT choisie -- remplace le silence (Browse/expanders/
+by-descriptor n'avaient auparavant AUCUN message si la roue était vide)
+et l'ancienne caption discrète de Compare ("No quantitative aroma wheel
+data for: ...").
+
+Câblé sur les 4 sites déjà porteurs du toggle T79 (`_browse`, `_hop_
+detail_expanders`, `_by_descriptor`, `_compare`) -- toggle désormais
+TOUJOURS affiché (plus conditionné à "ce houblon a-t-il les deux
+sources ?"), pour que l'avertissement puisse s'afficher même sur un
+houblon n'ayant qu'UNE seule source. `_compare` : plus de résolution PAR
+HOUBLON (repli automatique T79) -- un SEUL toggle, la source choisie est
+désormais UNIFORME sur tout le graphique ; un houblon qui ne l'a pas est
+explicitement listé dans l'avertissement plutôt que silencieusement replié
+sur l'autre source.
+
+**Bug de `key` figé trouvé en vérification live (pas en revue statique),
+corrigé avant de considérer le ticket terminé.** Premier passage :
+`_compare` utilisait une clé FIXE (`"aroma_source_compare"`) pour le
+widget -- `default=` d'un widget Streamlit ne s'applique QU'À LA CRÉATION
+du widget sous cette clé précise, jamais recalculé sur un rerun si la clé
+ne change pas (même piège que T57/T61, `contrast_target_pills_...`).
+Constaté en direct : sélectionner Admiral seul calculait bien le défaut
+"barthhaas" (correct, Yakima absent pour Admiral) -- mais AJOUTER Citra
+ensuite gardait le widget sur son état précédent au lieu de recalculer
+vers "yakima" (Citra a une vraie lecture Yakima). Corrigé : `key=
+f"aroma_source_compare_{tuple(sorted(selected))}"` -- changer la
+sélection de houblons crée un nouveau widget avec un défaut fraîchement
+calculé, tout en conservant un choix manuel tant que la sélection ne
+change pas (même pattern que les clés déjà scopées par houblon des 3
+autres sites, qui n'avaient pas ce problème).
+
+7 tests ajoutés (`test_matching.py`) : `select_aroma_intensity` (exact,
+sans repli ; remise à l'échelle BarthHaas ; vide sur source dégénérée),
+`default_aroma_wheel_source` (Yakima usable ; repli BarthHaas si Yakima
+dégénéré ; reste Yakima si aucune des deux usable), `default_aroma_wheel_
+source_for_varieties` (Yakima si au moins un houblon l'a ; BarthHaas si
+AUCUN houblon n'a Yakima). 2 tests `test_app.py` corrigés : la fixture
+`_build_toy_db` utilisait la source `"toy"` (générique, cohérente avec le
+reste de la fixture) pour `hop_aroma_intensity` -- invisible pour le
+nouveau toggle qui ne reconnaît que les noms littéraux "yakima"/
+"barthhaas" (les seuls réels en production) ; renommée en "yakima" dans
+la fixture (T79 4e addendum, 2026-08-23) ; assertion de comptage
+`UnknownElement` et caption "No quantitative aroma wheel data" mises à
+jour pour le nouveau mécanisme (`st.warning`, pas une caption discrète).
+Suite complète : 248 -> **256 tests, tous verts** ; `pyflakes` propre.
+
+Vérifié en direct dans le navigateur sur les 4 sites : Admiral en
+`browse`/`by-descriptor` -- toggle par défaut sur BarthHaas (Yakima
+dégénéré), bascule sur Yakima affiche "Not in the Yakima database:
+Admiral." ; Compare Hops Admiral+Citra -- défaut Yakima (Citra en a une
+vraie lecture), seul Citra tracé + avertissement nommant Admiral ; bascule
+BarthHaas affiche les deux houblons (tous deux dual-source) sans
+avertissement.
+
+**Addendum T79, 2026-08-23 : bug de parsing "analyses" trouvé
+en revoyant la liste des descripteurs BarthHaas-only.** Demande
+utilisateur : "give me the list of descriptor that didn't existed before
+and that are only in brathaas" -- 34 termes listés (`hop_descriptors`
+groupé par descripteur, filtré aux lignes dont l'ENSEMBLE des sources ==
+`{"barthhaas"}`), dont un manifestement faux : **"analyses"**, présent sur
+4 houblons (bobek, brewers-gold, pahtotm, saaz-late), sans rapport avec
+un arôme. Root cause vérifiée en direct (refetch des pages réelles,
+`soup.get_text("\n")` puis recherche de la séquence exacte) : sur ces 4
+pages, la ligne suivant "AROMA PROFILE" est le sous-titre "Typical Aroma
+Profile" (sauté par la garde existante), puis la ligne suivante est
+**"Analyses"** -- pas le contenu attendu, mais le libellé de l'onglet de
+navigation suivant ("Aroma Profile" / "Analyses" tabs, une barre
+d'onglets SANS rapport avec la section arôme, positionnée ailleurs sur la
+page mais aplati au même flux de texte par `get_text`). Un seul mot, ni
+virgule ni point : passe les deux garde-fous de `parsers.parse_
+descriptors` (censée détecter un paragraphe via la présence d'un point)
+et ressort comme un faux descripteur à un mot.
+
+Corrigé : `ingest.crawl_barthhaas` n'appelle plus `parsers.parse_
+descriptors(text)` (retiré, commentaire explicatif laissé en place) --
+la fonction elle-même n'est PAS supprimée (toujours utilisée par
+`build_from_fixtures`, sur des fixtures figées/contrôlées où ce risque de
+faux positif n'existe pas -- format court d'origine, jamais de barre
+d'onglets aplatie dedans), seul cet appel-ci, sur le HTML réel bruyant,
+est retiré. 4 lignes `hop_descriptors` (`descriptor='analyses'`,
+`source='barthhaas'`) supprimées de la base locale ET de la base
+déployée (`quentinba/HopFinder-db`, commit `456bca0`) -- vocabulaire
+`hop_descriptors` 138 -> 137. Pas de test cassé (`parse_descriptors`
+lui-même n'a pas changé de comportement, seul un appelant a été retiré) ;
+suite complète toujours **256 tests, tous verts**, `pyflakes` propre.
+**Reboot Streamlit Cloud requis après un push de la base** (le
+téléchargement ne se redéclenche que si le fichier local du conteneur
+est absent, voir T64) -- même geste que pour la mise à jour T79.
+
+**2e addendum T79, 2026-08-23 : alias "camomile blossom"
+-> "chamomile" retiré -- incohérence trouvée par l'utilisateur en
+comparant à "apple blossom".** L'utilisateur a demandé pourquoi
+"camomile blossom" avait été fusionné (perdant l'information "blossom")
+alors qu'"apple blossom" avait été délibérément gardé distinct, en
+soupçonnant que c'était "just to make it match yakima descriptors".
+Vérifié en direct AVANT de répondre (pas de suppositions) : ni
+"chamomile" ni "apple" ne viennent de Yakima -- les deux existaient déjà
+via **BeerMaverick** avant T79, donc ce n'était pas un alignement sur
+Yakima. La vraie cause, reconnue honnêtement : "camomile blossom" avait
+été classé par l'assistant dans le même lot que "fennel seeds"->fennel/
+"honeydew melon"->honeydew (qualificatif jugé redondant, sans dimension
+olfactive distincte) au lieu d'être testé contre la règle "apple blossom"
+(un qualificatif floral change réellement la note par rapport au terme de
+base -- fruit vs fleur) -- une incohérence d'application de la règle, pas
+une décision motivée séparément. Recommandation donnée : séparer par
+cohérence avec apple blossom plutôt que présumer non vérifié que "blossom"
+est redondant pour la camomille -- confirmée par l'utilisateur.
+
+Corrigé : ligne `"camomile blossom": chamomile` retirée de `data/mappings/
+barthhaas_descriptor_aliases.yaml` (commentaire d'en-tête étendu pour
+documenter explicitement ce revirement et la règle à appliquer à l'avenir
+-- ne jamais présumer un qualificatif redondant sans le même test que pour
+apple blossom). **Pas de recrawl complet** : les 6 houblons concernés
+(bramling-cross, crystal, hersbrucker-spaet, magnat, saaz-late,
+strisselspalt) réidentifiés par requête SQL (`descriptor='chamomile' AND
+source='barthhaas'`), puis chacune de leurs 6 pages BarthHaas réelles
+refetchées en direct pour CONFIRMER que le mot brut scrapé était bien
+"camomile blossom" dans les 6 cas (pas juste "chamomile" tel quel, ce qui
+aurait été un cas différent ne nécessitant aucun correctif) --
+`UPDATE hop_descriptors SET descriptor='camomile blossom' WHERE variety=?
+AND descriptor='chamomile' AND source='barthhaas'` sur les 6 lignes
+exactes. Le "chamomile" de BeerMaverick (`magnat`, source distincte,
+concept indépendant de la roue BarthHaas) volontairement NON touché --
+vérifié après coup qu'il reste bien présent. Base locale ET déployée
+(`quentinba/HopFinder-db`, commit `741113b`) corrigées ; vocabulaire
+`hop_descriptors` 137 -> 138 (ajout net d'"camomile blossom"). Suite
+complète toujours **256 tests, tous verts**, `pyflakes` propre (le
+changement touche uniquement le fichier de mapping et des données, aucun
+code de parsing/ingestion modifié pour ce correctif-ci). Reboot Streamlit
+Cloud requis (même geste, voir ci-dessus).
+
 Reste :
 1. Jointure FooDB/hop_composition au-delà des ~734 composés Flavornet si le vocabulaire
    s'élargit beaucoup (crawl Yakima déjà réel, plus d'aliments FooDB).

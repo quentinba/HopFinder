@@ -425,6 +425,52 @@ def test_resolve_aroma_intensity_all_sources_degenerate_falls_back_to_default_or
     assert source == "yakima"
     assert values == {"citrus": 0.0}
 
+def test_select_aroma_intensity_returns_exact_source_no_fallback():
+    # T79 4e addendum (2026-08-23) : contrairement à resolve_aroma_intensity,
+    # jamais de repli automatique -- "barthhaas" absent ici doit renvoyer {},
+    # pas basculer silencieusement sur yakima.
+    by_source = {"yakima": {"citrus": 50.0}}
+    assert matching.select_aroma_intensity(by_source, "barthhaas") == {}
+    assert matching.select_aroma_intensity(by_source, "yakima") == {"citrus": 50.0}
+
+def test_select_aroma_intensity_rescales_barthhaas():
+    by_source = {"barthhaas": {"citrus": 4.0, "floral": 8.0}}
+    assert matching.select_aroma_intensity(by_source, "barthhaas") == {
+        "citrus": 50.0, "floral": 100.0}
+
+def test_select_aroma_intensity_empty_on_degenerate_all_zero_source():
+    by_source = {"yakima": {"citrus": 0.0, "floral": 0.0}}
+    assert matching.select_aroma_intensity(by_source, "yakima") == {}
+
+def test_default_aroma_wheel_source_yakima_when_usable():
+    by_source = {"yakima": {"citrus": 50.0}, "barthhaas": {"citrus": 4.0}}
+    assert matching.default_aroma_wheel_source(by_source) == "yakima"
+
+def test_default_aroma_wheel_source_falls_back_to_barthhaas_when_yakima_degenerate():
+    # Admiral -- entrée Yakima présente mais corrompue à 0, BarthHaas réel.
+    by_source = {"yakima": {"citrus": 0.0}, "barthhaas": {"citrus": 4.0}}
+    assert matching.default_aroma_wheel_source(by_source) == "barthhaas"
+
+def test_default_aroma_wheel_source_stays_yakima_when_neither_usable():
+    by_source = {"yakima": {"citrus": 0.0}, "barthhaas": {"citrus": 0.0}}
+    assert matching.default_aroma_wheel_source(by_source) == "yakima"
+
+def test_default_aroma_wheel_source_for_varieties_yakima_when_any_usable():
+    all_intensity = {
+        "hopa": {"yakima": {"citrus": 0.0}},
+        "hopb": {"yakima": {"citrus": 50.0}},
+    }
+    assert matching.default_aroma_wheel_source_for_varieties(
+        all_intensity, ["hopa", "hopb"]) == "yakima"
+
+def test_default_aroma_wheel_source_for_varieties_barthhaas_when_all_yakima_missing():
+    all_intensity = {
+        "hopa": {"yakima": {"citrus": 0.0}},
+        "hopb": {"barthhaas": {"citrus": 4.0}},
+    }
+    assert matching.default_aroma_wheel_source_for_varieties(
+        all_intensity, ["hopa", "hopb"]) == "barthhaas"
+
 def test_aroma_wheel_vocabulary_full_without_source_filter(db):
     db.execute("INSERT INTO hop_aroma_intensity VALUES (?,?,?,?)",
               ("_fixture_vocab_full", "citrus", 50.0, "yakima"))
