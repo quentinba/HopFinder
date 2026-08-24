@@ -548,28 +548,31 @@ def test_browse_shows_purpose_badge_as_top_info(toy_cwd):
     assert not at.exception
     assert any("-badge[" in m.value and "Aromatic" in m.value for m in at.markdown)
 
-def test_browse_mode_search_filters_hop_list(toy_cwd):
+def test_browse_mode_lists_all_hops_without_a_search_box(toy_cwd):
+    # Champ de recherche texte libre retiré (2026-08-24, retour utilisateur
+    # explicite : "the 'Hop' search bar already has completion functionality"
+    # -- redondant avec le tape-à-tape natif du `st.selectbox`). Le
+    # selectbox liste désormais TOUJOURS tous les houblons de la base, sans
+    # filtre préalable à appliquer soi-même.
     at = _app()
     at.run()
     at.sidebar.radio[0].set_value("browse").run()
     assert not at.exception
-    at.text_input[0].set_value("hopb").run()
-    assert not at.exception
-    caption = next(c.value for c in at.caption if "hop(s)" in c.value)
-    assert "1 hop(s)" in caption
+    assert len(at.text_input) == 0
     # .options renvoie le libellé affiché (format_func), pas le code brut.
     options = at.selectbox[0].options
-    assert options == ["Hopb"]
+    assert options == ["Hopa", "Hopb", "Hopc", "Twins (Region A)", "Twins (Region B)"]
 
 def test_browse_disambiguates_duplicate_hop_names_by_region(toy_cwd):
     at = _app()
     at.run()
     at.sidebar.radio[0].set_value("browse").run()
     assert not at.exception
-    at.text_input[0].set_value("twins").run()  # twina/twinb : même nom, régions différentes
-    assert not at.exception
+    # twina/twinb : même nom, régions différentes -- les deux doivent
+    # apparaître, désambiguïsées, dans la liste COMPLÈTE (pas de recherche
+    # à appliquer, voir le test ci-dessus).
     options = at.selectbox[0].options
-    assert set(options) == {"Twins (Region A)", "Twins (Region B)"}
+    assert {"Twins (Region A)", "Twins (Region B)"} <= set(options)
 
 def test_compare_requires_at_least_one_hop(toy_cwd):
     at = _app()

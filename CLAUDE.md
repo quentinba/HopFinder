@@ -2539,6 +2539,240 @@ vérification 390px par redimensionnement réel du navigateur (outil
 disponible non coopératif dans cette session, repli sur le comportement déjà
 établi).
 
+## Refonte esthétique GUI -- suivi (2026-08-24, retour Claude Design après
+revue de la 1ere passe)
+
+L'utilisateur a renvoyé `DESIGN_SPEC.md`/`DESIGN_TICKETS.md` mis à jour avec
+4 corrections ciblées sur des défauts trouvés en testant la 1ere passe (voir
+section ci-dessus), plus 4 lockups de logo à choisir. Implémenté dans l'ordre
+donné :
+
+- **Palette catégorielle (§8.2, config.toml)** : l'ancienne palette Organic
+  "chaude" (terracotta/sauge/terracotta foncé/sauge clair/neutre chaud,
+  choisie au 1er tour) ne différait qu'en VALEUR, pas en TEINTE -- 5 houblons
+  se seraient effondrés en nuances de rouille. Nouvelle palette (`_COMPARE_
+  PALETTE` : denim `#4f86b8`, terracotta `#c67139`, sauge `#7f9455`, ochre
+  `#d9a441`, prune `#a5678a`) répartie sur le cercle chromatique, ORDONNÉE
+  pour que les cas à 2 houblons tombent sur bleu/orange (paire qui survit à
+  tout daltonisme). Couleur assignée par position TRIÉE de la sélection
+  (`sorted(selected)`, sur la clé `variety`) -- stable qu'on sélectionne A
+  puis B ou B puis A, pas l'ordre de clic.
+- **Heatmap (§8.3)** : la rampe terracotta choisie au 1er tour faisait
+  collision entre "intensité maximale" et "ceci est cliquable" (terracotta =
+  couleur d'INTERACTION du thème). `_INTENSITY_BUCKET_COLORS` recoloré en
+  rampe SAUGE mono-teinte (`chartSequentialColors`), jamais confondue avec le
+  terracotta. Légende déjà à labels explicites (buckets nommés "0-20"/
+  "20-40"/...), pas juste un dégradé -- conforme sans changement de code
+  supplémentaire (échelle ordinale/discrète dès le départ, pas continue).
+- **Radar mono-houblon (`_aroma_wheel`)** : accent recoloré de terracotta (1er
+  essai, erroné -- §8.1 réserve le terracotta au job "interaction", la couche
+  descripteurs/roue est la voix SAUGE) vers sauge, `mark_area` à 25%
+  d'opacité ajoutée pour le remplissage (manquant au 1er essai). Couleurs de
+  grille/labels alignées sur les VRAIS tokens `borderColor`/`textColor` du
+  thème (`#dcd3c4`/`#474238` et `#201e1d`/`#f9f4ed`) plutôt qu'une teinte de
+  contraste choisie à la main ; taille de police des labels 14->12px (spec).
+- **Radar Compare (`_aroma_wheel_compare`, T-D09b)** : légende déplacée à
+  droite -> en BAS (horizontale, 2 colonnes, `labelLimit=160`) -- l'ancienne
+  légende à droite volait de la largeur au polygone, le "rétrécissant"
+  visuellement dès qu'un nom de houblon long (désambiguïsation régionale,
+  T60, ex. "Saaz (Czech Republic)") apparaissait dans la sélection. Nouveau
+  mécanisme d'abréviation LÉGENDE SEULEMENT (`_abbreviate_region_suffix`/
+  `_legend_abbr_expr`, table `_REGION_ABBR` fermée sur les 13 régions
+  RÉELLEMENT présentes en base, vérifiée en direct, pas supposée) : "Saaz
+  (Czech Republic)" -> "Saaz · CZ" dans la légende via un `labelExpr` Vega
+  (réécrit uniquement le TEXTE affiché), le nom complet reste inchangé dans
+  le tooltip des points et partout ailleurs (tableaux, barplots). `width`/
+  `height` explicites + `autosize=fit-x/contains=padding` (spec) : le
+  polygone garde un rayon pixel-identique quelle que soit la sélection.
+  **Bug trouvé en vérification live** : le canal `color` étant partagé avec
+  la nouvelle couche `mark_area` (18% d'opacité), Vega-Lite héritait cette
+  opacité pour la PASTILLE de légende elle-même (pastilles quasi blanches,
+  illisibles) -- corrigé par `symbolOpacity=1` explicite sur `alt.Legend`.
+- **Detailed composition (T-D09c)** : rotation complète de
+  `_compare_dual_axis_barplot` en une NOUVELLE fonction dédiée
+  (`_compare_detail_barplot`) -- composés sur Y (`yOffset` par houblon au
+  lieu de `xOffset`), hauteur CALCULÉE (`24 + n_compounds * (n_hops*14+18)`)
+  au lieu d'une hauteur fixe (la carte défile désormais au lieu de se
+  comprimer à 5 houblons), bande alternée `mark_rect` à 6% derrière un
+  composé sur deux (x/x2 fixés en dur à `0`/`_COMPARE_CHART_WIDTH`, pas une
+  expression Vega `{"expr":"width"}`, plus fragile), séparateur de barre
+  `stroke`/`strokeWidth=1` à la couleur de fond de carte, composés triés par
+  valeur MAXIMALE décroissante (séparément par groupe d'échelle primaire/
+  secondaire -- comparer les maxima de ml/100g et de µg/kg directement
+  n'aurait pas de sens). `_compare_dual_axis_barplot` original INCHANGÉ,
+  toujours utilisé pour le barplot "Principal info" (4 champs seulement, pas
+  concerné par ce ticket).
+
+**Deux retours utilisateur en vérification live, corrigés avant de committer
+(voir aussi la mémoire cross-session correspondante -- règle générale déjà
+établie : toujours vérifier en direct avant de déclarer un ticket terminé,
+mais ici le défaut n'était visible qu'après un test avec plusieurs houblons
+sélectionnés, pas au premier coup d'oeil) :**
+1. **`strokeDash` par série sur le radar RETIRÉ.** La spec §8.2 suggérait un
+   motif de trait distinct par houblon EN PLUS de la couleur ("Overlays:
+   categorical scale, 18% fills, distinct strokeDash per series") --
+   implémenté (`_COMPARE_STROKE_DASH`, `dash_enc`) puis retiré en totalité le
+   jour même : "using different shape of lines per hop in the radar is not
+   working at all... it's a mess". Le motif pointillé rendait les polygones
+   MOINS lisibles là où ils se croisent -- l'inverse du but recherché. La
+   nouvelle palette élargie (teintes réparties sur le cercle chromatique)
+   suffit seule à distinguer jusqu'à 5 houblons ; ne pas réintroduire de
+   `strokeDash` sans un nouveau retour explicite en sens contraire.
+2. **Axes du barplot "Detailed composition" inversés.** Vega-Lite plaçait
+   par défaut l'axe SECONDAIRE (Thiols, µg/kg -- un seul composé, tout en bas
+   de la grille triée) en HAUT du graphique, et l'axe PRIMAIRE (Amount,
+   ml/100g -- la majorité des composés) en bas -- aucun rapport visuel entre
+   un axe et les barres qu'il annote. Corrigé par un `alt.Axis(orient=...)`
+   explicite sur chaque couche (`orient="top"` primaire, `orient="bottom"`
+   secondaire) -- chaque échelle reste maintenant proche de ce qu'elle
+   mesure.
+
+**T-D14b -- nouveau logo, lockup "1d — Stacked".** Spec fournie sous forme
+d'un aperçu HTML (`HopFinder Logo Options.dc.html`, 4 lockups construits à
+partir de `assets/mini_logo_square.png` utilisé comme masque alpha CSS,
+même principe qu'un seul asset recoloré par thème que le fond d'écran,
+T-D02) -- présenté à l'utilisateur (`AskUserQuestion`, description de chaque
+option reprise de la spec), qui a choisi **1d "Stacked"** (marque au-dessus
+du mot-symbole, aligné à gauche -- pas centré, habitude asymétrique du
+système Organic) pour la sidebar et le hero de la page d'accueil.
+
+La spec elle-même signale que la marque nue perd sa silhouette en dessous
+de ~24px ("if you pick 1a or 1d for the lockup, use the 1b patch as the
+favicon") : le favicon (`_TAB_ICON_PATH`) passe donc du contour nu
+transparent (T78) au variant "1b" (disque sauge + marque crème), généré une
+fois par un script ponctuel (`PIL`, composite de `mini_logo_square.png`
+recoloré sur un disque, 256×256, sauvegardé dans `assets/favicon_patch.png`)
+-- PAS via le mécanisme `light-dark()` du logo principal : un favicon ne
+peut pas réagir au thème de l'app au moment où le navigateur le charge,
+une seule teinte statique pour les deux thèmes.
+
+`_LOGO_PATH`/`_TAB_ICON_PATH` gardent leur RÔLE (voir le ticket : "keep
+their roles; only the files change") -- `_LOGO_PATH` pointe maintenant sur
+`assets/mini_logo_square.png` (plus `assets/logo.png`, l'ancien raster
+opaque, resté inchangé et toujours utilisé par le README GitHub qui ne peut
+pas faire de masque CSS). Nouveau `_logo_html(mark_px, word_px)` construit
+le lockup en HTML (`st.html`, PAS `st.image` -- un `mask-image` CSS ne peut
+pas s'appliquer à un widget image natif) ; nouveau `_logo_mask_data_uri`
+(mise en cache par mtime, même schéma que `_background_mask_data_uri`, mais
+SANS le traitement PIL de celui-ci -- `mini_logo_square.png` a déjà le bon
+canal alpha depuis T78, lu tel quel). Deux classes CSS ajoutées à
+`_TYPOGRAPHY_STYLE` (`.hf-logo-mark` : `mask-image` recoloré terracotta/
+terracotta clair par thème ; `.hf-logo-word` : Caprasimo, couleur de texte
+du thème). Remplace les deux appels `st.image(_LOGO_PATH, ...)` (sidebar,
+hero Home) -- `st.logo` reste écarté (plafond de taille intégré, déjà
+rejeté avant ce ticket).
+
+Vérifié en direct dans le navigateur, thème clair ET sombre : logo net et
+correctement recoloré en sidebar et sur la page d'accueil, favicon lisible.
+`pytest -q` : **256 tests, tous verts** (aucun test ne verrouillait le détail
+visuel des graphiques Compare ni du logo -- rien à mettre à jour) ;
+`pyflakes` propre sur `app.py`.
+
+## Refonte esthétique GUI -- 2e suivi (2026-08-24, retours utilisateur en
+direct sur la passe précédente, capture d'écran à l'appui pour le 1er point)
+
+**Remplissage du radar CASSÉ, corrigé.** Signalé par l'utilisateur avec une
+capture d'écran : le remplissage translucide de chaque polygone ("tenté de
+teinter la surface intérieure de chaque houblon avec la même couleur en
+transparence") ne suivait pas du tout le contour -- des pointes/triangles
+aberrants plutôt que l'étoile fermée attendue. Root cause vérifiée : `mark_
+area` sur des coordonnées x/y LIBRES (pas un axe temporel/catégoriel avec
+ligne de base) remplit vers le bord du graphique le plus proche plutôt que
+de refermer le polygone entre les points consécutifs -- comportement
+documenté de `mark_area` (toujours relatif à une ligne de base), jamais
+prévu pour un polygone fermé arbitraire. Corrigé dans `_aroma_wheel` (mono-
+houblon) ET `_aroma_wheel_compare` (superposition) : `mark_line(interpolate=
+"linear-closed", filled=True, fill=..., fillOpacity=..., strokeOpacity=0)`
+-- le mécanisme Vega-Lite correct pour un polygone fermé sur x/y arbitraires
+(relie premier et dernier point, bascule le remplissage sur `fill` plutôt
+que `stroke`) ; `strokeOpacity=0` cache le contour de CETTE couche, déjà
+dessiné net par la couche `polygon_line` séparée juste au-dessus. Pour la
+version multi-houblons, nouveau canal `fill_enc` (`alt.Fill`, DISTINCT de
+`color_enc`) -- `polygon_line`/`points` gardent `color=color_enc` pour la
+légende, inchangé. Vérifié en direct : chaque étoile se remplit maintenant
+correctement, une seule teinte par houblon fidèle à son contour.
+
+**Taille du radar, ajustée deux fois en direct.** 1er retour ("too big, on
+mobile we don't see it full") -> réduit de 480px/`_COMPARE_CHART_WIDTH`
+(700px, radar carré aligné sur les 2 barplots depuis 2026-08-19) à 340px
+pour les deux versions, radar Compare DÉCOUPLÉ des barplots via une nouvelle
+constante `_COMPARE_RADAR_SIZE` (les 3 graphiques n'étant plus jamais côte à
+côte depuis T-D04, l'alignement pixel entre eux n'a plus de valeur
+fonctionnelle réelle -- voir le commentaire complet dans le code). 2e retour,
+même jour, en revoyant le rendu à 340px : "too small now... something
+inbetween the previous and current version" -> réglé à 400px pour les deux
+(radar mono-houblon ET Compare), un compromis explicite entre 340 et
+480/700. La géométrie interne (`r_max`/`half_extent`, en unités de domaine)
+n'a jamais eu besoin d'être touchée -- Vega-Lite met simplement le rendu à
+l'échelle du `width`/`height` donné.
+
+**Barplot "Detailed composition" : échelle log + libellés de composés.**
+Demande utilisateur explicite : "some compounds are in too small quantity to
+have discrimination on the barplot... a logarithmic scale toggle". Nouveau
+`st.toggle` "Logarithmic scale" (`log_scale`, OFF par défaut -- une échelle
+linéaire reste la lecture la plus directe pour comparer des amplitudes, log
+seulement à la demande), affiché à côté du toggle absolu/relatif existant
+(`st.columns(2)`, T-D14). Une valeur de 0 est INVALIDE sur une échelle log
+(pas de `log(0)`) -- ces lignes sont RETIRÉES avant le tracé quand `log_
+scale` est actif, jamais une barre nulle fabriquée ; l'aide (`help=`) du
+toggle le signale explicitement, même discipline d'honnêteté que le reste
+de l'app.
+
+**`mark_bar` + échelle log : incompatibilité structurelle, 3 correctifs en
+vérification live avant la vraie root cause.** (1) `zero=False` explicite
+sur le `scale` : sans effet, `WARN "x-scale's 'zero' is dropped as it does
+not work with log scale"` en console -- Vega-Lite ignore purement `zero`
+sur une échelle log. (2) domaine `[min, max]` calculé À LA MAIN sur les
+valeurs réellement tracées par chaque couche (`_log_scale`, nécessaire mais
+insuffisant seul) : la console continuait de rapporter `WARN "Log scale
+domain includes zero"` et le graphique restait ENTIÈREMENT VIDE (aucune
+barre, aucun tick d'axe). Root cause réelle, trouvée en creusant plus loin :
+`mark_bar` a un besoin STRUCTUREL d'une ligne de BASE (une barre "part"
+visuellement de quelque chose) -- Vega tente d'unir cette ligne de base au
+domaine fourni quel qu'il soit, et log(0) reste indéfini, donc l'union
+échoue silencieusement. Limitation CONNUE de Vega-Lite (bar + log ne
+cohabitent structurellement pas), pas quelque chose de corrigible côté
+configuration d'axe/domaine seule. (3) Solution retenue : EN MODE LOG
+SEULEMENT, `mark_bar` remplacé par `mark_point` (un point par houblon x
+composé, même position `yOffset`/couleur) -- un point n'a pas besoin de
+ligne de base, seulement d'une position X, donc compatible nativement avec
+une échelle log ; le domaine `_log_scale` calculé à la main reste utile
+avec des points (évite que l'inférence Vega-Lite ne mélange les valeurs des
+2 couches primaire/secondaire sous `resolve_scale(x="independent")`). Mode
+linéaire (barres) totalement inchangé.
+
+Demande utilisateur groupée, même échange : "put capital letters (e.g.
+myrcene -> Myrcene) and use an actual beta symbol for beta-pinene" --
+uniquement sur l'AXE de ce barplot, jamais la clé de donnée `Field`
+(réutilisée telle quelle pour les bandes alternées/le survol/le tooltip/
+`matching.compound_descriptors`). Nouveaux `_compound_display_label`/
+`_compound_axis_expr` : même mécanisme `labelExpr` Vega que `_legend_abbr_
+expr` (radar Compare, ticket précédent) -- réécrit le TEXTE affiché
+seulement. "beta-" -> "β-" (seul composé de `_COMPARE_DETAIL_OIL_COMPOUNDS`
+avec un préfixe grec), puis majuscule initiale sur tous.
+
+**T-D14b, retouché -- favicon.** Signalé par l'utilisateur : "the favicon is
+very small (the hop flower) because the round shape is too big". Le disque
+sage occupait ~62,5% du canevas 256×256 (script de génération, voir T-D14b
+plus haut) -- porté à ~84% (marque quasi pleine, fin anneau sage résiduel)
+pour rester lisible aux tailles réelles de favicon (16-32px). `assets/
+favicon_patch.png` régénéré, même script ponctuel PIL, rien d'autre changé
+(`_TAB_ICON_PATH` inchangé).
+
+**Nettoyage des assets inutilisés.** Demandé par l'utilisateur en même
+temps : `assets/mini_logo.jpeg` (fond noir, source d'ORIGINE du favicon
+avant son recadrage carré T78 -- plus référencé nulle part dans le code
+depuis, `grep` vérifié) retiré du dépôt (`git rm`). `assets/.DS_Store`
+(jamais suivi par git, junk macOS) supprimé localement. `assets/logo.png`
+(raster opaque original) et `assets/mini_logo_square.png`/`background_
+zoomed.png` CONSERVÉS -- toujours utilisés (respectivement par README.md,
+qui ne peut pas faire de masque CSS, et par `_LOGO_PATH`/`_BACKGROUND_PATH`).
+
+`pytest -q` : **256 tests, tous verts** ; `pyflakes` propre. Vérifié en
+direct dans le navigateur (thème clair ET sombre, radar mono-houblon et
+Compare, plusieurs houblons sélectionnés) pour le remplissage et la taille ;
+favicon régénéré vérifié visuellement (fichier PNG) avant intégration.
+
 Reste :
 1. Jointure FooDB/hop_composition au-delà des ~734 composés Flavornet si le vocabulaire
    s'élargit beaucoup (crawl Yakima déjà réel, plus d'aliments FooDB).
@@ -2548,6 +2782,258 @@ Reste :
 3. `INGREDIENT_DESCRIPTORS` (T76, amorce ingrédient->descripteurs) pas encore revue
    contre le vocabulaire élargi par T79 (+34 termes nets) -- mentionné dans la demande
    T79 originale de l'utilisateur mais pas encore repris depuis.
+
+## Refonte esthétique GUI -- 3e suivi (2026-08-24, retour utilisateur sur le
+2e suivi ci-dessus : le point (3) "mark_point" du barplot log a été rejeté)
+
+**"I want barplot not scatterplot"** -- le contournement `mark_point` du 2e
+suivi marchait visuellement mais l'utilisateur voulait des BARRES, pas des
+points, sur l'échelle log aussi. A forcé à creuser la VRAIE root cause
+plutôt que le contournement : reproduction isolée hors Streamlit (fichier
+HTML autonome via `alt.Chart(...).save()`, servi par `python3 -m http.server`
+depuis `/tmp`, piloté par `javascript_tool` appelant `vegaEmbed()`
+directement -- Streamlit bundle/webpack son JS, impossible d'introspecter
+`window.vegaEmbed`/la vue Vega compilée depuis la page de l'app elle-même ;
+technique à réutiliser pour tout futur débogage Vega-Lite profond). Confirmé
+via `view.scale('x').domain()` en direct : le domaine `[min, max]` calculé à
+la main (`_log_scale` du 2e suivi) était déjà CORRECT même quand les barres
+restaient invisibles -- la root cause n'était donc PAS le domaine mais le
+calcul de `x2` (ligne de base d'une barre) : `mark_bar` fixe implicitement
+son `x2` à la valeur littérale `0`, jamais au minimum du domaine, et
+`log(0) = -Infinity` casse la géométrie de la barre quel que soit le domaine
+déclaré -- limitation Vega-Lite réelle, pas une erreur de configuration.
+Correctif trouvé sur la page de test isolée puis reporté dans le code :
+fournir `x2` comme CONSTANTE littérale via `alt.X2Datum(domain_min)`
+(`{"datum": domain_min}` compilé, PAS une référence de champ) -- contourne
+le calcul implicite `x2=0` et permet aux barres de se dessiner sur une
+échelle log, chaque barre partant visuellement de `domain_min` plutôt que de
+0. `domain_min = min(valeurs) * 0.9` (10% sous la plus petite valeur réelle)
+pour que même la barre la plus petite garde une largeur visible (une barre
+dont la valeur == `domain_min` aurait une largeur nulle). Nouvelle fonction
+`_log_scale_and_baseline(values) -> (alt.Scale, domain_min)` remplace
+`_log_scale` + le chemin `mark_point` du 2e suivi, entièrement retiré --
+`mark_bar` inconditionnel dans les deux modes (linéaire ET log) désormais,
+`x2=alt.X2Datum(...)` ajouté seulement quand `log_scale` est actif. Les
+bandes grises alternées derrière chaque groupe de composés (`mark_rect`,
+positionnement `x=alt.value(0)`/`x2=alt.value(_COMPARE_CHART_WIDTH)`,
+indépendant du domaine de la couche barres) n'avaient jamais eu besoin
+d'être touchées -- leur rendu manquant en mode log précédent n'était qu'un
+symptôme du graphique globalement vide, pas un bug séparé.
+
+**Radar, encore retouché : 500px, traits plus fins.** Après 480 -> 340 -> 400
+(2e suivi ci-dessus), nouvelle demande explicite "let's increase to 500px
+instead of 400. Also reducing the size of the line could help reduce the
+bulkyness" -- `_aroma_wheel` (`.properties(width=500, height=500)`) ET
+`_COMPARE_RADAR_SIZE = 500` alignés ; `polygon_line.strokeWidth` 2 -> 1.5
+(mono-houblon) et `line_width` (Compare, `alt.condition` survol/non-survol)
+`(5, 2)` -> `(3.5, 1.5)`. Ne plus re-questionner 500px/traits fins sans
+nouveau retour explicite -- historique de 4 valeurs déjà essayées en
+quelques jours.
+
+**Caption dupliquée sous la roue d'arôme de Compare Hops, retirée.**
+Signalé littéralement par l'utilisateur (texte copié-collé montrant la
+répétition) : `_aroma_wheel_source_caption(source)` inclut DÉJÀ "Hover a
+label for its definition." comme préfixe de son propre texte (pour les 2
+variantes Yakima/BarthHaas) -- un `st.caption(":material/info: Hover a
+label for its definition.")` séparé, juste après, dans `_compare()`
+seulement, répétait donc la même phrase deux fois. Retiré (seule la ligne
+`st.caption(_aroma_wheel_source_caption(source))` reste). Vérifié par `grep`
+que les 3 AUTRES call sites (`_browse`, `_hop_detail_expanders`,
+`_by_descriptor`) n'avaient jamais eu ce doublon -- bug localisé à Compare
+Hops uniquement, pas un pattern répété ailleurs.
+
+`pytest -q` : 256 tests, tous verts ; `pyflakes` propre. Vérifié en direct
+dans le navigateur (thème sombre, 3 houblons sélectionnés Compare Hops) :
+radar 500px/traits fins avec remplissage toujours propre ; barplot détaillé
+en mode log affichant de VRAIES barres (Myrcene, Humulene, ... jusqu'à
+Thiols) avec bandes alternées visibles sur les deux axes (primaire ml/100g
+en haut, Thiols µg/kg en bas) ; caption de la roue d'arôme Compare affichée
+une seule fois. Artefacts de débogage nettoyés (`/tmp/test_log_bar.html`
+supprimé, serveur HTTP de test tué).
+
+## Refonte esthétique GUI -- 4e suivi (2026-08-24, retours utilisateur sur
+le 3e suivi ci-dessus : caption sur 2 lignes, points du radar trop gros, et
+le toggle log remplacé par un menu de normalisation)
+
+**Caption de la roue d'arôme, sur 2 lignes.** Demande explicite : "put the
+two info of the info box on two lines". `_aroma_wheel_source_caption`
+combinait déjà "Hover a label for its definition." et "Aroma wheel source:
+..." dans UNE seule chaîne (voir le 3e suivi, dédoublonnage de la caption
+Compare) -- `st.caption` rend du markdown, donc un `\n` littéral est ignoré
+par le rendu (recolle tout sur une ligne) : il faut un retour à la ligne
+MARKDOWN (`"  \n"`, deux espaces avant le saut) pour que les deux phrases
+s'affichent réellement sur deux lignes séparées.
+
+**Points du radar, réduits.** Demande explicite : "reduce the size of the
+points/scatter of the spider chart, it's a bit bulky". Même logique que le
+trait affiné au 3e suivi (`polygon_line.strokeWidth`/`line_width`) --
+`mark_point.size` est une AIRE en px², une réduction "de moitié" donne un
+rayon perceptiblement plus fin sans le diviser par deux visuellement :
+mono-houblon (`_aroma_wheel`) 60 -> 30 ; Compare (`_aroma_wheel_compare`,
+`point_size` selon survol) `(110, 50)` -> `(55, 25)`.
+
+**Barplot détaillé : toggle log -> menu déroulant "Normalization".**
+Demande utilisateur explicite, retour direct sur le toggle log du 3e suivi
+("I'm not convinced, I think there is something better to do") : "instead
+of the toggle button a dropdown menu where you choose a normalization. By
+default it's None as per the initial barplot, but you can select min-max /
+log / quantile normalisation... for each molecule you look at the known
+value across all hops in the database and apply minmax or quantile
+normalisation depending on user choice." `st.selectbox` 4 options (`app.
+_compare`) : **None** (défaut, comportement historique inchangé, valeurs
+brutes) ; **Log** (représentation EXISTANTE du 3e suivi, reprise à
+l'identique -- `X2Datum`, aucune retouche) ; **Min-max**/**Quantile**
+(nouveau).
+
+Min-max/Quantile calculées PAR COMPOSÉ, sur `comp` ENTIER (`matching.load`
+retourne déjà TOUTES les variétés de la base, pas seulement `selected` --
+aucune requête supplémentaire nécessaire) : `_compare_field_db_values(comp,
+field, absolute)` réutilise `_compare_detail_value` (même conversion
+d'unité `absolute` que la barre elle-même -- mélanger % d'huile et ml/100g
+pour un même composé fausserait le classement) pour collecter toutes les
+valeurs connues de CE composé, puis `_normalize_minmax`/`_normalize_
+quantile` transforment la valeur du houblon sélectionné en position dans
+[0, 1] :
+- `_normalize_minmax` : `(value - min) / (max - min)`, cas dégénéré (`hi ==
+  lo`, une seule valeur connue dans toute la base) -> 1.0 plutôt qu'une
+  division par zéro -- ce houblon EST le seul point connu, une barre pleine
+  plutôt qu'un 0.5 arbitraire qui suggérerait une position "moyenne" non
+  fondée.
+- `_normalize_quantile` : rang moyen bas/haut (`bisect_left`/`bisect_right`
+  sur la liste triée, divisé par 2n) -- gère correctement les valeurs à
+  égalité (fréquentes : beaucoup de houblons partagent la même valeur
+  arrondie) plutôt qu'un rang arbitraire entre doublons. Même cas dégénéré
+  -> 1.0.
+
+Une fois transformée, `rows[i]["Value"]` (le champ tracé) devient la
+position [0, 1] ; la valeur BRUTE est conservée à côté dans `rows[i][
+"RawValue"]` -- sans elle, myrcène à 3.2 ml/100g et thiols à 0.0004 µg/kg
+afficheraient tous deux "0.81" au survol, ce qui serait malhonnête (perte
+totale de l'amplitude réelle). `_compare_detail_barplot` reçoit 3 nouveaux
+paramètres optionnels pour ça, RIEN d'autre n'y change (Min-max/Quantile
+sont des modes LINÉAIRES ordinaires, `log_scale=False` -- pas besoin du
+trick `X2Datum`, une position normalisée à 0 est un point valide sur une
+échelle linéaire contrairement à `log(0)`) :
+- `x_domain=(0.0, 1.0)` fige le domaine des 2 échelles X plutôt que de
+  laisser Vega-Lite l'auto-zoomer sur l'étendue réelle des seuls houblons
+  SÉLECTIONNÉS -- sans ça, "0 = minimum de la base" au titre de l'axe
+  deviendrait FAUX dès que la sélection ne couvre pas tout l'intervalle
+  (2 barres pourraient sembler aux extrêmes du graphique alors qu'elles
+  sont proches l'une de l'autre dans la vraie base).
+- `value_tooltip_title`/`raw_value_title` renomment les 2 lignes de
+  tooltip ("Min-max position"/"Quantile rank" + "Raw value (unit varies by
+  compound)") plutôt que le "Value" générique par défaut.
+
+Ordre des composés (`_sorted_by_max`, inchangé structurellement) trie
+maintenant par la valeur normalisée max en Min-max/Quantile -- cohérent
+avec l'axe affiché, mais change l'ordre visuel par rapport au mode None
+(les composés où un houblon sélectionné est près du maximum DE LA BASE
+remontent, pas ceux avec la plus grande quantité brute). Comportement
+attendu, pas un bug : l'ordre suit toujours "ce qui se distingue le plus
+sur CET axe".
+
+`pytest -q` : 256 tests, tous verts ; `pyflakes` propre. Vérifié en direct
+(3 houblons Compare Hops, thème sombre) : caption sur 2 lignes ; points du
+radar visiblement plus fins ; menu "Normalization" avec ses 4 options ;
+Min-max ET Quantile affichant un domaine [0, 1] figé, un titre d'axe
+explicite, et le tooltip montrant à la fois la position normalisée ET la
+valeur brute ; Log toujours identique au 3e suivi (aucune régression).
+
+## Refonte esthétique GUI -- 5e suivi (2026-08-24, retours utilisateur sur
+le 4e suivi ci-dessus : légende du radar disparue, ordre des composés
+instable selon la normalisation, et infobox "Smells like"/"Process")
+
+**Légende du radar Compare, DISPARUE -- root cause enfin trouvée.** Signalé
+par l'utilisateur : "For some reason we lost the legend in the spider plot.
+Put it back". `_aroma_wheel_compare` utilisait un canal `fill_enc` (`alt.
+Fill`, `legend=None`) DISTINCT de `color_enc` (`alt.Color`, légende bas/
+horizontale) pour `polygon_fill` -- introduit au 3e suivi (git blame plus
+lointain en réalité, voir T-D09 du même jour) pour remplir chaque polygone
+de sa propre teinte SANS dupliquer la légende. Cassé depuis (jamais vérifié
+en direct après une modification voisine) : `fill`/`color` référencent le
+MÊME champ ("Hop:N") avec un domaine/une plage IDENTIQUES -- Vega-Lite
+fusionne leurs légendes en UNE seule (scale partagée détectée), et le
+conflit "disable" (`fill_enc` en demande une désactivée via `legend=None`,
+`color_enc` une active) se résolvait en DÉSACTIVANT la légende FUSIONNÉE
+ENTIÈRE (`WARN Conflicting legend property "disable" (true and false)` en
+console, présent mais jamais remarqué avant ce signalement -- aucun test
+`pytest`/AppTest ne rend réellement le SVG Vega-Lite, ce genre de
+régression purement visuelle ne peut être attrapée qu'en vérifiant en
+direct dans le navigateur après CHAQUE changement touchant aux légendes).
+
+Corrigé en revenant à `color=color_enc` PARTOUT (`polygon_fill` inclus,
+`fill_enc` supprimé entièrement) : un mark `line` avec `filled=True`
+bascule le SENS du canal `color` de "stroke" (défaut pour ce type de mark)
+vers "fill" -- donc `color=color_enc` suffisait DÉJÀ à remplir chaque
+polygone de sa propre teinte, le canal `fill` séparé n'a jamais été
+nécessaire. Un seul canal partagé par les 3 couches (`polygon_fill`/
+`polygon_line`/`points`) => une seule légende, aucun conflit possible.
+`symbolOpacity=1` sur `color_enc` (déjà en place, T-D09b) reste nécessaire :
+sans lui, la pastille de légende hériterait le `fillOpacity=0.18` de
+`polygon_fill`.
+
+**Ordre des composés, maintenant STABLE quelle que soit la normalisation.**
+Demande explicite : "I want you to keep the same order of molecules across
+different normalisations. Keep the same as before with Myrcene as first
+element". `_sorted_by_max` (`_compare_detail_barplot`) triait sur `Value`
+-- la valeur PLOTÉE, donc déjà normalisée en Min-max/Quantile (transformée
+côté appelant AVANT l'appel, voir 4e suivi) -- ce qui réordonnait les
+composés selon leur position DANS LA BASE plutôt que leur quantité RÉELLE
+chez les houblons affichés, un ordre différent à chaque changement de menu.
+Corrigé en triant sur `r.get("RawValue", r["Value"])` -- `RawValue` (la
+valeur BRUTE, ajoutée par l'appelant en Min-max/Quantile pour le tooltip,
+voir 4e suivi) quand présente, sinon `Value` lui-même (déjà brut en mode
+None/Log, aucun changement de comportement pour ces 2 modes). Un seul
+point de vérité pour "quel composé est le plus significatif", partagé par
+les 4 modes -- Myrcene reste en tête tant qu'il l'est en mode None.
+
+**Infobox "Smells like"/"Process", sur 2 lignes.** Demande explicite : "use
+2 lines for the two information level 'Smells like' and 'Process'". Même
+mécanisme que la caption de la roue d'arôme (2e/3e suivi) : retour à la
+ligne MARKDOWN (`"  \n"`) entre les 2 phrases, chacune CONDITIONNÉE à sa
+propre présence (`descriptors`/`process_notes` peuvent être vides
+indépendamment selon les composés affichés) -- jamais une ligne vide pour
+un niveau d'info absent de la sélection courante.
+
+**Champ de recherche texte retiré de Browse a hop** (demande arrivée en
+cours de tour, hors du lot des 3 retours ci-dessus, mais traitée dans le
+même passage) : "the 'Hop' search bar already has completion functionality"
+-- `st.text_input("Search (name or variety)")` filtrait la liste AVANT de
+la passer au `st.selectbox`, alors que ce dernier filtre déjà nativement
+par frappe (tape-à-tape Streamlit standard), rendant le champ texte pur
+doublon. Retiré, le selectbox liste désormais toujours TOUS les houblons de
+la base (189, non filtrés en amont). 2 tests `AppTest` mis à jour (`tests/
+test_app.py`) -- l'un vérifiait le FILTRAGE par le texte (`test_browse_
+mode_search_filters_hop_list`, devenu `test_browse_mode_lists_all_hops_
+without_a_search_box`, vérifie maintenant la liste COMPLÈTE + l'absence de
+`text_input`), l'autre (désambiguïsation twina/twinb) utilisait le champ
+texte seulement pour restreindre AVANT d'asserter -- adapté pour asserter
+sur un SOUS-ENSEMBLE de la liste complète plutôt que sur son égalité.
+
+`pytest -q` : 256 tests, tous verts (2 réécrits, aucun ajouté/retiré) ;
+`pyflakes` propre. Vérifié en direct (Compare Hops, thème sombre, Citra +
+Saaz) : légende du radar de nouveau visible (pastilles Citra/Saaz sous le
+polygone) ; console navigateur sans le warning "Conflicting legend
+property" ; ordre des composés IDENTIQUE en None et en Min-max (Myrcene en
+tête dans les deux) ; caption "Smells like"/"Process" sur 2 lignes ; page
+Browse sans aucun `text_input` restant, `st.selectbox` "Hop" listant les
+189 houblons.
+
+**Addendum, même jour : tooltip "Normalization" reformaté.** Demande
+utilisateur explicite : "format the 'Normalization' infobox to use \n to
+separate the normalisations descriptions" -- le `help=` du `st.selectbox`
+(4e suivi) empilait les 4 descriptions (None/Log/Min-max/Quantile) en un
+seul paragraphe dense. Même mécanisme que toutes les autres captions
+multi-lignes de cette session : retour à la ligne MARKDOWN (`"  \n"`, un
+simple `"\n"` est ignoré par le rendu markdown du tooltip `help=`, comme
+pour `st.caption`) -- construit ici via `"  \n".join(help_lines)` sur une
+liste de 5 chaînes (l'intro + une par option) plutôt que des `+=`
+concaténés à la main. Profité de l'occasion pour distinguer enfin Min-max
+de Quantile dans le texte (avant : une seule phrase commune "or its rank
+among them (quantile)" accolée à la description min-max) -- Quantile
+précise maintenant "percentile rank... less swayed by a single outlier
+hop", Min-max reste "raw position between the extremes". Vérifié en direct :
+tooltip affichant les 4 lignes séparément au survol du "?".
 
 ## Conventions
 - Commentaires/docstrings en français (cohérent avec l'existant).
