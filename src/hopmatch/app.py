@@ -15,10 +15,13 @@ Lancer : streamlit run src/hopmatch/app.py [-- --db chemin/vers/aromahops.db]
 """
 from __future__ import annotations
 import base64
+import bisect
 import io
 import itertools
+import json
 import math
 import os
+import re
 import sys
 from datetime import datetime
 
@@ -45,26 +48,34 @@ DEFAULT_DB = "aromahops.db"
 _BACKGROUND_PATH = os.path.join(
     os.path.dirname(__file__), "..", "..", "assets", "background_zoomed.png")
 
-# Logo (demande utilisateur, 2026-08-22) : image fournie par l'utilisateur
-# (fond crème opaque). Une version fond-transparent a été essayée puis
-# retirée le même jour (2e addendum) : "it doesn't work in dark theme" --
-# constaté en direct par l'utilisateur dans l'app déployée (contrairement à
-# l'aperçu composité statique utilisé pour la valider, voir CLAUDE.md) ;
-# fond original CONSERVÉ tel quel désormais, jamais modifié.
+# Logo (T-D14b, 2026-08-24, spec Claude Design -- "HopFinder Logo Options",
+# lockup 1d "Stacked" choisi par l'utilisateur parmi 4 options présentées).
+# REMPLACE l'ancien raster `assets/logo.png` (2026-08-22, fond crème opaque)
+# -- `_LOGO_PATH` garde son RÔLE ("le fichier source du logo affiché en
+# sidebar/hero") mais pointe maintenant sur `assets/mini_logo_square.png`,
+# déjà un simple contour vert sur fond TRANSPARENT (T78) -- appliqué en `mask-
+# image` CSS (voir `_logo_html`), teinté par le thème via `light-dark()`,
+# même technique à un seul asset que le fond d'écran (T-D02) : plus besoin
+# de deux fichiers clair/sombre ni de la mise en garde du 1er essai T78
+# ("transparent logo doesn't work in dark theme" -- un `<img>` PNG collé
+# tel quel n'a pas ce problème pour un MASQUE recoloré dynamiquement, à la
+# différence d'un fond fixe imprimé dans les pixels).
 _LOGO_PATH = os.path.join(
-    os.path.dirname(__file__), "..", "..", "assets", "logo.png")
-
-# Icône d'onglet navigateur (favicon), demande utilisateur explicite le même
-# jour : "Use this for the table logo" [sic, "tab logo"] -- image DISTINCTE
-# du logo principal (assets/mini_logo.jpeg, fond noir, icône houblon seule,
-# fournie par l'utilisateur), plus adaptée qu'un lockup horizontal large à
-# un favicon carré minuscule. `mini_logo_square.png` -- recadrage carré
-# CENTRÉ SUR L'ICÔNE (pas sur le canevas 1408×768, décalé) : bbox du contenu
-# calculé par seuil de luminosité (>25/255) pour trouver le centre réel de
-# l'icône avant de découper, jamais un simple crop au centre géométrique du
-# fichier source.
-_TAB_ICON_PATH = os.path.join(
     os.path.dirname(__file__), "..", "..", "assets", "mini_logo_square.png")
+
+# Icône d'onglet navigateur (favicon). T-D14b (2026-08-24) : passe de la
+# marque nue transparente (T78) au variant "patch" (1b, cercle sauge + marque
+# crème) -- demandé par la spec elle-même pour tout lockup nu en dessous de
+# ~24px ("the bare mark loses its silhouette... if you pick 1a or 1d for the
+# lockup, use the 1b patch as the favicon", et 1d est le choix retenu
+# ci-dessus). Généré une fois (`mini_logo_square.png` recoloré + composé sur
+# un disque sage, script ponctuel, pas de dépendance PIL au runtime pour ce
+# fichier) -- statique, PAS le mécanisme `light-dark()` du logo principal :
+# un favicon ne peut pas réagir au thème de l'app au moment où le navigateur
+# le charge, une seule teinte fixe pour les deux thèmes (déjà lisible sur
+# fond clair ET sombre de barre d'onglets, vérifié en direct).
+_TAB_ICON_PATH = os.path.join(
+    os.path.dirname(__file__), "..", "..", "assets", "favicon_patch.png")
 
 # Libellés GUI affichés à l'utilisateur, distincts des clés internes ("mode")
 # qui pilotent le dispatch et restent stables (CLI/tests/URLs internes non
@@ -169,6 +180,57 @@ _TOOL_SUMMARY_BY_MODE = {t["mode"]: t for t in _TOOL_SUMMARIES}
 # un `git log` en direct exigerait aussi que `.git` soit présent dans le
 # conteneur déployé, ce qui n'est pas garanti.
 _RECENT_UPDATES = [
+    ("2026-08-24", "The \"Normalization\" dropdown's help text (Compare "
+                   "Hops, detailed composition chart) now lists None/Log/"
+                   "Min-max/Quantile one per line instead of one dense "
+                   "paragraph."),
+    ("2026-08-24", "Fixed the multi-hop aroma-wheel radar's legend, which "
+                   "had silently gone missing (a Vega-Lite quirk from an "
+                   "earlier fix); the detailed composition chart's compound "
+                   "order now stays the same (myrcene first) no matter "
+                   "which normalization is selected, instead of reshuffling "
+                   "every time; its \"Smells like\"/\"Process\" hint is now "
+                   "two lines instead of one; and Browse a hop's redundant "
+                   "search box was removed — the \"Hop\" dropdown already "
+                   "filters as you type."),
+    ("2026-08-24", "Compare Hops' detailed composition chart's log-scale "
+                   "toggle became a \"Normalization\" dropdown (None / "
+                   "Min-max / Quantile / Log): min-max and quantile place "
+                   "each hop's compound value relative to every hop's "
+                   "known value for that same compound across the whole "
+                   "database, so small and large compounds become directly "
+                   "comparable (the exact amount is still on hover); the "
+                   "aroma-wheel radar's dots are smaller and less bulky; "
+                   "and the aroma wheel's caption is now two lines instead "
+                   "of one long run-on sentence."),
+    ("2026-08-24", "Another round on the aroma-wheel radar and detailed "
+                   "composition chart: the radar is bigger again (500px) "
+                   "with thinner outlines so it reads less busy; the "
+                   "detailed composition chart's logarithmic-scale toggle "
+                   "now draws actual bars (it briefly fell back to dots, "
+                   "a Vega-Lite log-scale limitation) with the alternating "
+                   "background bands correctly visible again; and a "
+                   "duplicated \"Hover a label for its definition\" line "
+                   "under Compare Hops' aroma wheel was removed."),
+    ("2026-08-24", "Fixed the aroma-wheel radar's shaded fill, which wasn't "
+                   "tracing the polygon shape correctly; resized the radar "
+                   "for a better fit on both mobile and desktop; added a "
+                   "logarithmic scale toggle to Compare Hops' detailed "
+                   "composition chart to see small compounds better; "
+                   "capitalized compound names on that chart's axis (and "
+                   "used a real β symbol for beta-pinene); and made the "
+                   "favicon's hop icon bigger."),
+    ("2026-08-24", "Follow-up polish on the new visual design: a wider, "
+                   "actually-distinguishable colour palette for Compare "
+                   "Hops' charts (5 hops no longer collapse into shades of "
+                   "the same colour); the aroma-wheel radar keeps a "
+                   "constant size regardless of hop name length, with an "
+                   "abbreviated legend at the bottom; the detailed "
+                   "composition chart is now horizontal with a computed "
+                   "height so it scrolls instead of compressing at 5 hops; "
+                   "the intensity heatmap switched from a terracotta ramp "
+                   "(which read as \"button\") to a sage one; and a new "
+                   "logo lockup everywhere the logo appears."),
     ("2026-08-23", "New visual design across the whole app (warm cream/"
                    "terracotta/sage palette, new typography, a redesigned "
                    "background): coverage/orphan-molecule/truncation "
@@ -504,6 +566,21 @@ def _background_mask_data_uri(path: str, _version: float) -> str | None:
     return f"data:image/png;base64,{encoded}"
 
 
+@st.cache_data
+def _logo_mask_data_uri(path: str, _version: float) -> str | None:
+    """T-D14b (2026-08-24, spec Claude Design, lockup "1d — Stacked" choisi
+    par l'utilisateur parmi 4 options) : encode `_LOGO_PATH` en data URI pour
+    un `mask-image` CSS. AUCUN traitement PIL nécessaire ici, contrairement à
+    `_background_mask_data_uri` : le fichier (`assets/mini_logo_square.png`,
+    déjà retravaillé en T78) a DÉJÀ le bon canal alpha (contour opaque, fond
+    transparent) -- lu tel quel. Mis en cache par mtime, `None` si absent."""
+    if not os.path.exists(path):
+        return None
+    with open(path, "rb") as f:
+        encoded = base64.b64encode(f.read()).decode("ascii")
+    return f"data:image/png;base64,{encoded}"
+
+
 # T-D03 (2026-08-23, spec Claude Design `DESIGN_SPEC.md` §3) : Caprasimo
 # (h1 SEULEMENT -- "at h3 inside a dense results panel it becomes noise")
 # et `tabular-nums` (alignement des chiffres en colonne, tableaux/metrics)
@@ -531,6 +608,24 @@ _TYPOGRAPHY_STYLE = """
    (seul hook stable pour un `st.container(border=True)`, voir `_panel`). */
 div[class*="st-key-panel_"], details[class*="st-key-panel_"] {
     background-color: light-dark(#ebddc5, #2e2b25);
+}
+/* T-D14b (2026-08-24, spec Claude Design, lockup "1d — Stacked") : la
+   marque (`.hf-logo-mark`) est un `mask-image` (voir `_logo_mask_data_uri`/
+   `_logo_html`) recoloré par thème -- même technique à un seul asset que le
+   fond d'écran (T-D02), teinte terracotta (accent d'interaction, §8.1),
+   PAS la sauge du reste de la roue d'arôme : le logo est chrome de marque,
+   pas une donnée. Le mot-symbole reprend Caprasimo (déjà réservé au h1).*/
+.hf-logo-mark {
+    display: inline-block;
+    background-color: light-dark(#c67139, #f6a06b);
+    -webkit-mask-size: contain; mask-size: contain;
+    -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+    -webkit-mask-position: center; mask-position: center;
+}
+.hf-logo-word {
+    font-family: 'Caprasimo', Figtree, sans-serif;
+    color: light-dark(#201e1d, #f9f4ed);
+    line-height: 1;
 }
 </style>
 """
@@ -568,6 +663,29 @@ _BACKGROUND_STYLE_TEMPLATE = """
 # si la palette change.
 _GROUND_LIGHT = "#ebddc5"
 _GROUND_DARK = "#2e2b25"
+
+
+def _logo_html(mark_px: int, word_px: int) -> str:
+    """T-D14b (2026-08-24, spec Claude Design -- lockup "1d — Stacked",
+    choisi par l'utilisateur parmi 4 options présentées dans "HopFinder Logo
+    Options.dc.html") : marque au-dessus du mot-symbole, aligné à GAUCHE (pas
+    centré -- habitude asymétrique du système Organic, spec §3/§5, "flush
+    left, not centred"). Remplace `st.image(_LOGO_PATH, ...)` -- un `mask-
+    image` CSS ne peut pas être appliqué à un widget `st.image` natif, d'où
+    `st.html`. Repli silencieux sur le mot-symbole seul si l'asset masque est
+    absent (même garde que `_inject_background` pour le fond d'écran)."""
+    word = f'<div class="hf-logo-word" style="font-size:{word_px}px;">HopFinder</div>'
+    if not os.path.exists(_LOGO_PATH):
+        return word
+    mask_uri = _logo_mask_data_uri(_LOGO_PATH, os.path.getmtime(_LOGO_PATH))
+    if mask_uri is None:
+        return word
+    mark_style = (f"width:{mark_px}px; height:{mark_px}px; "
+                  f"-webkit-mask-image:url('{mask_uri}'); mask-image:url('{mask_uri}');")
+    mark = f'<div class="hf-logo-mark" style="{mark_style}"></div>'
+    gap = max(6, word_px // 3)
+    return (f'<div style="display:flex; flex-direction:column; align-items:flex-start; '
+           f'gap:{gap}px;">{mark}{word}</div>')
 
 
 def _inject_background() -> None:
@@ -955,11 +1073,16 @@ def _aroma_wheel_toggle(default_source: str, key: str) -> str:
 
 
 def _aroma_wheel_source_caption(source: str) -> str:
+    # Deux phrases sur deux lignes (2026-08-24, retour utilisateur explicite)
+    # -- `st.caption` rend du markdown, donc un retour à la ligne markdown
+    # ("  \n", deux espaces avant le saut) plutôt qu'un simple "\n" (ignoré
+    # par le rendu markdown, aurait recollé les deux phrases sur une ligne).
     if source == "barthhaas":
-        return (":material/info: Hover a label for its definition. Aroma wheel source: "
-                "BarthHaas (rescaled to a comparable 0-100 range from their own 0-8 scale).")
-    return (":material/info: Hover a label for its definition. Aroma wheel source: "
-           "Yakima Chief Hop Sensory Ballot.")
+        return (":material/info: Hover a label for its definition.  \n"
+                "Aroma wheel source: BarthHaas (rescaled to a comparable "
+                "0-100 range from their own 0-8 scale).")
+    return (":material/info: Hover a label for its definition.  \n"
+           "Aroma wheel source: Yakima Chief Hop Sensory Ballot.")
 
 
 def _aroma_wheel_missing_warning(missing_names: list[str], source: str) -> None:
@@ -1819,13 +1942,21 @@ def _aroma_wheel(intensity: dict[str, float], vocabulary: list[str]):
     if not vocabulary:
         return None
     dark = st.context.theme.type == "dark"
-    text_color = "#f2f2f0" if dark else "#1a1a18"
-    grid_color = "#5a5a56" if dark else "#3a3a38"
-    # T-D09 (2026-08-23, spec Claude Design §8) : accent terracotta (config.toml
-    # `primaryColor`) au lieu d'un bleu générique sans rapport avec la palette
-    # Organic -- un ton par thème (comme avant), pas de `light-dark()` ici (marks
-    # Altair "libres", voir docstring de la fonction).
-    accent = "#f6a06b" if dark else "#c67139"
+    # "axis labels at body colour" -- tokens `textColor` réels du thème.
+    text_color = "#f9f4ed" if dark else "#201e1d"
+    # 8.3 (2026-08-24, retour Claude Design) : "axis spokes at border
+    # colour" -- alignés sur les tokens `borderColor` réels du thème
+    # (config.toml), pas une teinte de contraste choisie à part.
+    grid_color = "#474238" if dark else "#dcd3c4"
+    # T-D09/8.1 (2026-08-24, retour Claude Design sur la 1ere passe) : le
+    # premier essai de ce ticket avait mis la roue mono-houblon en accent
+    # TERRACOTTA -- faux au regard du §8.1 de la spec, qui réserve le
+    # terracotta au job "interaction" (boutons/sélection/focus/slider) et
+    # assigne la couche descripteurs/roue d'arôme à la voix SAUGE. Corrigé en
+    # sauge (mêmes tons que `greenColor`, cohérent avec les chips "fine" T-D05/
+    # T-D06) -- un ton par thème (comme avant), pas de `light-dark()` ici
+    # (marks Altair "libres", voir docstring de la fonction).
+    accent = "#aebf92" if dark else "#7a8a5e"
 
     n = len(vocabulary)
     r_max = 170.0  # agrandi (demande utilisateur) — était 130
@@ -1863,26 +1994,58 @@ def _aroma_wheel(intensity: dict[str, float], vocabulary: list[str]):
         .mark_rule(strokeWidth=1, stroke=grid_color)
         .encode(x=x_enc, y=y_enc, x2="x2:Q", y2="y2:Q")
     )
-    polygon_line = (
+    # T-D09/8.3 (2026-08-24, spec Claude Design, "fill = sage at 25%, stroke
+    # = sage") -- `mark_area` CASSÉ ici, corrigé 2026-08-24 (retour
+    # utilisateur en direct, capture d'écran à l'appui) : sur des coordonnées
+    # x/y libres (pas un axe temporel/catégoriel avec ligne de base), `mark_
+    # area` remplit vers le bord du graphique le plus proche plutôt que de
+    # refermer le polygone entre les points -- d'où les pointes/triangles
+    # aberrants observés (jamais l'étoile fermée attendue). `mark_line` avec
+    # `interpolate="linear-closed"` (relie premier et dernier point) +
+    # `filled=True` (bascule le remplissage sur `fill`, pas `stroke`, pour un
+    # mark line) est le mécanisme Vega-Lite correct pour un polygone fermé
+    # sur x/y arbitraires -- `strokeOpacity=0` cache le contour propre à
+    # CETTE couche (déjà dessiné, net, par `polygon_line` juste après).
+    polygon_fill = (
         alt.Chart(alt.Data(values=poly))
-        .mark_line(color=accent, strokeWidth=2, order=True)
+        .mark_line(interpolate="linear-closed", filled=True, fill=accent,
+                  fillOpacity=0.25, strokeOpacity=0, order=True)
         .encode(x=x_enc, y=y_enc, order="Order:Q")
     )
+    # Trait affiné 2 -> 1.5px (2026-08-24, retour utilisateur explicite,
+    # même échange que le passage à 500px : "reducing the size of the line
+    # could help reduce the bulkyness of the plot").
+    polygon_line = (
+        alt.Chart(alt.Data(values=poly))
+        .mark_line(color=accent, strokeWidth=1.5, order=True)
+        .encode(x=x_enc, y=y_enc, order="Order:Q")
+    )
+    # size 60 -> 30 (2026-08-24, retour utilisateur explicite : "reduce the
+    # size of the points/scatter of the spider chart, it's a bit bulky").
     points = (
         alt.Chart(alt.Data(values=poly[:-1]))
-        .mark_point(filled=True, size=60, color=accent)
+        .mark_point(filled=True, size=30, color=accent)
         .encode(x=x_enc, y=y_enc,
                tooltip=["Descriptor:N", alt.Tooltip("Intensity:Q", format=".0f")])
     )
     text = (
         alt.Chart(alt.Data(values=labels))
-        .mark_text(fontSize=14, color=text_color)
+        .mark_text(fontSize=12, color=text_color)
         .encode(x=x_enc, y=y_enc, text="Descriptor:N",
                tooltip=["Descriptor:N", "Definition:N"])
     )
+    # Taille réduite de 480 à 340px (2026-08-24, retour utilisateur en
+    # direct, capture d'écran mobile à l'appui : "the spider plot is too
+    # big, on mobile we don't see it full because of the large size") --
+    # 480 -> 340 -> 400px -> **500px** (2026-08-24, encore retouché le même
+    # jour, retour utilisateur explicite : "let's increase to 500 px
+    # instead of 400"). La géométrie interne (`r_max`/`half_extent`,
+    # calculée en unités de domaine, pas en pixels) est simplement mise à
+    # l'échelle par Vega-Lite, aucun changement de la trigonométrie
+    # ci-dessus nécessaire à chaque fois.
     return (
-        (grid + polygon_line + points + text)
-        .properties(width=480, height=480)
+        (grid + polygon_fill + polygon_line + points + text)
+        .properties(width=500, height=500)
         .configure_view(strokeWidth=0)
     )
 
@@ -1900,14 +2063,15 @@ def _browse(con):
     2026-08-19) : plus besoin d'un mécanisme séparé ici, ni ailleurs dans la
     GUI (amplify/contrast/by-descriptor en profitent aussi automatiquement)."""
     hops, comp, hop_desc, _ = matching.load(con)
-    query = st.text_input("Search (name or variety)", key="browse_search")
+    # Champ de recherche texte libre RETIRÉ (2026-08-24, retour utilisateur
+    # explicite : "the 'Hop' search bar already has completion functionality"
+    # -- `st.selectbox` filtre déjà par frappe (tape-à-tape natif Streamlit),
+    # un second champ texte au-dessus était une redondance pure, jamais un
+    # filtre supplémentaire (mêmes critères nom/variété que la complétion du
+    # selectbox lui-même).
     varieties = sorted(hops, key=lambda v: hops[v]["name"].lower())
-    if query:
-        q = query.strip().lower()
-        varieties = [v for v in varieties if q in hops[v]["name"].lower() or q in v]
-    st.caption(f"{len(varieties)} hop(s)")
     if not varieties:
-        st.write("No hop matches this search.")
+        st.write("No hop in the database.")
         return
 
     selected = st.selectbox("Hop", varieties, format_func=lambda v: hops[v]["name"],
@@ -2153,12 +2317,17 @@ _MAX_HEATMAP_HOPS = 12
 # lisible sur une petite cellule de grille (voir T-D09 ci-dessous pour la
 # palette).
 _INTENSITY_BUCKET_ORDER = ["absent", "present", "0-20", "20-40", "40-60", "60-80", "80-100"]
-# T-D09 (2026-08-23, spec Claude Design §8, "heatmap on the sequential
-# accent ramp") : 5 paliers pris de `chartSequentialColors` (config.toml,
-# rampe terracotta crème -> brun foncé) à la place de l'ancien dégradé de
-# bleu codé en dur ; "absent" aligné sur le fond Organic (`#f5ead8`) plutôt
-# qu'un gris neutre générique, "present" (noir) inchangé (voir ci-dessus).
-_INTENSITY_BUCKET_COLORS = ["#f5ead8", "#000000", "#ffe1d0", "#f6a06b", "#b2622d", "#643312", "#2e2b25"]
+# T-D09/8.3 (2026-08-24, retour Claude Design sur la 1ere passe -- "the
+# terracotta ramp made 'max intensity' and 'this is a button' the same
+# colour") : 5 paliers pris de `chartSequentialColors` (config.toml, rampe
+# sauge UNI-teinte, jamais confondue avec terracotta = interaction) --
+# remplace le premier essai terracotta de ce même ticket, gardé UN seul
+# tour. "absent" aligné sur le fond Organic (`#f5ead8`), "present" (noir)
+# inchangé (voir ci-dessus). Légende déjà à labels explicites ("absent"/
+# "present"/"0-20"/...), pas juste une barre de dégradé -- l'échelle est
+# ordinale/discrète (`Bucket:N`), pas continue, donc déjà conforme à "give
+# the legend explicit value labels" sans changement de code supplémentaire.
+_INTENSITY_BUCKET_COLORS = ["#f5ead8", "#000000", "#e1eecc", "#aebf92", "#728157", "#3d472b", "#272e1b"]
 
 
 def _intensity_bucket(value: float) -> str:
@@ -2418,17 +2587,72 @@ def _by_descriptor(con):
 # (pas divergente -- "Spectral" suggéré par l'utilisateur est une palette
 # ColorBrewer pensée pour un gradient autour d'un centre neutre, pas adaptée
 # à des houblons sans ordre naturel entre eux) -- 5 premières teintes (max 5
-# houblons). T-D09 (2026-08-23, spec Claude Design §8, "stable per-hop
-# colour... shared _chart_theme()") : remplace l'ancienne palette Vega
-# "tableau10" (bleu/orange/rouge/sarcelle/vert générique) par
-# `chartCategoricalColors` (config.toml) -- alterne teinte ET valeur dès les
-# 2 premières entrées (terracotta/sauge) pour rester distinguable même en
-# niveaux de gris, cohérent avec le reste de la palette Organic plutôt qu'un
-# jeu de couleurs sans rapport avec le thème.
-_COMPARE_PALETTE = ["#c67139", "#7a8a5e", "#8c491a", "#aebf92", "#82796a"]
+# houblons). T-D09 (2026-08-23, spec Claude Design §8) : remplace l'ancienne
+# palette Vega "tableau10" par `chartCategoricalColors` (config.toml).
+# **Corrigé le 2026-08-24** (retour Claude Design sur ce premier essai) :
+# les 5 teintes Organic "chaudes" choisies au premier tour (terracotta/sauge/
+# terracotta foncé/sauge clair/neutre chaud) ne différaient qu'en VALEUR, pas
+# en TEINTE -- cinq houblons se seraient effondrés en nuances de rouille sur
+# le radar, un vrai défaut signalé avant même d'être testé en direct avec 5
+# houblons. Nouvelle palette (spec §8.2) : 5 teintes réparties sur le cercle
+# chromatique, encore dans le registre Organic (tons moyens, pas saturés),
+# ORDONNÉES pour que les cas à 2/3 houblons (les plus fréquents) tombent sur
+# les paires les plus robustes -- bleu/orange (denim/terracotta) survit à
+# toute forme de daltonisme. Chaque teinte clarifie ≥3:1 sur LES DEUX fonds
+# (`#f5ead8` clair ET `#201e1d` sombre) -- `chartCategoricalColors` ne peut
+# pas être fixé par thème, donc jamais un ton d'extrémité de rampe (`#402310`/
+# `#f0fae1`), qui échouerait sur l'un des deux fonds.
+_COMPARE_PALETTE = ["#4f86b8", "#c67139", "#7f9455", "#d9a441", "#a5678a"]
+# La spec §8.2 suggérait aussi un `strokeDash` distinct par série sur le
+# radar, en plus de la couleur -- ESSAYÉ puis RETIRÉ (2026-08-24, retour
+# utilisateur en direct : "using different shape of lines per hop in the
+# radar is not working at all... it's a mess"). Le motif pointillé rendait
+# les polygones illisibles là où ils se croisent (l'inverse du but), la
+# nouvelle palette (5 teintes déjà réparties sur le cercle chromatique,
+# testée séparément et jugée bonne) suffit seule -- ne pas réintroduire de
+# `strokeDash` sans un nouveau retour explicite.
 _COMPARE_MAX_HOPS = 5
 
-# Largeur PARTAGÉE, littérale (pas de Step ni de "stretch") des 3 graphiques
+# T-D09b (2026-08-24, spec Claude Design §8.3, retour utilisateur : "the
+# radar shrinks when a hop has a long name") -- abréviation du suffixe de
+# désambiguïsation (`matching._disambiguate_hop_names`, T60) DANS LA LÉGENDE
+# SEULEMENT du radar Compare, jamais dans les tooltips/tableaux/autres pages
+# (le nom complet y reste, voir `_legend_abbr_expr` -- une expression Vega
+# `labelExpr`, pas une transformation des données elles-mêmes). Ensemble
+# FERMÉ vérifié en direct sur la base réelle (`SELECT DISTINCT region FROM
+# hops`, 13 valeurs, 2026-08-24) -- pas une supposition de codes ISO.
+_REGION_ABBR = {
+    "Australia": "AU", "China": "CN", "Czech Republic": "CZ", "France": "FR",
+    "Germany": "DE", "Great Britain": "GB", "Japan": "JP", "New Zealand": "NZ",
+    "Poland": "PL", "Slovenia": "SI", "Styrian (Slovenia/Austria)": "SI/AT",
+    "United Kingdom": "GB", "United States": "US",
+}
+
+
+def _abbreviate_region_suffix(name: str) -> str:
+    """"Saaz (Czech Republic)" -> "Saaz · CZ" ; un nom sans suffixe de
+    désambiguïsation (pas de collision, T60) est renvoyé tel quel."""
+    m = re.match(r"^(.*) \(([^)]+)\)$", name)
+    if not m:
+        return name
+    base, region = m.groups()
+    return f"{base} · {_REGION_ABBR.get(region, region)}"
+
+
+def _legend_abbr_expr(names: list[str]) -> str:
+    """Expression Vega `labelExpr` -- réécrit UNIQUEMENT le texte affiché
+    dans la légende (`datum.label`), jamais les données/tooltips sous-jacents.
+    Chaîne de ternaires par nom réellement présent dans la sélection courante
+    (au plus 5, `_COMPARE_MAX_HOPS`) -- pas une regex Vega, `labelExpr`
+    n'exécute qu'une expression Vega simple, jamais du JS/Python arbitraire."""
+    expr = "datum.label"
+    for name in names:
+        short = _abbreviate_region_suffix(name)
+        if short != name:
+            expr = f"datum.label === {json.dumps(name)} ? {json.dumps(short)} : ({expr})"
+    return expr
+
+# Largeur PARTAGÉE, littérale (pas de Step ni de "stretch") des 2 barplots
 # de Compare Hops (2026-08-19, retour utilisateur en direct : "I would like
 # all 3 plots to be the same width... ensure the spider plot is properly
 # scaled (not narrow)"). Root cause du désalignement initial : les 3
@@ -2437,16 +2661,27 @@ _COMPARE_MAX_HOPS = 5
 # `width="stretch"` (rempli le conteneur, beaucoup plus large) pour les
 # barplots avec une largeur interne `alt.Step(70)` (dépend du nombre de
 # catégories, pas de la largeur du conteneur). Résultat : trois largeurs
-# incohérentes. Corrigé en fixant une largeur numérique EXPLICITE, IDENTIQUE
-# sur les 3 (`properties(width=_COMPARE_CHART_WIDTH)`), rendue avec
-# `width="content"` partout (jamais "stretch", qui écraserait cette largeur
-# explicite) -- seul moyen de garantir un alignement pixel-perfect entre un
-# radar carré à domaine quantitatif fixe et deux barplots à échelle de bande
-# catégorielle (nombre de catégories différent entre les deux : 4 vs jusqu'à
-# 11 -- un `width` numérique fixe, pas un `Step` par catégorie, est
-# nécessaire pour que Vega-Lite recalcule lui-même la largeur de bande en
-# fonction du nombre de catégories tout en gardant le total identique).
+# incohérentes. Corrigé À L'ÉPOQUE en fixant une largeur numérique EXPLICITE,
+# IDENTIQUE sur les 3 (`properties(width=_COMPARE_CHART_WIDTH)`).
+#
+# **Revu le 2026-08-24** (retour utilisateur en direct, capture d'écran
+# mobile à l'appui : "the spider plot is too big, on mobile we don't see it
+# full because of the large size") -- le radar utilise désormais SA PROPRE
+# taille (`_COMPARE_RADAR_SIZE`, voir plus bas), plus `_COMPARE_CHART_WIDTH`.
+# Le "same width" de 2026-08-19 visait le radar À CETTE ÉPOQUE trop ÉTROIT
+# par rapport aux barplots (largeur "content" ratée, pas une largeur voulue
+# petite) -- l'exigence utilisateur ACTUELLE, plus récente et plus précise,
+# porte sur la taille MOBILE du radar spécifiquement, jamais sur les
+# barplots (délibérément larges/défilants, T-D09c) : les deux graphiques ne
+# sont plus jamais côte à côte dans la mise en page (chacun dans sa propre
+# carte de section, T-D04), l'alignement pixel entre eux n'a plus de valeur
+# fonctionnelle réelle.
 _COMPARE_CHART_WIDTH = 700
+# 500px (voir `_aroma_wheel` pour l'historique complet des tailles
+# essayées -- 480 -> 340 -> 400 -> 500, retour utilisateur explicite à
+# chaque étape) -- même valeur que le radar mono-houblon pour rester
+# cohérent entre les deux versions du composant.
+_COMPARE_RADAR_SIZE = 500
 
 # Composés "détaillés" du barplot 2 = tout hop_composition SAUF les 4 champs
 # "principaux" du barplot 1 (`matching.NON_AROMA_DISPLAY`) -- ordre fixe pour rester
@@ -2512,6 +2747,52 @@ def _compare_detail_value(hcomp: dict, compound: str, absolute: bool) -> float |
     if oil is None:
         return None
     return rec["mid"] * oil / 100.0
+
+
+def _compare_field_db_values(comp: dict, field: str, absolute: bool) -> list[float]:
+    """Toutes les valeurs CONNUES d'UN composé à travers TOUT `comp` (toutes
+    les variétés de la base, pas seulement les houblons sélectionnés dans
+    Compare Hops) -- socle de la normalisation min-max/quantile (2026-08-24,
+    demande utilisateur explicite : "for each molecule you look at the known
+    value across all hops in the database"). Même conversion d'unité
+    (`absolute`, voir `_compare_detail_value`) que la barre affichée --
+    mélanger des valeurs en % d'huile avec des valeurs absolues ml/100g pour
+    un même composé fausserait complètement le classement."""
+    values = []
+    for hcomp in comp.values():
+        v = _compare_detail_value(hcomp, field, absolute)
+        if v is not None:
+            values.append(v)
+    return values
+
+
+def _normalize_minmax(value: float, db_values: list[float]) -> float:
+    """Position min-max de `value` dans `db_values` (0 = minimum connu de la
+    base pour ce composé, 1 = maximum). Cas dégénéré (une seule valeur
+    connue dans toute la base, ou toutes identiques -- `hi == lo`) : 1.0
+    plutôt qu'une division par zéro -- ce houblon EST le maximum (et le
+    minimum) connu, une barre pleine plutôt qu'un 0.5 arbitraire qui
+    suggérerait une position "moyenne" non fondée sur rien."""
+    lo, hi = min(db_values), max(db_values)
+    if hi == lo:
+        return 1.0
+    return (value - lo) / (hi - lo)
+
+
+def _normalize_quantile(value: float, db_values: list[float]) -> float:
+    """Rang quantile de `value` dans `db_values` (0 = parmi les plus bas
+    connus, 1 = parmi les plus hauts), moyenne des rangs bas/haut
+    (`bisect_left`/`bisect_right`) pour rester correct sur des valeurs à
+    égalité plutôt qu'un rang arbitraire entre doublons. Cas dégénéré (une
+    seule valeur connue dans toute la base) : 1.0, même raison que
+    `_normalize_minmax`."""
+    n = len(db_values)
+    if n <= 1:
+        return 1.0
+    sorted_values = sorted(db_values)
+    lo = bisect.bisect_left(sorted_values, value)
+    hi = bisect.bisect_right(sorted_values, value)
+    return (lo + hi) / (2 * n)
 
 
 _COMPARE_LABEL_ANGLE = -45
@@ -2655,6 +2936,279 @@ def _compare_dual_axis_barplot(rows: list[dict], primary_fields: list[str], prim
     return chart.properties(width=_COMPARE_CHART_WIDTH, height=320)
 
 
+def _compound_display_label(compound: str) -> str:
+    """Nom AFFICHÉ d'un composé sur l'axe de `_compare_detail_barplot`
+    (2026-08-24, demande utilisateur explicite : "put capital letters...
+    and use an actual beta symbol for beta-pinene") -- jamais la clé de
+    donnée `Field` elle-même (inchangée, réutilisée pour les bandes
+    alternées/le survol/le tooltip/`matching.compound_descriptors`, etc.).
+
+    `beta-pinene` traité à PART -- **bug trouvé en vérification live** :
+    `"beta-pinene".replace("beta-", "β-")` puis `.upper()` sur le premier
+    caractère met le β en MAJUSCULE grecque (Β), visuellement indissociable
+    d'un simple "B" latin dans la plupart des polices -- l'inverse du but
+    ("an actual beta symbol"). Convention chimique réelle respectée à la
+    place : le préfixe grec reste TOUJOURS en minuscule (β-pinene), jamais
+    capitalisé, quelle que soit sa position dans le libellé."""
+    if compound.startswith("beta-"):
+        return "β-" + compound[len("beta-"):]
+    return compound[:1].upper() + compound[1:]
+
+
+def _compound_axis_expr(fields: list[str]) -> str:
+    """Expression Vega `labelExpr` pour l'axe Y de `_compare_detail_barplot`
+    -- même mécanisme que `_legend_abbr_expr` (radar Compare) : réécrit
+    UNIQUEMENT le texte affiché, jamais la donnée `Field:N` sous-jacente."""
+    expr = "datum.label"
+    for f in fields:
+        expr = f"datum.label === {json.dumps(f)} ? {json.dumps(_compound_display_label(f))} : ({expr})"
+    return expr
+
+
+def _compare_detail_barplot(rows: list[dict], primary_fields: list[str], primary_title: str,
+                            secondary_fields: list[str], secondary_title: str,
+                            colors: dict[str, str],
+                            descriptors: dict[str, str] | None = None,
+                            process_notes: dict[str, str] | None = None,
+                            log_scale: bool = False,
+                            x_domain: tuple[float, float] | None = None,
+                            value_tooltip_title: str | None = None,
+                            raw_value_title: str | None = None):
+    """T-D09c (2026-08-24, spec Claude Design §8.3, retour utilisateur sur le
+    premier essai de ce ticket) : version HORIZONTALE de
+    `_compare_dual_axis_barplot`, réservée au seul barplot "Detailed
+    composition" (2e graphique de Compare Hops, jusqu'à 11 composés x 5
+    houblons) -- "five adjacent thin bars per compound, read left-to-right,
+    is the hardest possible arrangement to compare". Le barplot "Principal
+    info" (4 champs seulement) garde l'ancienne disposition verticale
+    (`_compare_dual_axis_barplot`), pas concerné par ce ticket.
+
+    Composés sur Y (`yOffset` par houblon), valeur sur X -- inverse de
+    `_compare_dual_axis_barplot`. Même contrat `rows`/`descriptors`/
+    `process_notes` que la fonction sœur (voir sa docstring pour le détail
+    du mécanisme de survol par couche rect invisible, ici tournée de 90°).
+
+    Hauteur CALCULÉE (`24 + n_compounds * (n_hops * 14 + 18)`) plutôt que
+    fixe : les barres gardent une épaisseur constante quel que soit le
+    nombre de houblons/composés, la carte défile au lieu de se comprimer.
+
+    Composés triés par valeur MAXIMALE décroissante (séparément par groupe
+    d'échelle -- primaire puis secondaire, ex. thiols toujours en dernier :
+    unités différentes, ml/100g vs µg/kg, comparer leurs maxima bruts n'aurait
+    pas de sens) -- les composés qui différencient le plus les houblons
+    remontent en haut.
+
+    Bande alternée (un `mark_rect` à 6% neutre derrière un groupe de composé
+    sur deux) : "this is what actually separates the groups" -- posée EN
+    PREMIER (donc sous tout le reste). `x`/`x2` fixés à `0`/`_COMPARE_CHART_
+    WIDTH` en dur (pas une expression Vega `{"expr": "width"}`, plus fragile)
+    puisque la largeur du graphique est déjà une constante partagée
+    (`_COMPARE_CHART_WIDTH`) -- même trick pour la couche de survol
+    "Smells like"/"Process", elle aussi tournée de 90°.
+
+    `log_scale` (2026-08-24, demande utilisateur explicite : "some compounds
+    are in too small quantity to have discrimination on the barplot... a
+    logarithmic scale toggle") : bascule les DEUX échelles X (primaire ET
+    secondaire -- thiols inclus, même défaut) sur `type="log"`. Une valeur
+    de 0 est INVALIDE sur une échelle log (Vega-Lite ne peut pas placer un
+    point à log(0)) -- ces lignes sont retirées AVANT le tracé si `log_scale`
+    est actif, jamais affichées comme une barre nulle fabriquée ; l'aide du
+    toggle (`app._compare`) le signale explicitement, honnêteté d'abord.
+
+    **`mark_bar` + échelle log, root cause TROUVÉE en reproduisant le bug
+    HORS Streamlit** (page HTML minimale, Vega-Embed seul, spec Vega-Lite
+    écrite à la main, 2026-08-24 -- 2 tentatives précédentes insuffisantes :
+    `scale.zero=False` explicitement ignoré par Vega-Lite sur une échelle
+    log ; un `scale.domain` positif explicite laissait le graphique VIDE
+    quand même). Isolé via `view.scale('x').domain()` dans la page de test :
+    le DOMAINE de l'échelle était correct, le problème est ailleurs --
+    `mark_bar` calcule sa ligne de base en fixant implicitement `x2` à la
+    valeur DE DONNÉE 0 (jamais au minimum du domaine de l'échelle), et
+    `log(0) = -Infinity` rend la largeur de la barre invalide. Corrigé en
+    fournissant `x2` explicitement (`alt.X2Datum`, une CONSTANTE, pas un
+    champ) égale au minimum du domaine choisi (`_log_scale_and_baseline`,
+    10% EN DESSOUS de la plus petite valeur réelle -- une barre dont la
+    valeur est EXACTEMENT ce minimum aurait une largeur nulle sinon,
+    invisible) : chaque barre part de CE minimum plutôt que de 0, un calcul
+    valide sur une échelle log. `mark_bar` reste utilisé dans les DEUX
+    modes désormais (barres, jamais des points -- essayé puis abandonné :
+    "I want barplot not scatterplot", retour utilisateur explicite). En
+    mode linéaire (`log_scale=False`), aucun `x2` n'est fourni, le
+    comportement par défaut (barres depuis 0) reste inchangé.
+
+    `x_domain`/`value_tooltip_title`/`raw_value_title` (2026-08-24, retour
+    utilisateur explicite : le simple toggle log ci-dessus remplacé côté
+    `_compare` par un menu déroulant "Normalization" -- None / Min-max /
+    Quantile / Log). Min-max et Quantile ne changent RIEN ici -- ce sont des
+    modes LINÉAIRES ordinaires (`log_scale=False`), la transformation a déjà
+    eu lieu côté APPELANT (`app._compare`, voir `_normalize_minmax`/
+    `_normalize_quantile`) sur `rows[i]["Value"]`, qui arrive donc déjà dans
+    [0, 1]. Cette fonction n'a besoin de savoir que DEUX choses en plus du
+    cas linéaire brut : (1) `x_domain=(0, 1)` fige le domaine des DEUX
+    échelles X plutôt que de laisser Vega-Lite zoomer sur l'étendue réelle
+    des seuls houblons SÉLECTIONNÉS -- un domaine auto-zoomé rendrait le
+    "0 = minimum de la base / 1 = maximum" affiché par le titre de l'axe
+    FAUX pour la sélection courante (2 barres qui semblent aux extrêmes du
+    graphique alors qu'elles sont en réalité proches l'une de l'autre dans
+    la vraie base) ; (2) `raw_value_title`, ajoute la valeur BRUTE (avant
+    normalisation, stockée par l'appelant dans `rows[i]["RawValue"]`) comme
+    2e ligne de tooltip -- la normalisation cache sinon complètement
+    l'amplitude réelle (myrcène 3.2 ml/100g et thiols 0.0004 µg/kg
+    deviennent tous deux "0.81", ce qui serait malhonnête sans le chiffre
+    brut à côté). Pas de trick `X2Datum` nécessaire pour ces deux modes :
+    contrairement à log(0), une valeur normalisée de 0 est un point valide
+    sur une échelle linéaire, `x2` implicite à 0 fonctionne nativement."""
+    if not rows:
+        return None
+    descriptors = descriptors or {}
+    process_notes = process_notes or {}
+    if log_scale:
+        rows = [r for r in rows if r["Value"] > 0]
+        if not rows:
+            return None
+    hop_names = list(colors.keys())
+    n_hops = len(hop_names)
+
+    # Tri sur `RawValue` (valeur BRUTE, avant normalisation min-max/quantile
+    # -- absente en mode None/Log, `Value` EST déjà la valeur brute dans ces
+    # 2 cas, `.get(..., r["Value"])` couvre les deux) plutôt que sur `Value`
+    # (2026-08-24, retour utilisateur explicite : "I want you to keep the
+    # same order of molecules across different normalisations... Myrcene as
+    # first element"). Sans ça, Min-max/Quantile réordonnaient les composés
+    # selon leur position DANS LA BASE plutôt que leur quantité RÉELLE chez
+    # les houblons affichés -- un ordre différent à chaque changement de
+    # menu, déroutant pour comparer visuellement avant/après.
+    def _sorted_by_max(fields: list[str]) -> list[str]:
+        present = [f for f in fields if any(r["Field"] == f for r in rows)]
+        return sorted(present, key=lambda f: -max(
+            r.get("RawValue", r["Value"]) for r in rows if r["Field"] == f))
+
+    field_order = _sorted_by_max(primary_fields) + _sorted_by_max(secondary_fields)
+    if not field_order:
+        return None
+    n_compounds = len(field_order)
+    height = 24 + n_compounds * (n_hops * 14 + 18)
+
+    dark = st.context.theme.type == "dark"
+    # Bande alternée "6% neutral" et séparateur de barre "background-coloured"
+    # (spec §8.3) : le vrai fond de carte est `light-dark(#ebddc5, #2e2b25)`
+    # (voir `_TYPOGRAPHY_STYLE`) -- marks Altair "libres" ici aussi, un ton
+    # par thème plutôt que `light-dark()` (CSS uniquement).
+    band_color = "#f9f4ed" if dark else "#201e1d"
+    stroke_color = "#2e2b25" if dark else "#ebddc5"
+
+    y_enc = alt.Y("Field:N", scale=alt.Scale(domain=field_order), title=None,
+                  axis=alt.Axis(labelLimit=200, labelExpr=_compound_axis_expr(field_order)))
+    y_offset_enc = alt.YOffset("Hop:N", scale=alt.Scale(domain=hop_names))
+    color_enc = alt.Color("Hop:N", scale=alt.Scale(domain=hop_names, range=list(colors.values())))
+    tooltip = ["Hop:N", "Field:N",
+              alt.Tooltip("Value:Q", format=".2f", title=value_tooltip_title or "Value")]
+    if raw_value_title and any("RawValue" in r for r in rows):
+        # 4 chiffres significatifs, zéros de fin tronqués ("~g") : les
+        # valeurs brutes vont de ~0.0004 (thiols, µg/kg) à ~40 (myrcène, %
+        # d'huile) -- un format fixe (".2f") écraserait les petites à "0.00".
+        tooltip.append(alt.Tooltip("RawValue:Q", format=".4~g", title=raw_value_title))
+    if any(f in descriptors for f in field_order):
+        tooltip.append(alt.Tooltip("Descriptors:N", title="Smells like"))
+        rows = [dict(r, Descriptors=descriptors.get(r["Field"], "—")) for r in rows]
+    if any(f in process_notes for f in field_order):
+        tooltip.append(alt.Tooltip("Process:N", title="Process"))
+        rows = [dict(r, Process=process_notes.get(r["Field"], "—")) for r in rows]
+
+    primary_rows = [r for r in rows if r["Field"] in primary_fields]
+    secondary_rows = [r for r in rows if r["Field"] in secondary_fields]
+
+    # T-D09c/log (2026-08-24, retour utilisateur en direct : "I want barplot
+    # not scatterplot... just apply a log scale on both axis") -- 4e passe.
+    # Root cause enfin isolée en la reproduisant DANS UNE PAGE HTML minimale
+    # (Vega-Embed seul, hors Streamlit, spec Vega-Lite écrite à la main) :
+    # `mark_bar` calcule sa ligne de base en fixant implicitement `x2` à la
+    # valeur DE DONNÉE 0 (pas au minimum du domaine de l'échelle) -- passée
+    # à travers une échelle log, `log(0)` vaut `-Infinity`, donc la largeur
+    # de la barre devient invalide et RIEN ne se dessine, quel que soit le
+    # `scale.domain` fourni par ailleurs (déjà correct, vérifié directement
+    # via `view.scale('x').domain()` dans la page de test -- le problème est
+    # dans le calcul de `x2`, pas dans le domaine de l'échelle). Fixé en
+    # fournissant `x2` EXPLICITEMENT comme une valeur constante (`X2Datum`,
+    # PAS un champ de données) égale au minimum du domaine choisi -- chaque
+    # barre part alors de CE minimum plutôt que de 0, un calcul valide sur
+    # une échelle log. Confirmé en direct sur la page de test minimale avant
+    # d'appliquer ici. Minimum du domaine pris 10% EN DESSOUS de la plus
+    # petite valeur réelle (`* 0.9`) plutôt qu'égal à elle : une barre dont
+    # la valeur est EXACTEMENT le minimum du domaine aurait une largeur
+    # nulle (x == x2), invisible -- la marge de 10% garantit un filet visible
+    # même pour le plus petit composé.
+    def _log_scale_and_baseline(values: list[float]) -> tuple[alt.Scale, float]:
+        domain_min = min(values) * 0.9
+        return alt.Scale(type="log", domain=[domain_min, max(values)]), domain_min
+
+    # `x_domain` (Min-max/Quantile, voir docstring) fige le domaine plutôt
+    # que de laisser Vega-Lite l'auto-zoomer sur les seuls houblons
+    # sélectionnés -- sans quoi "0 = minimum de la base" au titre de l'axe
+    # deviendrait faux dès que la sélection ne couvre pas tout l'intervalle.
+    linear_scale = (alt.Scale(type="linear", domain=list(x_domain)) if x_domain
+                    else alt.Scale(type="linear"))
+    if log_scale and primary_rows:
+        x_scale_primary, x2_primary = _log_scale_and_baseline([r["Value"] for r in primary_rows])
+    else:
+        x_scale_primary, x2_primary = linear_scale, None
+    if log_scale and secondary_rows:
+        x_scale_secondary, x2_secondary = _log_scale_and_baseline([r["Value"] for r in secondary_rows])
+    else:
+        x_scale_secondary, x2_secondary = linear_scale, None
+
+    layers = [
+        alt.Chart(alt.Data(values=[{"Field": f} for i, f in enumerate(field_order) if i % 2 == 1]))
+        .mark_rect(opacity=0.06, color=band_color)
+        .encode(y=y_enc, x=alt.value(0), x2=alt.value(_COMPARE_CHART_WIDTH)),
+    ]
+    resolved_fields = [f for f in field_order if f in descriptors or f in process_notes]
+    if resolved_fields:
+        rect_tooltip = ["Field:N"]
+        if descriptors:
+            rect_tooltip.append(alt.Tooltip("Descriptors:N", title="Smells like"))
+        if process_notes:
+            rect_tooltip.append(alt.Tooltip("Process:N", title="Process"))
+        layers.append(
+            alt.Chart(alt.Data(values=[{"Field": f, "Descriptors": descriptors.get(f, "—"),
+                                       "Process": process_notes.get(f, "—")}
+                                       for f in resolved_fields]))
+            .mark_rect(opacity=0.001)
+            .encode(y=y_enc, x=alt.value(0), x2=alt.value(_COMPARE_CHART_WIDTH),
+                   tooltip=rect_tooltip))
+    if primary_rows:
+        primary_encoding = dict(
+            y=y_enc, yOffset=y_offset_enc, color=color_enc, tooltip=tooltip,
+            # Axe primaire explicitement en haut (2026-08-24, retour
+            # utilisateur en direct : Vega-Lite plaçait par défaut l'axe
+            # secondaire -- thiols, un seul composé tout en bas de la
+            # grille -- en haut, sans rapport visuel avec sa propre barre) :
+            # orienté pour que chaque axe reste proche de ce qu'il annote.
+            x=alt.X("Value:Q", title=primary_title, axis=alt.Axis(orient="top"),
+                   scale=x_scale_primary))
+        if x2_primary is not None:
+            primary_encoding["x2"] = alt.X2Datum(x2_primary)
+        layers.append(
+            alt.Chart(alt.Data(values=primary_rows))
+            .mark_bar(stroke=stroke_color, strokeWidth=1)
+            .encode(**primary_encoding))
+    if secondary_rows:
+        secondary_encoding = dict(
+            y=y_enc, yOffset=y_offset_enc, color=color_enc, tooltip=tooltip,
+            x=alt.X("Value:Q", title=secondary_title, axis=alt.Axis(orient="bottom"),
+                   scale=x_scale_secondary))
+        if x2_secondary is not None:
+            secondary_encoding["x2"] = alt.X2Datum(x2_secondary)
+        layers.append(
+            alt.Chart(alt.Data(values=secondary_rows))
+            .mark_bar(stroke=stroke_color, strokeWidth=1)
+            .encode(**secondary_encoding))
+    if len(layers) <= 1:
+        return None
+    chart = alt.layer(*layers).resolve_scale(x="independent")
+    return chart.properties(width=_COMPARE_CHART_WIDTH, height=height)
+
+
 def _aroma_wheel_compare(intensities: dict[str, dict[str, float]], vocabulary: list[str],
                          colors: dict[str, str]):
     """Version multi-houblons de `_aroma_wheel` (T58, 2026-08-19) : plusieurs
@@ -2675,8 +3229,12 @@ def _aroma_wheel_compare(intensities: dict[str, dict[str, float]], vocabulary: l
     if not vocabulary or not intensities:
         return None
     dark = st.context.theme.type == "dark"
-    text_color = "#f2f2f0" if dark else "#1a1a18"
-    grid_color = "#5a5a56" if dark else "#3a3a38"
+    # "axis labels at body colour" -- tokens `textColor` réels du thème.
+    text_color = "#f9f4ed" if dark else "#201e1d"
+    # 8.3 (2026-08-24, retour Claude Design) : "axis spokes at border
+    # colour" -- alignés sur les tokens `borderColor` réels du thème
+    # (config.toml), pas une teinte de contraste choisie à part.
+    grid_color = "#474238" if dark else "#dcd3c4"
 
     n = len(vocabulary)
     r_max = 170.0
@@ -2711,9 +3269,24 @@ def _aroma_wheel_compare(intensities: dict[str, dict[str, float]], vocabulary: l
     domain = [-half_extent, half_extent]
     x_enc = alt.X("x:Q", axis=None, scale=alt.Scale(domain=domain))
     y_enc = alt.Y("y:Q", axis=None, scale=alt.Scale(domain=domain))
-    color_enc = alt.Color("Hop:N", scale=alt.Scale(domain=list(colors.keys()),
-                                                   range=list(colors.values())),
-                          legend=alt.Legend(title="Hop"))
+    # T-D09b (2026-08-24, spec Claude Design §8.3) : légende en bas
+    # (horizontale, 2 colonnes) -- l'ancienne légende à droite volait de la
+    # largeur au polygone, faisant "rétrécir" le radar dès qu'un nom de
+    # houblon long (désambiguïsation régionale, T60) apparaissait dans la
+    # sélection. `labelExpr` réécrit UNIQUEMENT le texte affiché (voir
+    # `_legend_abbr_expr`) -- le nom complet reste dans le tooltip des points
+    # (`Hop:N`, inchangé plus bas).
+    color_enc = alt.Color(
+        "Hop:N", scale=alt.Scale(domain=list(colors.keys()), range=list(colors.values())),
+        legend=alt.Legend(title="Hop", orient="bottom", direction="horizontal", columns=2,
+                          labelLimit=160, labelExpr=_legend_abbr_expr(list(colors.keys())),
+                          # Le canal `color` est partagé avec `polygon_fill`
+                          # (18% d'opacité, voir plus bas) -- sans ceci, Vega-
+                          # Lite hérite cette opacité pour la PASTILLE de
+                          # légende elle-même, la rendant illisible (vérifié
+                          # en direct : pastilles quasi blanches). Forcée à
+                          # pleine opacité, indépendamment du mark source.
+                          symbolOpacity=1))
 
     # Surlignage au survol (demande utilisateur, 2026-08-19) : `hover`, un
     # selection_point Vega-Lite standard (`on="mouseover"`, `nearest=True`),
@@ -2751,14 +3324,61 @@ def _aroma_wheel_compare(intensities: dict[str, dict[str, float]], vocabulary: l
     hover = alt.selection_point(fields=["Hop"], on="mouseover", nearest=True, empty=True,
                                 clear="mouseout")
     line_opacity = alt.condition(hover, alt.value(1.0), alt.value(0.55))
-    line_width = alt.condition(hover, alt.value(5), alt.value(2))
+    # Traits affinés (2026-08-24, retour utilisateur explicite, "reducing
+    # the size of the line could help reduce the bulkyness of the plot") --
+    # 5/2 -> 3.5/1.5, même ratio hover/repos conservé.
+    line_width = alt.condition(hover, alt.value(3.5), alt.value(1.5))
     point_opacity = alt.condition(hover, alt.value(1.0), alt.value(0.55))
-    point_size = alt.condition(hover, alt.value(110), alt.value(50))
+    # (110, 50) -> (55, 25) (2026-08-24, même retour que `_aroma_wheel` : "the
+    # points/scatter... is a bit bulky" -- taille = aire en px^2, ~moitié pour
+    # un rayon perceptiblement plus fin, cohérent avec la réduction de trait).
+    point_size = alt.condition(hover, alt.value(55), alt.value(25))
 
     grid = (
         alt.Chart(alt.Data(values=spokes))
         .mark_rule(strokeWidth=1, stroke=grid_color)
         .encode(x=x_enc, y=y_enc, x2="x2:Q", y2="y2:Q")
+    )
+    # T-D09/8.3 (2026-08-24, spec Claude Design, "Overlays: categorical
+    # scale, 18% fills") -- posée avant la ligne (donc dessous dans
+    # l'empilement SVG), pas de survol dédié dessus (le hover reste porté
+    # par `points`, voir plus bas). `strokeDash` par série suggéré par la
+    # même phrase de la spec, essayé puis retiré (voir le commentaire
+    # au-dessus de `_COMPARE_PALETTE`) -- couleur seule (palette élargie)
+    # suffit.
+    #
+    # `mark_area` CASSÉ ici, corrigé 2026-08-24 (retour utilisateur en
+    # direct, capture d'écran à l'appui, même défaut que `_aroma_wheel` --
+    # voir sa docstring pour le détail complet) : sur des x/y libres,
+    # `mark_area` remplit vers le bord du graphique le plus proche plutôt
+    # que de refermer chaque polygone -- 5 pointes/triangles aberrants
+    # mélangés au lieu de 5 étoiles fermées. `mark_line(interpolate=
+    # "linear-closed", filled=True)` est le mécanisme Vega-Lite correct pour
+    # un polygone fermé par série sur x/y arbitraires -- `filled=True` sur
+    # un mark `line` bascule le sens du canal `color` de "stroke" (défaut
+    # pour ce type de mark) vers "fill", donc `color=color_enc` ici suffit à
+    # remplir chaque polygone de sa propre teinte, PAS besoin d'un canal
+    # `fill=` séparé.
+    #
+    # Un canal `fill_enc` (`alt.Fill`, DISTINCT de `color_enc`) avait été
+    # introduit ici, `legend=None` pour éviter une 2e légende -- CASSÉ,
+    # signalé par l'utilisateur ("we lost the legend in the spider plot") :
+    # `fill`/`color` réfèrent le MÊME champ ("Hop:N") avec un domaine/une
+    # plage IDENTIQUES -- Vega-Lite fusionne leurs légendes en une seule
+    # (scale partagée détectée), et le conflit "disable" (`fill_enc` en
+    # demande une désactivée, `color_enc` une active) se résolvait en
+    # DÉSACTIVANT la légende fusionnée entière (`WARN Conflicting legend
+    # property "disable" (true and false)` en console, jamais remarqué avant
+    # que l'utilisateur ne signale la légende manquante). Revenu à `color=
+    # color_enc` PARTOUT (même canal que `polygon_line`/`points`, un seul
+    # champ, une seule légende, aucun conflit possible) -- `symbolOpacity=1`
+    # sur `color_enc` (voir plus haut) reste nécessaire : SANS lui, la
+    # pastille de légende hériterait le `fillOpacity=0.18` de CETTE couche.
+    polygon_fill = (
+        alt.Chart(alt.Data(values=poly_rows))
+        .mark_line(interpolate="linear-closed", filled=True, fillOpacity=0.18,
+                  strokeOpacity=0, order=True)
+        .encode(x=x_enc, y=y_enc, order="Order:Q", color=color_enc, detail="Hop:N")
     )
     polygon_line = (
         alt.Chart(alt.Data(values=poly_rows))
@@ -2775,13 +3395,21 @@ def _aroma_wheel_compare(intensities: dict[str, dict[str, float]], vocabulary: l
     )
     text = (
         alt.Chart(alt.Data(values=labels))
-        .mark_text(fontSize=14, color=text_color)
+        .mark_text(fontSize=12, color=text_color)
         .encode(x=x_enc, y=y_enc, text="Descriptor:N",
                tooltip=["Descriptor:N", "Definition:N"])
     )
+    # T-D09b : `width`/`height` explicites (carré, radius constant quel que
+    # soit le nom sélectionné, `_COMPARE_RADAR_SIZE` -- voir son commentaire,
+    # revu 2026-08-24 pour tenir sur mobile) + `autosize` fit-x/contains=
+    # padding -- la marge nécessaire à la légende du bas est prise sur le
+    # CONTENEUR, pas sur la zone de tracé (sinon le polygone rétrécirait à
+    # nouveau, cette fois à cause de la hauteur de légende plutôt que de sa
+    # largeur).
     return (
-        (grid + polygon_line + points + text)
-        .properties(width=_COMPARE_CHART_WIDTH, height=_COMPARE_CHART_WIDTH)
+        (grid + polygon_fill + polygon_line + points + text)
+        .properties(width=_COMPARE_RADAR_SIZE, height=_COMPARE_RADAR_SIZE,
+                   autosize=alt.AutoSizeParams(type="fit-x", contains="padding"))
         .configure_view(strokeWidth=0)
     )
 
@@ -2802,7 +3430,13 @@ def _compare(con):
             st.write("Choose at least one hop.")
     if not selected:
         return
-    colors = {hops[v]["name"]: _COMPARE_PALETTE[i] for i, v in enumerate(selected)}
+    # 8.2/§8 "stable per-hop colour" (2026-08-24, retour Claude Design) :
+    # assignation par position TRIÉE de la sélection (`sorted(selected)`,
+    # sur la clé `variety` -- stable, indépendant de la locale/casse du nom
+    # affiché), pas l'ordre de clic -- deux houblons gardent la même couleur
+    # qu'on les sélectionne A-puis-B ou B-puis-A.
+    ordered = sorted(selected)
+    colors = {hops[v]["name"]: _COMPARE_PALETTE[i] for i, v in enumerate(ordered)}
 
     with _panel():
         st.subheader("Aroma wheel")
@@ -2838,8 +3472,13 @@ def _compare(con):
     if chart is not None:
         st.altair_chart(chart, width="content")
         with _panel():
+            # 2026-08-24, retour utilisateur en direct : caption dupliquée --
+            # `_aroma_wheel_source_caption` inclut déjà "Hover a label for its
+            # definition." dans son propre texte (préfixe partagé par les 2
+            # variantes de source), cette 2e ligne répétait donc la même
+            # phrase deux fois de suite. Retirée, seule la caption source
+            # reste (elle porte déjà l'information complète).
             st.caption(_aroma_wheel_source_caption(source))
-            st.caption(":material/info: Hover a label for its definition.")
     if missing:
         with _panel():
             _aroma_wheel_missing_warning(missing, source)
@@ -2876,9 +3515,56 @@ def _compare(con):
     # exclus de la conversion (déjà en µg/kg, absolu dans les deux modes --
     # `_compare_detail_value` ne convertit que l'unité `pct_oil`).
     with _panel():
-        show_absolute = st.toggle(
-            "Show absolute amount (ml/100g) instead of % of oil",
-            value=True, key="compare_absolute_oil")
+        abs_col, norm_col = st.columns(2)
+        with abs_col:
+            show_absolute = st.toggle(
+                "Show absolute amount (ml/100g) instead of % of oil",
+                value=True, key="compare_absolute_oil")
+        # Menu déroulant "Normalization" (2026-08-24, remplace le toggle log
+        # binaire précédent -- demande utilisateur explicite, le toggle ne
+        # convainquait pas : "Rather than a log scale toggle I would like
+        # you to implement something more complex... a dropdown menu where
+        # you choose a normalization... for each molecule you look at the
+        # known value across all hops in the database and apply minmax or
+        # quantile normalisation"). "None" reste le défaut -- la lecture la
+        # plus directe (unité réelle, comportement historique) prime tant
+        # que rien n'est demandé. "Log" reprend la représentation EXISTANTE
+        # à l'identique (voir `_compare_detail_barplot`, jamais retouchée
+        # ici). "Min-max"/"Quantile" : transformation calculée juste en bas,
+        # sur TOUTE la base (`comp`, pas `selected` seul) -- voir
+        # `_compare_field_db_values`/`_normalize_minmax`/`_normalize_
+        # quantile`.
+        with norm_col:
+            # Une ligne par option (2026-08-24, retour utilisateur explicite :
+            # "format the 'Normalization' infobox to use \n to separate the
+            # normalisations descriptions") -- même mécanisme que les autres
+            # captions multi-lignes de cette session (roue d'arôme, infobox
+            # "Smells like"/"Process") : retour à la ligne MARKDOWN ("  \n"),
+            # un simple "\n" est ignoré par le rendu markdown du tooltip
+            # `help=`. Un paragraphe unique mélangeant les 4 options obligeait
+            # à relire toute la phrase pour retrouver celle qui intéressait.
+            help_lines = [
+                "How each compound's bar is scaled:",
+                "\"None\": raw amount/% of oil, the most direct reading.",
+                "\"Log\": stretches the low end of the scale so small "
+                "compounds (ketones, isobutyrate...) aren't flattened by a "
+                "much larger one (myrcene, thiols...) — zero-value bars "
+                "can't be shown on a log scale and are dropped when this "
+                "is on.",
+                "\"Min-max\": where this hop's value sits between the "
+                "lowest and highest value known for that compound across "
+                "the whole database — makes small and large compounds "
+                "directly comparable, at the cost of hiding the actual "
+                "amount (still shown on hover).",
+                "\"Quantile\": same idea as min-max, but this hop's "
+                "percentile rank among all known values for that compound "
+                "instead of its raw position between the extremes — less "
+                "swayed by a single outlier hop.",
+            ]
+            normalization = st.selectbox(
+                "Normalization", ["None", "Min-max", "Quantile", "Log"],
+                index=0, key="compare_detail_normalization",
+                help="  \n".join(help_lines))
     present_oil_compounds = [c for c in _COMPARE_DETAIL_OIL_COMPOUNDS
                              if any(comp.get(v, {}).get(c, {}).get("mid") is not None
                                     for v in selected)]
@@ -2901,7 +3587,38 @@ def _compare(con):
             detail_rows.append({"Hop": name, "Field": _COMPARE_THIOLS_COMPOUND, "Value": thiols_val})
     thiols_fields = [_COMPARE_THIOLS_COMPOUND] if any(
         r["Field"] == _COMPARE_THIOLS_COMPOUND for r in detail_rows) else []
-    primary_title = "Amount (ml/100g)" if show_absolute else "Percent of oil (%)"
+    log_scale = normalization == "Log"
+    x_domain = value_tooltip_title = raw_value_title = None
+    if normalization in ("Min-max", "Quantile"):
+        # Normalise PAR COMPOSÉ, sur les valeurs connues de TOUTE la base
+        # (`comp`, jamais seulement `selected`) -- demande utilisateur
+        # explicite ("look at the known value across all hops in the
+        # database"). `RawValue` gardé à côté de `Value` (normalisé) pour le
+        # tooltip -- voir `_compare_detail_barplot`, `raw_value_title`.
+        normalize = _normalize_minmax if normalization == "Min-max" else _normalize_quantile
+        for field in present_oil_compounds + thiols_fields:
+            db_values = _compare_field_db_values(comp, field, show_absolute)
+            if not db_values:
+                continue
+            for row in detail_rows:
+                if row["Field"] == field:
+                    row["RawValue"] = row["Value"]
+                    row["Value"] = normalize(row["RawValue"], db_values)
+        # Domaine FIGÉ à [0, 1] (pas l'auto-zoom Vega-Lite habituel) : sinon
+        # "0 = minimum de la base" au titre de l'axe deviendrait faux dès que
+        # la sélection courante ne couvre pas tout l'intervalle réel.
+        x_domain = (0.0, 1.0)
+        value_tooltip_title = ("Min-max position" if normalization == "Min-max"
+                               else "Quantile rank")
+        raw_value_title = "Raw value (unit varies by compound)"
+    axis_label = {
+        "None": "Amount (ml/100g)" if show_absolute else "Percent of oil (%)",
+        "Log": "Amount (ml/100g)" if show_absolute else "Percent of oil (%)",
+        "Min-max": "Min-max position (0 = lowest in DB, 1 = highest)",
+        "Quantile": "Quantile rank (0 = lowest in DB, 1 = highest)",
+    }[normalization]
+    primary_title = axis_label
+    secondary_title = ("Thiols (µg/kg)" if normalization in ("None", "Log") else axis_label)
     # Tooltip descripteurs par composé (T70, 2026-08-21, demande utilisateur
     # explicite -- "myrcene est une chaîne nue, rien ne dit qu'elle couvre
     # vert, herbacé, résineux et pin", même pattern que la roue d'arôme) :
@@ -2916,20 +3633,39 @@ def _compare(con):
     # `_compare_dual_axis_barplot`) -- deux infos indépendantes par composé.
     process_notes = {c: label for c in present_oil_compounds + thiols_fields
                      if (label := _process_survival_label(c)) is not None}
-    detail_chart = _compare_dual_axis_barplot(
+    # T-D09c (2026-08-24, spec Claude Design §8.3) : rotation horizontale,
+    # voir `_compare_detail_barplot` -- réservée à CE barplot (le "Principal
+    # info" ci-dessus, 4 champs seulement, garde la disposition verticale).
+    detail_chart = _compare_detail_barplot(
         detail_rows, present_oil_compounds, primary_title,
-        thiols_fields, "Thiols (µg/kg)", colors, descriptors=descriptors,
-        process_notes=process_notes)
+        thiols_fields, secondary_title, colors, descriptors=descriptors,
+        process_notes=process_notes, log_scale=log_scale, x_domain=x_domain,
+        value_tooltip_title=value_tooltip_title, raw_value_title=raw_value_title)
     if detail_chart is not None:
         st.altair_chart(detail_chart, width="content")
         if descriptors or process_notes:
+            # 2 lignes, une par niveau d'info (2026-08-24, retour utilisateur
+            # explicite : "use 2 lines for the two information level 'Smells
+            # like' and 'Process'") -- même mécanisme que `_aroma_wheel_
+            # source_caption` (retour à la ligne MARKDOWN "  \n", un simple
+            # "\n" est ignoré par le rendu markdown de `st.caption`). Chaque
+            # ligne conditionnée à sa propre présence (`descriptors`/
+            # `process_notes` peuvent être vides indépendamment selon les
+            # composés affichés) -- jamais une ligne vide affichée pour rien.
+            caption_lines = []
+            if descriptors:
+                caption_lines.append(
+                    "Hover a bar, or the space near/below a compound's label, "
+                    "for its Flavornet odor descriptors (\"Smells like\") — "
+                    "not every compound has an entry.")
+            if process_notes:
+                caption_lines.append(
+                    "\"Process\" notes are a qualitative prior (Scott Janish, "
+                    "The New IPA) on whether a compound survives boiling/"
+                    "fermentation — never a measured transfer rate, never "
+                    "used in any score.")
             with _panel():
-                st.caption(":material/info: Hover a bar, or the space near/below "
-                          "a compound's label, for its Flavornet odor descriptors "
-                          "and process survival notes (not every compound has an "
-                          "entry). \"Process\" is a qualitative prior (Scott "
-                          "Janish, The New IPA) — never a measured transfer rate, "
-                          "never used in any score.")
+                st.caption(":material/info: " + "  \n".join(caption_lines))
         if process_notes:
             _process_survival_legend()
     else:
@@ -2995,13 +3731,12 @@ def main():
     # sur des données en partie non-commerciales, FooDB/FlavorDB2 CC BY-NC-SA)
     # : la personne concernée par un signalement de licence regarde l'app
     # déployée, pas nécessairement le dépôt GitHub associé.
-    # Logo en tête de sidebar (2026-08-22, demande utilisateur explicite) --
-    # `st.image` directement dans le flux de la sidebar (PAS `st.logo`,
-    # retiré : son plafond de taille intégré, 32px de haut max même en
-    # "large", rendait un logo minuscule -- "in the sidebar it should be
-    # bigger than currently"). `width=260` : large mais reste dans la
-    # largeur par défaut de la sidebar Streamlit (~336px) sans déborder.
-    st.sidebar.image(_LOGO_PATH, width=260)
+    # Logo en tête de sidebar. T-D14b (2026-08-24) : `st.html`/`_logo_html`
+    # (lockup "Stacked") remplace `st.image` (PAS `st.logo` -- déjà écarté
+    # avant ce ticket : son plafond de taille intégré, 32px de haut max même
+    # en "large", rendait un logo minuscule). 96px de marque : large mais
+    # reste dans la largeur par défaut de la sidebar Streamlit (~336px).
+    st.sidebar.html(_logo_html(mark_px=96, word_px=34))
 
     # T-D11 (2026-08-23, spec Claude Design §6) : "Sidebar order: logo ->
     # navigation -> collapsed 'Database' popover... -> licence/contact
@@ -3049,8 +3784,9 @@ def main():
     if mode == "home":
         # Logo affiché seulement ICI (page Home), pas sur les autres pages
         # d'outil -- voir le commentaire plus haut sur son retrait de
-        # `main()` en tête commune.
-        st.image(_LOGO_PATH, width=420)
+        # `main()` en tête commune. T-D14b (2026-08-24) : lockup "Stacked"
+        # (`_logo_html`) à taille "hero", remplace le raster `st.image`.
+        st.html(_logo_html(mark_px=160, word_px=56))
         st.title(MODE_LABELS[mode])
         _home(con)
         return

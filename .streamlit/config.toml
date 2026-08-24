@@ -26,24 +26,28 @@ buttonRadius = "full"
 showWidgetBorder = true
 showSidebarBorder = false
 
-# Charts. Categorical: up to 5 hops compared side by side, so the first five
-# entries alternate hue AND value to stay separable (and to survive
-# greyscale). Chart colours cannot be set per light/dark mode.
+# Charts. Three separate colour jobs (see DESIGN_SPEC.md §8.1):
+# categorical = which hop, sequential = intensity, terracotta = interaction.
+# Categorical cannot be set per theme, so every entry is a mid-tone that
+# clears 3:1 on BOTH the cream and the dark ground. Order matters: the first
+# two are the pair that survives every form of colour blindness.
 chartCategoricalColors = [
+  "#4f86b8",  # denim
   "#c67139",  # terracotta
-  "#7a8a5e",  # sage
+  "#7f9455",  # sage
+  "#d9a441",  # ochre
+  "#a5678a",  # plum
+  "#2f6f6a",  # teal
   "#8c491a",  # deep terracotta
-  "#aebf92",  # light sage
+  "#56633f",  # deep sage
+  "#7d5ba6",  # violet
   "#82796a",  # warm neutral
-  "#f6a06b",
-  "#56633f",
-  "#402310",
-  "#ccdbb2",
-  "#c0b6a5",
 ]
+# Sequential = descriptor intensity, single-hue sage, so the maximum value
+# never collides with the terracotta that means "interactive".
 chartSequentialColors = [
-  "#fff2eb", "#ffe1d0", "#ffc6a5", "#f6a06b", "#d67f48",
-  "#b2622d", "#8c491a", "#643312", "#402310", "#2e2b25",
+  "#f0fae1", "#e1eecc", "#ccdbb2", "#aebf92", "#8fa073",
+  "#728157", "#56633f", "#3d472b", "#2f3722", "#272e1b",
 ]
 chartDivergingColors = [
   "#272e1b", "#3d472b", "#56633f", "#8fa073", "#ccdbb2",
