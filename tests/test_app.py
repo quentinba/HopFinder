@@ -650,7 +650,12 @@ def test_compare_detail_barplot_log_scale_domain_uses_whole_database_range():
     chart = app._compare_detail_barplot(
         rows, [], "Amount", ["thiols"], "Thiols (ug/kg)", colors,
         log_scale=True, secondary_db_values=[0.7, 5.15, 32.6])
-    bar_layer = next(layer for layer in chart.to_dict()["layer"]
+    # 2026-08-26 (ticket catégories chimiques) : le chart racine est
+    # désormais un `hconcat` (colonnes classe/sous-classe + le barplot
+    # détaillé lui-même, en dernier) -- le barplot avec ses couches "bar"
+    # reste le DERNIER élément de ce `hconcat`.
+    detail = chart.to_dict()["hconcat"][-1]
+    bar_layer = next(layer for layer in detail["layer"]
                      if layer.get("mark", {}).get("type") == "bar")
     domain = bar_layer["encoding"]["x"]["scale"]["domain"]
     assert domain[0] == pytest.approx(0.7 * 0.9)

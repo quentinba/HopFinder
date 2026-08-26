@@ -180,6 +180,20 @@ _TOOL_SUMMARY_BY_MODE = {t["mode"]: t for t in _TOOL_SUMMARIES}
 # un `git log` en direct exigerait aussi que `.git` soit présent dans le
 # conteneur déployé, ce qui n'est pas garanti.
 _RECENT_UPDATES = [
+    ("2026-08-27", "Compare Hops' detailed composition chart now shows each "
+                   "compound's chemical category (Hydrocarbons/Oxygen "
+                   "containing/Sulfur compounds, and the finer Monoterpenes/"
+                   "Sesquiterpenes/etc. below that) in two narrow columns, "
+                   "with a coloured bracket connecting each group of "
+                   "compounds to its category and a clear divider line "
+                   "between adjacent categories — the category/compound "
+                   "names themselves stay plain text, leaning on the "
+                   "bracket colour and dividers instead. This chart is back "
+                   "to matching the width of the chart above it (its "
+                   "legend was dropped as redundant — the same one already "
+                   "appears twice higher up on this page). The browser-tab "
+                   "icon is now the plain orange hop mark with no "
+                   "background, matching the sidebar logo."),
     ("2026-08-26", "The hop-engraving background image is now visible, but "
                    "discreetly, in both light and dark mode (it was "
                    "nearly invisible at first, then too prominent once "
@@ -3140,14 +3154,503 @@ def _compound_display_label(compound: str) -> str:
     return compound[:1].upper() + compound[1:]
 
 
-def _compound_axis_expr(fields: list[str]) -> str:
-    """Expression Vega `labelExpr` pour l'axe Y de `_compare_detail_barplot`
-    -- même mécanisme que `_legend_abbr_expr` (radar Compare) : réécrit
-    UNIQUEMENT le texte affiché, jamais la donnée `Field:N` sous-jacente."""
-    expr = "datum.label"
-    for f in fields:
-        expr = f"datum.label === {json.dumps(f)} ? {json.dumps(_compound_display_label(f))} : ({expr})"
-    return expr
+# Catégories chimiques du barplot 2 (2026-08-26/27, demande utilisateur
+# explicite, mapping "HYDROCARBONS / OXYGEN CONTAINING / SULFUR CONTAINING"
+# fourni, recoupé composé par composé contre `reference.PROCESS_SURVIVAL`
+# (T74) -- REUTILISE cette structure plutôt que d'en dupliquer une nouvelle :
+# la taxonomie class/subclass y est déjà sourcée (Scott Janish, *The New
+# IPA*, figure "Chemical compositions of the essential oils of hops") et
+# vérifiée composé par composé pour les 11 champs réels de `hop_composition`.
+# Seule divergence avec le mapping fourni : `PROCESS_SURVIVAL` regroupe
+# esters ET cétones sous UNE sous-classe ("Other (ketones, esters,
+# aldehydes, epoxides)", confidence="low") -- BarthHaas n'indique jamais
+# QUELLE molécule précise compose "isobutyrate"/"ketones", les séparer en
+# deux sous-classes distinctes serait une supposition non vérifiable (même
+# réserve déjà documentée pour le refus de deviner un CID PubChem sur un nom
+# flou).
+#
+# Historique de ce composant (retours utilisateur successifs en
+# vérification live, avant la version actuelle) :
+# (1) 1er essai : colonne "classe" REMPLIE d'une couleur pleine -- signalé
+#     par l'utilisateur comme un DOUBLON de code couleur ("there is already
+#     a color code (per hop color)"), retiré.
+# (2) Raccourcir les libellés trop longs ("Ketones & esters", "Monoterpenols")
+#     pour les faire tenir sur UNE ligne pivotée -- signalé insuffisant par
+#     l'utilisateur lui-même ("enforce that all text... fits the space
+#     allocated... don't hesitate to use \\n") : retiré au profit du multi-
+#     ligne RÉEL (3).
+# (3) `mark_text(lineBreak="\\n")` scinde un libellé multi-mots sur son
+#     ESPACE naturel (vérifié en direct, isolé hors Streamlit -- voir le
+#     commentaire de `_compare_category_gutter` -- que `lineBreak` doit être
+#     posé EXPLICITEMENT, Vega-Lite n'auto-détecte pas un "\\n" nu) -- une
+#     fois pivoté à 90°, chaque ligne devient une COLONNE côte à côte plutôt
+#     qu'un empilement vertical. Seuls les MOTS UNIQUES sans espace
+#     ("Sesquiterpenes", "Monoterpenes", "Thiols") ne peuvent pas être
+#     scindés proprement ; `_CATEGORY_ROW_HEIGHT_FLOOR` garantit qu'ils
+#     tiennent malgré tout, même sur un groupe d'une seule ligne.
+# (4) 2026-08-27, second retour utilisateur -- couleur+contour sur le
+#     texte de classe/sous-classe/composé, `\\n` multi-ligne pivoté --
+#     ESSAYÉ puis RETIRÉ au (5) ci-dessous, voir son détail (une régression
+#     de rendu Vega-Lite propre au texte pivoté multi-ligne, pas juste un
+#     choix esthétique annulé).
+# (5) 2026-08-27, TROISIÈME retour utilisateur -- 8 points, tous traités
+#     ensemble ici :
+#     - "the plot is now super wide, doesn't enter in a PC screen" +
+#       "duplication of legends" -- LA MÊME cause : `resolve_scale(color=
+#       "independent")` avait été posé sur la couche INTERNE de
+#       `_compare_detail_barplot` (`alt.layer(*layers)`) pour isoler le
+#       "Class" de `compound_label` (alors teinté par catégorie, voir (4))
+#       du "Hop" des barres -- mais `resolve_scale` à ce niveau rend TOUTES
+#       les couches indépendantes LES UNES DES AUTRES, pas seulement de
+#       `compound_label` : la barre primaire ET la barre secondaire (même
+#       champ "Hop", même domaine) se sont retrouvées avec 2 échelles/
+#       légendes SÉPARÉES au lieu d'UNE partagée -- d'où la légende "Hop"
+#       DUPLIQUÉE, chacune ajoutant sa propre largeur de légende au rendu
+#       final (la vraie cause du "super wide", pas la largeur nominale du
+#       graphique lui-même). Résolu à la racine par (6) ci-dessous : sans
+#       teinte de catégorie sur `compound_label`, il n'y a plus qu'UN SEUL
+#       canal "color" (Hop) dans cette couche -- `resolve_scale(color=...)`
+#       n'est plus nécessaire ici du tout, seul `x="independent"` (barre
+#       primaire/secondaire, préexistant) reste.
+#     - "increase a bit the size of the main categories... exactly the mean
+#       of the size of the categories and the label name" --
+#       `_CATEGORY_SUBCLASS_FONT_SIZE` n'est plus une constante indépendante
+#       mais `(_CATEGORY_CLASS_FONT_SIZE + _CATEGORY_COMPOUND_FONT_SIZE) /
+#       2`, calculée -- garantit la moyenne EXACTE demandée, jamais
+#       approximée à la main.
+#     - "separation between subcategories is still not super visible" --
+#       `_run_boundary_rules` (inchangée dans son mécanisme) rendue plus
+#       contrastée : `strokeWidth` doublé (1 -> 2) et couleur portée à
+#       `text_color` (opaque, même teinte que le texte neutre) plutôt que
+#       `grid_color` (pensé pour un quadrillage discret, pas une frontière
+#       de catégorie -- les 2 usages n'ont pas la même exigence de
+#       contraste).
+#     - "remove the colored text with contour, it doesn't work... rely on
+#       the colored bars and better separation" -- RETIRÉ entièrement : le
+#       texte de classe/sous-classe/composé redevient `text_color` neutre
+#       statique, sans `color=` encodé ni `stroke`. Le "colored bar" =
+#       LA BRACKET (`_compare_category_gutter`, inchangée, reste teintée
+#       par classe) ; la séparation renforcée ci-dessus complète le signal
+#       visuel sans dépendre de la couleur du texte.
+#     - "Monoterpene alcohols is not centered on its box" -- root cause
+#       RÉELLE trouvée en isolant le rendu hors Streamlit (page Vega-Embed
+#       minimale, comme pour le bug du barplot log T-D09c) : Vega ne fait
+#       PAS pivoter le décalage inter-lignes d'un texte multi-ligne
+#       (`lineBreak`) AVEC le glyphe -- le décalage `lineHeight` reste
+#       appliqué en axe Y du document AVANT rotation, donc un bloc 2-lignes
+#       pivoté à 90° se retrouve désaxé et chevauche la ligne voisine (
+#       constaté noir sur blanc : "Monoterpene\\nalcohols" débordait
+#       visiblement sur la ligne de "Sesquiterpenes" juste en dessous).
+#       PAS une limite de centrage seule -- une limite de rendu Vega pour
+#       la combinaison (multi-ligne + pivoté) tout court. Le multi-ligne
+#       (`lineBreak`, introduit au tour précédent) est donc entièrement
+#       ABANDONNÉ : tous les libellés repassent à UNE seule ligne,
+#       raccourcis si besoin (voir juste en dessous) -- `align="center"`/
+#       `baseline="middle"` posés explicitement (au lieu du défaut Vega-Lite)
+#       centrent alors correctement un libellé à une ligne.
+#     - "'Sulfur compounds' should be renamed 'Sulfur comps.'" -- ce
+#       raccourci, combiné à l'abandon du multi-ligne ci-dessus, permet
+#       aussi de raccourcir "Oxygen containing" -> "Oxygen cont." (même
+#       style d'abréviation) : les 3 classes ET les 5 sous-classes tiennent
+#       maintenant TOUTES sur une ligne, mesuré empiriquement (page de test
+#       isolée) -- 69.5px pour le mot le plus long ("Sesquiterpenes"),
+#       jamais plus.
+#     - "reduce the width allocated to categories and subcategories" -- une
+#       fois le texte redescendu à 1 ligne (fini le besoin de 2 colonnes de
+#       texte côte à côte après pivot), l'épaisseur RÉELLE d'une ligne
+#       pivotée mesurée (11.5px à ces tailles de police) rend les anciennes
+#       largeurs (38/50px) très excessives -- réduites à 20/22px
+#       (`_COMPARE_CATEGORY_CLASS_WIDTH`/`_COMPARE_CATEGORY_SUBCLASS_WIDTH`).
+#     - "in main, barplot 2 is the same width as barplot 1 -- keep this"
+#       -- `_COMPARE_DETAIL_BAR_WIDTH` (nouveau) retire la largeur du
+#       gutter de `_COMPARE_CHART_WIDTH` pour la seule zone des BARRES de
+#       ce barplot, pour que la largeur TOTALE (gutter + barres) reste
+#       identique à `_COMPARE_CHART_WIDTH` -- donc identique au barplot 1
+#       ("Principal info", qui n'a pas de gutter et utilise `_COMPARE_
+#       CHART_WIDTH` en entier), au lieu de s'y ajouter en plus.
+_CATEGORY_SUBCLASS_DISPLAY = {
+    "Monoterpene alcohols": "Monoterpenols",
+    "Other (ketones, esters, aldehydes, epoxides)": "Ketones/esters",
+}
+_CATEGORY_CLASS_DISPLAY = {
+    "Oxygen containing": "Oxygen cont.",
+    "Sulfur compounds": "Sulfur comp.",  # 2026-08-27, 4e retour : "comps." débordait encore de sa boîte
+}
+_CATEGORY_UNCATEGORIZED = "Uncategorized"
+# Couleur "classe" -- 3 teintes prises dans les 5 dernières entrées de
+# `chartCategoricalColors` (.streamlit/config.toml), JAMAIS dans les 5
+# premières : `_COMPARE_PALETTE` (couleur par houblon, dans la MÊME vue)
+# n'utilise que les 5 premières (`_COMPARE_MAX_HOPS`) -- confondre la
+# couleur d'une catégorie chimique avec la couleur d'identité d'un houblon
+# affiché juste à côté serait trompeur. Depuis (5) ci-dessus, sert
+# UNIQUEMENT à teinter la "bracket" (`_compare_category_gutter`) -- plus
+# aucun texte n'est teinté par catégorie (voir (5)).
+_CATEGORY_CLASS_COLORS = {
+    "Hydrocarbons": "#2f6f6a",           # teal
+    "Oxygen containing": "#8c491a",      # deep terracotta
+    "Sulfur compounds": "#56633f",       # deep sage
+    _CATEGORY_UNCATEGORIZED: "#82796a",  # warm neutral -- ne devrait jamais s'afficher (T74 couvre les 11 composés réels)
+}
+# Largeur des 2 colonnes du gutter -- réduite au minimum utile (5) : texte à
+# UNE seule ligne pivotée (~11.5px d'épaisseur mesurée), plus la fine
+# bracket colorée sur la colonne sous-classe.
+_COMPARE_CATEGORY_CLASS_WIDTH = 20
+_COMPARE_CATEGORY_SUBCLASS_WIDTH = 22
+# Largeur de la bracket colorée, à l'extrémité GAUCHE de la colonne
+# sous-classe (contre la colonne classe) -- un simple repère visuel, jamais
+# un canal de donnée à lui seul.
+_CATEGORY_BRACKET_WIDTH = 4
+# Plancher de hauteur de ligne -- garantit qu'un groupe d'UNE SEULE ligne
+# (le pire cas : n'importe quel houblon peut, selon sa composition mesurée,
+# laisser une sous-classe/classe entière réduite à 1 seul composé présent)
+# reste assez haut pour loger le plus long libellé à une ligne
+# ("Sesquiterpenes", 69.5px mesuré empiriquement en direct -- page de test
+# Vega-Embed isolée, voir l'historique (5) ci-dessus). S'applique en PLUS de
+# la formule habituelle (`n_hops * 14 + 18`, `_compare_detail_barplot`) via
+# `max(...)` -- ne la réduit jamais, l'augmente seulement quand elle serait
+# insuffisante.
+_CATEGORY_ROW_HEIGHT_FLOOR = 78
+_CATEGORY_CLASS_FONT_SIZE = 13
+_CATEGORY_COMPOUND_FONT_SIZE = 12
+# Moyenne EXACTE des 2 tailles ci-dessus (demande utilisateur explicite :
+# "exactly the mean of the size of the categories... and the label name") --
+# calculée, jamais approximée à la main.
+_CATEGORY_SUBCLASS_FONT_SIZE = (_CATEGORY_CLASS_FONT_SIZE + _CATEGORY_COMPOUND_FONT_SIZE) / 2
+# Largeur de la colonne "noms de composés" (2026-08-27, 4e retour
+# utilisateur : "the plot is still too wide, reduce it... to be as large as
+# the first barplot") -- root cause RÉELLE du dépassement persistant malgré
+# `_COMPARE_DETAIL_BAR_WIDTH` (voir son historique) : les noms de composés
+# étaient un `mark_text` custom positionné sur l'axe Y natif rendu invisible
+# (`labelOpacity=0`), gardé UNIQUEMENT pour que Vega-Lite réserve la MÊME
+# marge gauche qu'avant -- mais cette marge est calculée par Vega-Lite lui-
+# même (taille dépendante du contenu, ex. "Caryophyllene") et s'ajoute EN
+# PLUS de la largeur `width` déclarée, donc EN PLUS de tout calcul basé sur
+# `_COMPARE_CHART_WIDTH` -- jamais pris en compte par `_COMPARE_DETAIL_BAR_
+# WIDTH`, d'où le dépassement qui persistait. Corrigé en sortant les noms de
+# composés dans leur PROPRE colonne `hconcat` (4e panneau, largeur EXPLICITE
+# comme les 2 du gutter) : le barplot de barres n'a alors plus AUCUN axe Y
+# natif (`axis=None` pur, aucune marge implicite), toute la largeur reste
+# comptée. Largeur mesurée empiriquement (page de test isolée) : "Caryo
+# phyllene" (le plus long nom réel), 63.9px -- marge de sécurité modeste.
+_COMPARE_CATEGORY_COMPOUND_WIDTH = 72
+# Nombre de jointures `hconcat` entre les 4 panneaux (classe | sous-classe |
+# noms de composés | barres), chacune espacée de 2px (`alt.hconcat(...,
+# spacing=2)`) -- utilisé pour calculer `_COMPARE_DETAIL_BAR_WIDTH`
+# ci-dessous.
+_COMPARE_DETAIL_HCONCAT_SPACING = 2
+# Surcoût de largeur RENDU mesuré empiriquement (2026-08-27, en direct dans
+# le navigateur, `svg.getAttribute("width")`) une fois la légende retirée
+# (voir `color_enc` de `_compare_detail_barplot`, "legend=None") et les 4
+# largeurs de panneau posées : le SVG final restait à 728px pour 700
+# déclarés (28px de trop), alors que le barplot 1 (une seule vue, PAS un
+# `hconcat`) rend EXACTEMENT sa largeur déclarée sans surcoût. Un `hconcat`
+# semble ajouter un petit padding par panneau (4 panneaux ici) au-delà de
+# `spacing` -- jamais confirmé dans la doc Vega-Lite, mesuré directement
+# plutôt que supposé. Soustrait de `_COMPARE_DETAIL_BAR_WIDTH` pour que la
+# largeur RENDUE (pas seulement déclarée) corresponde à celle du barplot 1,
+# demande utilisateur explicite : "reduce it... to be as large as the
+# first barplot".
+_COMPARE_DETAIL_HCONCAT_OVERHEAD = 28
+# Largeur de la seule zone "barres" du barplot détaillé (2026-08-27, demande
+# utilisateur explicite : "in main, barplot 2 is the same width as barplot
+# 1 -- keep this") -- `_COMPARE_CHART_WIDTH` MOINS le gutter ET la colonne
+# de noms de composés (classe + sous-classe + noms + 3 jointures `hconcat`)
+# MOINS le surcoût mesuré ci-dessus, pour que la largeur TOTALE RENDUE
+# (gutter + noms + barres) reste égale à `_COMPARE_CHART_WIDTH` -- comme le
+# barplot 1 ("Principal info", `_compare_dual_axis_barplot`) qui n'a pas de
+# gutter et utilise `_COMPARE_CHART_WIDTH` en entier -- jamais gutter/noms
+# EN PLUS de cette largeur, ce qui rendait le graphique plus large que
+# l'écran.
+_COMPARE_DETAIL_BAR_WIDTH = (_COMPARE_CHART_WIDTH - _COMPARE_CATEGORY_CLASS_WIDTH
+                            - _COMPARE_CATEGORY_SUBCLASS_WIDTH - _COMPARE_CATEGORY_COMPOUND_WIDTH
+                            - 3 * _COMPARE_DETAIL_HCONCAT_SPACING - _COMPARE_DETAIL_HCONCAT_OVERHEAD)
+
+
+def _compound_category(compound: str) -> tuple[str, str, str]:
+    """(classe, sous-classe BRUTE, sous-classe AFFICHÉE) pour `compound` --
+    lecture pure de `matching.process_survival` (T74), voir le commentaire
+    au-dessus de `_CATEGORY_SUBCLASS_DISPLAY`. Composé non mappé (ne devrait
+    jamais arriver sur les composés réels actuels) -> les 3 valeurs valent
+    `_CATEGORY_UNCATEGORIZED`, jamais un crash ni un groupe fabriqué qui
+    semblerait sourcé."""
+    info = matching.process_survival(compound)
+    if info is None:
+        return _CATEGORY_UNCATEGORIZED, _CATEGORY_UNCATEGORIZED, _CATEGORY_UNCATEGORIZED
+    subclass = info["subclass"]
+    return info["class"], subclass, _CATEGORY_SUBCLASS_DISPLAY.get(subclass, subclass)
+
+
+def _category_group_order() -> dict[tuple[str, str], int]:
+    """Ordre canonique (classe, sous-classe brute) -- position de première
+    apparition dans `reference.PROCESS_SURVIVAL` (ordre d'INSERTION du dict,
+    garanti en Python 3.7+), utilisé pour grouper les composés du barplot 2
+    PAR CATÉGORIE CHIMIQUE plutôt que par valeur brute (2026-08-26, demande
+    utilisateur explicite : "add the categories of molecules... make
+    something very easy to read and understand the categories"). Calculé
+    une seule fois au chargement du module -- la taxonomie ne change qu'au
+    code, jamais aux données d'un houblon particulier."""
+    order: dict[tuple[str, str], int] = {}
+    for info in matching.reference.PROCESS_SURVIVAL.values():
+        key = (info["class"], info["subclass"])
+        if key not in order:
+            order[key] = len(order)
+    return order
+
+
+_CATEGORY_GROUP_ORDER = _category_group_order()
+
+
+def _contiguous_runs(field_order: list[str], keys: list) -> list[tuple[int, int]]:
+    """Paires (index de début, index de fin INCLUS) des runs contigus de
+    `keys` identiques dans `field_order` (`keys` aligné index-à-index) --
+    brique de base pour les labels de groupe ET pour la "bracket" colorée
+    (`_compare_category_gutter`)."""
+    runs = []
+    i, n = 0, len(field_order)
+    while i < n:
+        j = i
+        while j + 1 < n and keys[j + 1] == keys[i]:
+            j += 1
+        runs.append((i, j))
+        i = j + 1
+    return runs
+
+
+def _contiguous_group_labels(field_order: list[str], keys: list, labels: list[str]
+                             ) -> list[tuple[str, str, bool]]:
+    """Une entrée (Field ANCRE, label AFFICHÉ, `on_boundary`) par run contigu
+    de `keys` identiques dans `field_order` (`keys`/`labels` alignés index-à-
+    index sur `field_order` -- `labels` peut différer de `keys`, ex. sous-
+    classe raccourcie pour l'affichage vs sous-classe brute pour le
+    regroupement). Un SEUL label par groupe de lignes consécutives -- pas
+    une ligne par composé, ce qui répéterait un texte pivoté à 90° sur
+    chaque ligne d'un même groupe et le ferait se chevaucher avec lui-même
+    verticalement.
+
+    2026-08-27, 3e retour utilisateur ("Oxygen cont.", "Monoterpenols" et
+    "Ketones/esters" pas centrés) -- root cause vérifiée en direct : l'ancre
+    `i + (j - i) // 2` (division entière) retombe TOUJOURS sur une ligne
+    RÉELLE, correcte pour un run à nombre IMPAIR de lignes (la ligne du
+    milieu existe réellement, ex. Sesquiterpenes à 3 lignes -> Caryophyllene)
+    mais biaisée vers le HAUT pour un run à nombre PAIR (le vrai centre
+    géométrique tombe exactement à la FRONTIÈRE entre les 2 lignes du
+    milieu, sur aucune ligne réelle -- ex. Oxygen containing, 4 lignes :
+    vrai centre entre Geraniol et Ketones, PAS sur Geraniol seul).
+    `on_boundary=True` (run pair) signale à l'appelant d'ancrer le texte via
+    `bandPosition=1` sur la PREMIÈRE des 2 lignes du milieu -- le BAS de
+    cette ligne coïncide exactement avec la frontière, donc avec le vrai
+    centre (vérifié hors Streamlit avant intégration, isolé comme les autres
+    mécanismes `bandPosition` de ce fichier). `on_boundary=False` (run
+    impair) : ancre normale (`bandPosition` par défaut, déjà correcte)."""
+    out = []
+    for i, j in _contiguous_runs(field_order, keys):
+        n = j - i + 1
+        if n % 2 == 1:
+            mid = i + n // 2
+            out.append((field_order[mid], labels[mid], False))
+        else:
+            mid = i + n // 2 - 1
+            out.append((field_order[mid], labels[mid], True))
+    return out
+
+
+def _contiguous_group_spans(field_order: list[str], keys: list
+                            ) -> list[tuple[str, str]]:
+    """(Field de début, Field de fin) par run contigu de `keys` identiques
+    -- pour la "bracket" colorée de `_compare_category_gutter`, qui doit
+    couvrir EXACTEMENT la plage d'un groupe (du haut de sa première ligne au
+    bas de sa dernière), pas seulement son point milieu. Repose sur
+    `alt.Y(..., bandPosition=0)`/`alt.Y2(..., bandPosition=1)` (Vega-Lite
+    v5+, vérifié disponible et correct hors Streamlit avant intégration --
+    voir le commentaire de `_compare_category_gutter`) plutôt qu'un
+    empilement de rects pleine-largeur par ligne (aurait remis en place le
+    "color code" de remplissage que l'utilisateur a explicitement demandé de
+    retirer)."""
+    return [(field_order[i], field_order[j]) for i, j in _contiguous_runs(field_order, keys)]
+
+
+def _category_color_scale() -> alt.Scale:
+    """Échelle couleur "classe chimique" partagée entre `_compare_category_
+    gutter` (texte classe/sous-classe + bracket) et `_compare_detail_
+    barplot` (noms de composés sur l'axe Y, 2026-08-27) -- un seul objet de
+    référence pour ce mapping, jamais reconstruit différemment à 2 endroits."""
+    return alt.Scale(domain=list(_CATEGORY_CLASS_COLORS.keys()),
+                     range=list(_CATEGORY_CLASS_COLORS.values()))
+
+
+def _compare_category_gutter(field_order: list[str], height: int,
+                             grid_color: str, text_color: str
+                             ) -> tuple[alt.Chart, alt.Chart] | None:
+    """Les 2 colonnes "catégorie chimique" (classe, sous-classe) affichées à
+    GAUCHE de `_compare_detail_barplot` par l'appelant, via `alt.hconcat`
+    (2026-08-26/27, demande utilisateur explicite, mapping fourni recoupé
+    contre `reference.PROCESS_SURVIVAL` -- voir le commentaire au-dessus de
+    `_CATEGORY_SUBCLASS_DISPLAY`). Retourne `None` si `field_order` est vide,
+    sinon `(class_chart, subclass_chart)`, chacun SANS `background` -- cette
+    propriété est TOPLEVEL-ONLY pour Altair (une erreur explicite si posée
+    sur un sous-spec d'un `hconcat`) : l'appelant l'applique une seule fois
+    sur le `hconcat` final, pas ici. L'assemblage final (`hconcat` avec
+    `detail_chart`) reste aussi chez l'appelant, pas ici, pour éviter un
+    `hconcat` imbriqué dans un autre. MÊME domaine `field_order`/MÊME
+    `height` que le barplot principal -- Vega-Lite calcule alors des
+    positions de bande identiques dans les vues juxtaposées (un alignement
+    ligne-à-ligne fiable).
+
+    Design retenu après plusieurs retours utilisateur en vérification live
+    -- voir le commentaire complet au-dessus de `_CATEGORY_SUBCLASS_DISPLAY`
+    pour l'historique (notamment (5), qui a fait marche arrière sur le
+    texte teinté+contour du tour précédent). État ACTUEL :
+    - **Colonne "classe"** ET **colonne "sous-classe"** : texte NEUTRE
+      (`text_color`, statique -- ni teinte de catégorie ni contour, retirés
+      au (5) : "remove the colored text with contour... rely on the
+      colored bars and better separation"), `align="center"`/
+      `baseline="middle"` posés EXPLICITEMENT (le défaut Vega-Lite ne
+      centre pas forcément un texte pivoté sur son ancre -- vérifié en
+      direct que ces 2 propriétés le garantissent). `_CATEGORY_CLASS_FONT_
+      SIZE` > `_CATEGORY_SUBCLASS_FONT_SIZE` (celle-ci = moyenne EXACTE
+      avec `_CATEGORY_COMPOUND_FONT_SIZE`, voir cette constante).
+    - **Bracket** : seul élément encore COLORÉ par catégorie (`_category_
+      color_scale`) -- fine bande verticale (`_CATEGORY_BRACKET_WIDTH`) au
+      bord gauche de la colonne sous-classe, s'étendant EXACTEMENT du haut
+      de la première ligne au bas de la dernière ligne d'un run de
+      sous-classe contigu (`_contiguous_group_spans`, `alt.Y(bandPosition=
+      0)`/`alt.Y2(bandPosition=1)` -- vérifié fiable hors Streamlit avant
+      intégration) : répond à la demande explicite "we need brackets or at
+      least vertical bar to help visual mapping between compound name and
+      sub-categories", et sert maintenant de repère catégoriel PRINCIPAL
+      depuis (5) (texte redevenu neutre).
+    - **Séparateurs de run** : un `mark_rule` HORIZONTAL à CHAQUE frontière
+      de run (`_contiguous_runs`, bandPosition=1 sur le dernier composé du
+      run), `strokeWidth=2`/`text_color` (opaque -- pas `grid_color`, pensé
+      pour un quadrillage discret, insuffisant ici : "separation between
+      subcategories is still not super visible") -- la classe/sous-classe
+      précédente partage parfois la MÊME teinte que la suivante (2
+      sous-classes d'une même classe), donc le changement de couleur seul
+      ne suffit pas à signaler la frontière ; ce trait EXPLICITE le fait,
+      indépendamment de la couleur.
+    - Texte pivoté à 90°, ancré à la ligne du milieu de chaque run contigu
+      (`_contiguous_group_labels`) -- jamais répété sur chaque ligne. Un
+      `mark_rule` vertical neutre (grid_color) à la frontière de chaque
+      colonne sépare les 3 zones (classe / sous-classe / composés+barres)."""
+    if not field_order:
+        return None
+    classes = [_compound_category(f)[0] for f in field_order]
+    class_display = [_CATEGORY_CLASS_DISPLAY.get(c, c) for c in classes]
+    raw_subclasses = [_compound_category(f)[1] for f in field_order]
+    display_subclasses = [_compound_category(f)[2] for f in field_order]
+
+    y_scale = alt.Scale(domain=field_order)
+    class_color_scale = _category_color_scale()
+
+    def _run_boundary_rules(keys: list, width: float) -> alt.Chart:
+        """Un `mark_rule` HORIZONTAL par frontière entre 2 runs contigus de
+        `keys` (toutes sauf la dernière, qui n'a rien après elle) -- voir
+        "Séparateurs de run" ci-dessus."""
+        runs = _contiguous_runs(field_order, keys)
+        boundary_rows = [{"Field": field_order[j]} for _, j in runs[:-1]]
+        return (alt.Chart(alt.Data(values=boundary_rows)).mark_rule(color=text_color, strokeWidth=2)
+               .encode(y=alt.Y("Field:N", scale=y_scale, axis=None, bandPosition=1),
+                      x=alt.value(0), x2=alt.value(width)))
+
+    def _label_layers(entries: list[tuple[str, str, bool]], x_value: float,
+                      **text_kwargs) -> list[alt.Chart]:
+        """1 ou 2 couches `mark_text` selon `_contiguous_group_labels` :
+        les runs à nombre IMPAIR de lignes (ancre normale) et les runs à
+        nombre PAIR (ancre `bandPosition=1`, voir cette fonction) ne
+        peuvent PAS partager la même couche -- `bandPosition` est une
+        propriété de SPEC, pas encodable par ligne de données ; vérifié hors
+        Streamlit que les combiner correctement (au lieu de forcer `band
+        Position=1` partout, qui aurait décalé les runs impairs) exige bien
+        2 couches distinctes."""
+        centered = [{"Field": f, "Label": lbl} for f, lbl, on_boundary in entries if not on_boundary]
+        on_boundary_rows = [{"Field": f, "Label": lbl} for f, lbl, on_boundary in entries if on_boundary]
+        layers = []
+        if centered:
+            layers.append(alt.Chart(alt.Data(values=centered)).mark_text(**text_kwargs)
+                          .encode(y=alt.Y("Field:N", scale=y_scale, axis=None),
+                                 x=alt.value(x_value), text="Label:N"))
+        if on_boundary_rows:
+            layers.append(alt.Chart(alt.Data(values=on_boundary_rows)).mark_text(**text_kwargs)
+                          .encode(y=alt.Y("Field:N", scale=y_scale, axis=None, bandPosition=1),
+                                 x=alt.value(x_value), text="Label:N"))
+        return layers
+
+    class_label_layers = _label_layers(
+        _contiguous_group_labels(field_order, classes, class_display),
+        _COMPARE_CATEGORY_CLASS_WIDTH / 2,
+        angle=90, fontSize=_CATEGORY_CLASS_FONT_SIZE, fontWeight=700,
+        align="center", baseline="middle", color=text_color)
+    class_boundaries = _run_boundary_rules(classes, _COMPARE_CATEGORY_CLASS_WIDTH)
+    class_divider = (
+        alt.Chart(alt.Data(values=[{}])).mark_rule(color=grid_color, strokeWidth=1)
+        .encode(x=alt.value(_COMPARE_CATEGORY_CLASS_WIDTH),
+               y=alt.value(0), y2=alt.value(height)))
+    class_chart = alt.layer(*class_label_layers, class_boundaries, class_divider).properties(
+        width=_COMPARE_CATEGORY_CLASS_WIDTH, height=height)
+
+    # Bracket : une ligne par run de SOUS-CLASSE contigu (pas de classe --
+    # une sous-classe ne s'étend jamais sur 2 classes, ce niveau est donc
+    # déjà le plus fin utile), teinte = classe parente du run (prise sur son
+    # premier composé, tous les composés d'un même run partagent la même
+    # classe par construction).
+    subclass_spans = _contiguous_group_spans(field_order, raw_subclasses)
+    bracket_rows = []
+    for start, end in subclass_spans:
+        cls = _compound_category(start)[0]
+        bracket_rows.append({"Start": start, "End": end, "Class": cls})
+    bracket = (
+        alt.Chart(alt.Data(values=bracket_rows))
+        .mark_rect()
+        .encode(y=alt.Y("Start:N", scale=y_scale, axis=None, bandPosition=0),
+               y2=alt.Y2("End:N", bandPosition=1),
+               x=alt.value(0), x2=alt.value(_CATEGORY_BRACKET_WIDTH),
+               color=alt.Color("Class:N", scale=class_color_scale, legend=None),
+               tooltip=[alt.Tooltip("Class:N", title="Class")]))
+    subclass_label_layers = _label_layers(
+        _contiguous_group_labels(field_order, raw_subclasses, display_subclasses),
+        _CATEGORY_BRACKET_WIDTH + (_COMPARE_CATEGORY_SUBCLASS_WIDTH - _CATEGORY_BRACKET_WIDTH) / 2,
+        angle=90, fontSize=_CATEGORY_SUBCLASS_FONT_SIZE, align="center", baseline="middle",
+        color=text_color)
+    subclass_boundaries = _run_boundary_rules(raw_subclasses, _COMPARE_CATEGORY_SUBCLASS_WIDTH)
+    subclass_divider = (
+        alt.Chart(alt.Data(values=[{}])).mark_rule(color=grid_color, strokeWidth=1)
+        .encode(x=alt.value(_COMPARE_CATEGORY_SUBCLASS_WIDTH),
+               y=alt.value(0), y2=alt.value(height)))
+    subclass_chart = alt.layer(bracket, *subclass_label_layers, subclass_boundaries,
+                               subclass_divider).properties(
+        width=_COMPARE_CATEGORY_SUBCLASS_WIDTH, height=height)
+
+    return class_chart, subclass_chart
+
+
+def _compare_compound_names_column(field_order: list[str], height: int,
+                                   grid_color: str, text_color: str) -> alt.Chart:
+    """Colonne "noms de composés" affichée entre le gutter et les barres de
+    `_compare_detail_barplot`, via `alt.hconcat` (2026-08-27, 4e retour
+    utilisateur -- voir le commentaire de `_COMPARE_CATEGORY_COMPOUND_
+    WIDTH` pour la root cause du dépassement de largeur que cette colonne
+    corrige). MÊME domaine `field_order`/MÊME `height` que le gutter et le
+    barplot de barres -- alignement ligne-à-ligne fiable, un mark_text PAR
+    LIGNE (pas de regroupement -- chaque composé est sa propre ligne, pas
+    de multi-lignes à centrer comme dans `_compare_category_gutter`).
+    `align="right"` : le nom colle contre la frontière avec les barres,
+    comme un axe Y classique. Texte neutre (`text_color`, statique) --
+    jamais teinté par catégorie ni contourné, voir l'historique de
+    `_CATEGORY_SUBCLASS_DISPLAY`."""
+    y_scale = alt.Scale(domain=field_order)
+    label = (
+        alt.Chart(alt.Data(values=[{"Field": f, "Label": _compound_display_label(f)}
+                                   for f in field_order]))
+        .mark_text(align="right", baseline="middle", dx=-4,
+                  fontSize=_CATEGORY_COMPOUND_FONT_SIZE, color=text_color)
+        .encode(y=alt.Y("Field:N", scale=y_scale, axis=None, title=None),
+               x=alt.value(_COMPARE_CATEGORY_COMPOUND_WIDTH), text="Label:N"))
+    divider = (
+        alt.Chart(alt.Data(values=[{}])).mark_rule(color=grid_color, strokeWidth=1)
+        .encode(x=alt.value(_COMPARE_CATEGORY_COMPOUND_WIDTH),
+               y=alt.value(0), y2=alt.value(height)))
+    return alt.layer(label, divider).properties(
+        width=_COMPARE_CATEGORY_COMPOUND_WIDTH, height=height)
 
 
 def _compare_detail_barplot(rows: list[dict], primary_fields: list[str], primary_title: str,
@@ -3256,25 +3759,44 @@ def _compare_detail_barplot(rows: list[dict], primary_fields: list[str], primary
     hop_names = list(colors.keys())
     n_hops = len(hop_names)
 
-    # Tri sur `RawValue` (valeur BRUTE, avant normalisation min-max/quantile
-    # -- absente en mode None/Log, `Value` EST déjà la valeur brute dans ces
-    # 2 cas, `.get(..., r["Value"])` couvre les deux) plutôt que sur `Value`
-    # (2026-08-24, retour utilisateur explicite : "I want you to keep the
-    # same order of molecules across different normalisations... Myrcene as
-    # first element"). Sans ça, Min-max/Quantile réordonnaient les composés
-    # selon leur position DANS LA BASE plutôt que leur quantité RÉELLE chez
-    # les houblons affichés -- un ordre différent à chaque changement de
-    # menu, déroutant pour comparer visuellement avant/après.
+    # Tri PAR CATÉGORIE CHIMIQUE d'abord (2026-08-26, demande utilisateur
+    # explicite -- voir `_compound_category`/`_CATEGORY_GROUP_ORDER`), PUIS
+    # sur `RawValue` (valeur BRUTE, avant normalisation min-max/quantile --
+    # absente en mode None/Log, `Value` EST déjà la valeur brute dans ces 2
+    # cas, `.get(..., r["Value"])` couvre les deux) comme départage DANS
+    # chaque groupe (2026-08-24, retour utilisateur explicite : "I want you
+    # to keep the same order of molecules across different normalisations...
+    # Myrcene as first element" -- toujours respecté : Myrcene reste en tête
+    # de son groupe "Monoterpenes", premier groupe canonique). Sans le tri
+    # par catégorie, les composés d'une même famille chimique (ex. les 4
+    # sesquiterpènes) se retrouvaient dispersés sur l'axe selon leur seule
+    # concentration, rendant la nouvelle colonne de catégorie (`_compare_
+    # category_gutter`) illisible -- des groupes non contigus sur l'axe.
     def _sorted_by_max(fields: list[str]) -> list[str]:
         present = [f for f in fields if any(r["Field"] == f for r in rows)]
-        return sorted(present, key=lambda f: -max(
-            r.get("RawValue", r["Value"]) for r in rows if r["Field"] == f))
+
+        def sort_key(f: str) -> tuple[int, float]:
+            cls, subclass, _ = _compound_category(f)
+            idx = _CATEGORY_GROUP_ORDER.get((cls, subclass), len(_CATEGORY_GROUP_ORDER))
+            max_val = max(r.get("RawValue", r["Value"]) for r in rows if r["Field"] == f)
+            return (idx, -max_val)
+
+        return sorted(present, key=sort_key)
 
     field_order = _sorted_by_max(primary_fields) + _sorted_by_max(secondary_fields)
     if not field_order:
         return None
     n_compounds = len(field_order)
-    height = 24 + n_compounds * (n_hops * 14 + 18)
+    # `max(..., _CATEGORY_ROW_HEIGHT_FLOOR)` (2026-08-27, demande utilisateur
+    # explicite -- voir le commentaire de cette constante) : la formule
+    # habituelle (`n_hops * 14 + 18`) seule pouvait laisser un groupe d'une
+    # seule ligne trop bas pour loger le texte pivoté de sa catégorie/sous-
+    # catégorie sans chevaucher son voisin -- s'applique à TOUTES les lignes
+    # (une seule hauteur de bande pour tout le graphique), pas seulement
+    # celles d'un petit groupe, d'où un effet visible même sur un graphique
+    # sans lien avec la catégorie qui en avait besoin.
+    row_height = max(n_hops * 14 + 18, _CATEGORY_ROW_HEIGHT_FLOOR)
+    height = 24 + n_compounds * row_height
 
     dark = st.context.theme.type == "dark"
     # Bande alternée "6% neutral" (spec §8.3) : le vrai fond de carte est
@@ -3303,11 +3825,37 @@ def _compare_detail_barplot(rows: list[dict], primary_fields: list[str], primary
     # contour noir permanent plutôt qu'un artefact de thème. Aucune barre
     # n'a besoin d'un contour pour rester lisible (la couleur de remplissage
     # suffit, comme le barplot 1 juste au-dessus, qui n'en a jamais eu).
+    # `text_color` : même formule que `band_color` ci-dessus (valeurs
+    # identiques), variable séparée pour ne pas mélanger deux usages
+    # sémantiquement différents (bande de fond vs texte neutre).
+    text_color = "#f9f4ed" if dark else "#201e1d"
 
-    y_enc = alt.Y("Field:N", scale=alt.Scale(domain=field_order), title=None,
-                  axis=alt.Axis(labelLimit=200, labelExpr=_compound_axis_expr(field_order)))
+    # Noms de composés : PLUS un `mark_text` custom sur un axe Y natif rendu
+    # invisible (`labelOpacity=0`, ancienne technique) -- root cause du
+    # dépassement de largeur persistant (2026-08-27, 4e retour utilisateur :
+    # voir `_COMPARE_CATEGORY_COMPOUND_WIDTH`) : cet axe natif, même
+    # invisible, réservait une marge gauche dont la taille (dépendante du
+    # contenu, ex. "Caryophyllene") s'ajoutait EN PLUS de toute largeur
+    # déclarée. Les noms de composés vivent maintenant dans leur PROPRE
+    # colonne `hconcat` (`_compare_compound_names_column`, même mécanisme
+    # que les 2 colonnes du gutter), donc CE barplot n'a plus AUCUN axe Y
+    # natif : `axis=None` pur, aucune marge implicite.
+    y_enc = alt.Y("Field:N", scale=alt.Scale(domain=field_order), title=None, axis=None)
     y_offset_enc = alt.YOffset("Hop:N", scale=alt.Scale(domain=hop_names))
-    color_enc = alt.Color("Hop:N", scale=alt.Scale(domain=hop_names, range=list(colors.values())))
+    # `legend=None` (2026-08-27, 5e retour utilisateur explicite : "you can
+    # remove the legend from the 2nd barplot since it's the same legend
+    # than the 2 other plots from this tool") -- la légende "Hop" est déjà
+    # affichée sur le radar ET sur le barplot 1 ("Principal info") juste
+    # au-dessus sur la même page, redondante ici. Retirer la légende de CE
+    # SEUL barplot élimine aussi la marge droite que Vega-Lite lui
+    # réservait EN PLUS de la largeur déclarée du `hconcat` (`_COMPARE_
+    # DETAIL_BAR_WIDTH`) -- vérifié en direct (`svg.getAttribute("width")`)
+    # que cette marge de légende, PAS un excès de largeur déclarée, était la
+    # cause du dépassement de largeur qui persistait malgré `_COMPARE_
+    # DETAIL_BAR_WIDTH` (700 déclaré, 800 rendu avec la légende ; 700 rendu
+    # sans elle, exactement comme le barplot 1).
+    color_enc = alt.Color("Hop:N", scale=alt.Scale(domain=hop_names, range=list(colors.values())),
+                          legend=None)
     tooltip = ["Hop:N", "Field:N",
               alt.Tooltip("Value:Q", format=".2f", title=value_tooltip_title or "Value")]
     if raw_value_title and any("RawValue" in r for r in rows):
@@ -3386,7 +3934,7 @@ def _compare_detail_barplot(rows: list[dict], primary_fields: list[str], primary
     layers = [
         alt.Chart(alt.Data(values=[{"Field": f} for i, f in enumerate(field_order) if i % 2 == 1]))
         .mark_rect(opacity=0.06, color=band_color)
-        .encode(y=y_enc, x=alt.value(0), x2=alt.value(_COMPARE_CHART_WIDTH)),
+        .encode(y=y_enc, x=alt.value(0), x2=alt.value(_COMPARE_DETAIL_BAR_WIDTH)),
     ]
     resolved_fields = [f for f in field_order if f in descriptors or f in process_notes]
     if resolved_fields:
@@ -3400,7 +3948,7 @@ def _compare_detail_barplot(rows: list[dict], primary_fields: list[str], primary
                                        "Process": process_notes.get(f, "—")}
                                        for f in resolved_fields]))
             .mark_rect(opacity=0.001)
-            .encode(y=y_enc, x=alt.value(0), x2=alt.value(_COMPARE_CHART_WIDTH),
+            .encode(y=y_enc, x=alt.value(0), x2=alt.value(_COMPARE_DETAIL_BAR_WIDTH),
                    tooltip=rect_tooltip))
     if primary_rows:
         primary_encoding = dict(
@@ -3434,6 +3982,39 @@ def _compare_detail_barplot(rows: list[dict], primary_fields: list[str], primary
     if len(layers) <= 1:
         return None
     chart = alt.layer(*layers).resolve_scale(x="independent")
+    gutter = _compare_category_gutter(field_order, height, grid_color, text_color)
+    compound_names = _compare_compound_names_column(field_order, height, grid_color, text_color)
+    if gutter is not None:
+        # `background` est une propriété TOPLEVEL-ONLY pour Altair (erreur
+        # explicite si posée sur un sous-spec d'un `hconcat`, vue en direct
+        # en écrivant ce ticket) -- posée UNE SEULE FOIS sur le `hconcat`
+        # final, pas sur `detail_chart` ni les 3 colonnes de gauche
+        # séparément. `_COMPARE_DETAIL_BAR_WIDTH` (pas `_COMPARE_CHART_
+        # WIDTH`) pour que la largeur TOTALE du `hconcat` (gutter + noms +
+        # barres) reste égale à `_COMPARE_CHART_WIDTH`, comme le barplot 1
+        # ("Principal info", demande utilisateur explicite : "keep the
+        # same width as barplot 1").
+        class_chart, subclass_chart = gutter
+        detail_chart = chart.properties(width=_COMPARE_DETAIL_BAR_WIDTH, height=height)
+        # `resolve_scale(color="independent")` -- BUG réel trouvé sur
+        # signalement direct de l'utilisateur ("you changed the initial
+        # color palette for the bars... removed labels, e.g. Thiols") :
+        # sans lui, `hconcat` PARTAGE par défaut le canal `color` entre TOUS
+        # ses sous-specs -- `subclass_chart` l'encode sur "Class" (4
+        # catégories chimiques) et `detail_chart` sur "Hop" (jusqu'à 5
+        # houblons), donc Vega-Lite fusionnait les deux domaines/palettes en
+        # UNE seule échelle : les barres se coloraient avec la palette de
+        # catégorie chimique au lieu de la palette Hop (`colors`), et au
+        # moins une valeur du domaine fusionné n'avait plus de couleur
+        # valide dans le range fusionné -- rendant son mark invisible
+        # (symptôme observé : la ligne "Thiols" disparue). `color=
+        # "independent"` force chaque sous-spec à garder SA PROPRE échelle
+        # de couleur, comme voulu depuis le départ. `compound_names` n'a
+        # aucun canal "color" encodé (texte neutre statique) donc ne
+        # participe à aucun risque de fusion/duplication ici.
+        return alt.hconcat(class_chart, subclass_chart, compound_names, detail_chart,
+                           spacing=2, background=panel_bg
+                           ).resolve_scale(color="independent")
     return chart.properties(width=_COMPARE_CHART_WIDTH, height=height, background=panel_bg)
 
 
