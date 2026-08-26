@@ -618,6 +618,44 @@ def test_compare_shows_no_detailed_data_message_when_absent(toy_cwd):
     assert not at.exception
     assert any("No detailed composition data" in m.value for m in at.markdown)
 
+def test_normalize_minmax_floors_the_true_database_minimum():
+    # 2026-08-26, bug utilisateur : "if I enter Columbus and Nugget, without
+    # normalization Columbus has a Thiol data, but with normalization we lose
+    # it" -- Columbus porte le thiol MINIMUM connu de toute la base,
+    # `_normalize_minmax` renvoyait donc exactement 0.0, et
+    # `_compare_detail_barplot` rend une barre `Value == 0` invisible (`x2`
+    # implicite à 0 en mode linéaire, largeur nulle). Le plancher
+    # `_COMPARE_MIN_NORMALIZED_POSITION` garde la barre visible.
+    db_values = [0.7, 5.15, 32.6]
+    assert app._normalize_minmax(0.7, db_values) == app._COMPARE_MIN_NORMALIZED_POSITION
+
+def test_normalize_quantile_floors_a_near_zero_rank():
+    # Même plancher que `_normalize_minmax` -- un rang quantile proche de 0
+    # (mais jamais exactement 0 par construction, contrairement à min-max)
+    # sur une base à forte cardinalité resterait une barre quasi invisible.
+    db_values = list(range(1, 201))
+    assert app._normalize_quantile(1, db_values) == app._COMPARE_MIN_NORMALIZED_POSITION
+
+def test_compare_detail_barplot_log_scale_domain_uses_whole_database_range():
+    # 2026-08-26, retour utilisateur explicite : "keep the thiol axis to
+    # start at 0 even with the normalisations, for some reason you decided to
+    # start the axis at the minimal value" -- le domaine log calculé
+    # uniquement sur les houblons SÉLECTIONNÉS rétrécissait à une fenêtre
+    # minuscule autour de leurs propres valeurs (ex. Columbus seul, thiols
+    # 0.7 -> domaine [0.63, 0.7]). `secondary_db_values` (toutes les valeurs
+    # connues de ce composé sur toute la base) élargit le domaine à la vraie
+    # plage existante, stable quelle que soit la sélection.
+    rows = [{"Hop": "Columbus", "Field": "thiols", "Value": 0.7}]
+    colors = {"Columbus": "#000"}
+    chart = app._compare_detail_barplot(
+        rows, [], "Amount", ["thiols"], "Thiols (ug/kg)", colors,
+        log_scale=True, secondary_db_values=[0.7, 5.15, 32.6])
+    bar_layer = next(layer for layer in chart.to_dict()["layer"]
+                     if layer.get("mark", {}).get("type") == "bar")
+    domain = bar_layer["encoding"]["x"]["scale"]["domain"]
+    assert domain[0] == pytest.approx(0.7 * 0.9)
+    assert domain[1] == 32.6
+
 def test_browse_shows_key_stats_metrics(toy_cwd):
     # Demande utilisateur explicite (2026-08-19) : "il manque un élément
     # principale : les infos les plus importantes de yakima : i) ALPHA ACIDS
