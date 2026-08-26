@@ -180,6 +180,32 @@ _TOOL_SUMMARY_BY_MODE = {t["mode"]: t for t in _TOOL_SUMMARIES}
 # un `git log` en direct exigerait aussi que `.git` soit présent dans le
 # conteneur déployé, ce qui n'est pas garanti.
 _RECENT_UPDATES = [
+    ("2026-08-26", "The hop-engraving background image is now visible, but "
+                   "discreetly, in both light and dark mode (it was "
+                   "nearly invisible at first, then too prominent once "
+                   "fixed — now toned down). Every chart (aroma-wheel "
+                   "radars, Compare Hops barplots, By-descriptor heatmap) "
+                   "now has an opaque background matching its surrounding "
+                   "card instead of a mismatched default, which also fixes "
+                   "the radar's axis labels sometimes being unreadable. "
+                   "Compare Hops' \"Principal info\" barplot now has the "
+                   "same alternating background bands as the detailed "
+                   "composition chart to separate categories, and its "
+                   "grouped bars are now properly centered within each "
+                   "band (they used to hug one side) regardless of how "
+                   "many hops are compared."),
+    ("2026-08-26", "Compare Hops: hop colours/legend order now follow the "
+                   "order hops were picked in the multiselect, not "
+                   "alphabetical order. Detailed composition chart: fixed a "
+                   "hop at the database minimum for a compound (e.g. "
+                   "Columbus's thiols) becoming invisible under Min-max/"
+                   "Quantile normalization; the Log-scale axis now stays "
+                   "anchored to the whole database's range instead of "
+                   "zooming into whichever hops are selected; its "
+                   "scale-tick gridlines are now visible in light mode "
+                   "(previously dark-mode only, and toned down in dark "
+                   "mode after being too bright) and the bars no longer "
+                   "have a stray dark outline."),
     ("2026-08-24", "The \"Normalization\" dropdown's help text (Compare "
                    "Hops, detailed composition chart) now lists None/Log/"
                    "Min-max/Quantile one per line instead of one dense "
@@ -581,6 +607,27 @@ def _logo_mask_data_uri(path: str, _version: float) -> str | None:
     return f"data:image/png;base64,{encoded}"
 
 
+# Fond des cartes de section (`_panel()`/`_panel_expander()`), même valeur
+# que `secondaryBackgroundColor` (`.streamlit/config.toml`) et que le CSS
+# `light-dark(#ebddc5, #2e2b25)` de `_TYPOGRAPHY_STYLE` juste en dessous --
+# réutilisé comme fond EXPLICITE (`chart.properties(background=...)`) de
+# chaque graphique Vega-Lite (2026-08-26, retour utilisateur en direct :
+# "the background color of the plots should fit the background color of the
+# boxes in the application"). Root cause vérifiée : `theme="streamlit"` cale
+# le fond par défaut d'un graphique sur `backgroundColor` (le fond de PAGE),
+# PAS `secondaryBackgroundColor` (le fond des cartes `_panel()`) -- deux
+# tons crème/sombre subtilement différents, un rectangle visible autour de
+# chaque graphique dès que le fond d'écran (T-D02) devient net. Fixé en
+# fixant le fond de CHAQUE graphique à ce même token, pas en désactivant le
+# thème Streamlit (`theme=None` a été essayé puis abandonné ailleurs dans ce
+# fichier, voir `_compare_dual_axis_barplot`/T-D09 -- écraserait aussi les
+# couleurs catégorielles/grille déjà correctement héritées du thème). Garder
+# synchronisé avec `_TYPOGRAPHY_STYLE`/`.streamlit/config.toml` si la palette
+# change.
+_PANEL_BG_LIGHT = "#ebddc5"
+_PANEL_BG_DARK = "#2e2b25"
+
+
 # T-D03 (2026-08-23, spec Claude Design `DESIGN_SPEC.md` §3) : Caprasimo
 # (h1 SEULEMENT -- "at h3 inside a dense results panel it becomes noise")
 # et `tabular-nums` (alignement des chiffres en colonne, tableaux/metrics)
@@ -608,6 +655,32 @@ _TYPOGRAPHY_STYLE = """
    (seul hook stable pour un `st.container(border=True)`, voir `_panel`). */
 div[class*="st-key-panel_"], details[class*="st-key-panel_"] {
     background-color: light-dark(#ebddc5, #2e2b25);
+}
+/* Fond des graphiques Vega-Lite EN CSS PUR, `!important` (2026-08-26, retour
+   utilisateur en direct : le fond calculé côté Python -- `chart.properties(
+   background=panel_bg)`, voir `_PANEL_BG_LIGHT`/`_PANEL_BG_DARK` -- restait
+   parfois DÉSYNCHRONISÉ du thème réellement affiché après un bascule Light/
+   Dark/System, car `st.context.theme.type` (lu au moment du calcul du
+   graphique) ne se met à jour qu'après une VRAIE interaction widget, jamais
+   instantanément comme le sélecteur de thème lui-même -- piège déjà
+   documenté ailleurs dans ce fichier pour le fond d'écran T50). Vega-Lite
+   pose sa couleur de fond en `style="background-color: ..."` À MÊME le
+   `<svg>` racine (vérifié en direct, `svg.style.backgroundColor`) -- un
+   attribut `style` INLINE, qu'une règle de feuille de style ne bat
+   normalement PAS, sauf avec `!important` (ce que fait cette règle) :
+   celle-ci gagne alors TOUJOURS, quelle que soit la valeur (parfois
+   périmée) que Python avait posée dans la spec Vega-Lite. `light-dark()`
+   résout sur `color-scheme` (hérité de `.stApp`, mis à jour INSTANTANÉMENT
+   par le sélecteur Streamlit, sans rerun Python) -- même mécanisme fiable
+   que `_inject_background`/la règle `_panel()` ci-dessus, jamais de
+   décalage possible. `chart.properties(background=...)` (Python) reste en
+   place dans chaque fonction de graphique : sert de repli pour un export
+   PNG/SVG du graphique (le bouton de téléchargement Vega-Lite utilise la
+   spec, pas le DOM/CSS live) -- cette règle CSS ne fait que garantir que
+   l'AFFICHAGE À L'ÉCRAN ne dépend plus jamais de la fraîcheur de
+   `theme.type`. */
+[data-testid="stVegaLiteChart"] svg {
+    background-color: light-dark(#ebddc5, #2e2b25) !important;
 }
 /* T-D14b (2026-08-24, spec Claude Design, lockup "1d — Stacked") : la
    marque (`.hf-logo-mark`) est un `mask-image` (voir `_logo_mask_data_uri`/
@@ -637,8 +710,7 @@ _BACKGROUND_STYLE_TEMPLATE = """
     content: "";
     position: fixed;
     inset: 0;
-    background-color: light-dark(__LIGHT_GROUND__, __DARK_GROUND__);
-    opacity: 0.35;
+    background-color: light-dark(__LIGHT_TINT__, __DARK_TINT__);
     mask-image: url("__MASK_URI__");
     -webkit-mask-image: url("__MASK_URI__");
     mask-size: cover;
@@ -656,13 +728,39 @@ _BACKGROUND_STYLE_TEMPLATE = """
 """
 
 
-# Ground colors du thème (`.streamlit/config.toml`, `secondaryBackgroundColor`
-# clair/sombre) -- dupliqués ici en dur car AUCUNE variable CSS équivalente
-# n'existe pour les récupérer sans JS (vérifié en direct, voir le docstring
-# de `_inject_background`). Garder synchronisé avec `.streamlit/config.toml`
-# si la palette change.
-_GROUND_LIGHT = "#ebddc5"
-_GROUND_DARK = "#2e2b25"
+# Teinte du masque de fond (2026-08-26, retour utilisateur en direct : "in
+# dark mode we can barely see it and in light mode we don't see it at all").
+# ÉTAIT `secondaryBackgroundColor` (`#ebddc5`/`#2e2b25`, "raised surface"
+# token) -- vérifié PAR LE CALCUL avant de changer quoi que ce soit (pas
+# supposé) : cette teinte ne diffère du fond RÉEL de la page
+# (`backgroundColor`, `#f5ead8`/`#201e1d`) que de 10-19 sur 255 par canal,
+# quelle que soit l'opacité appliquée -- un simple bump d'opacité (ce que
+# l'utilisateur suggérait comme piste) ne peut PAS rendre visible un masque
+# dont la couleur est presque IDENTIQUE au fond qu'il recouvre, l'opacité ne
+# fait qu'atténuer un écart déjà minuscule. Remplacé par `grayColor`
+# (`.streamlit/config.toml`, un token du thème existant, pas une teinte
+# choisie à la main) : écart de 77-98/255 avec le fond réel dans les DEUX
+# thèmes, un ordre de grandeur plus contrasté, tout en restant un GRIS neutre
+# (cohérent avec l'esprit "gravure" du masque, pas une couleur d'accent).
+# Opacité PAR THÈME (`__LIGHT_TINT__`/`__DARK_TINT__` en rgba, voir
+# `_inject_background` -- `opacity` seul ne peut pas varier par thème sans
+# JS, contrairement à l'alpha d'une couleur `light-dark()`) : plus haute en
+# clair (`_BACKGROUND_OPACITY_LIGHT`) qu'en sombre
+# (`_BACKGROUND_OPACITY_DARK`), demande utilisateur explicite ("more for the
+# light mode"). Garder synchronisé avec `.streamlit/config.toml` si la
+# palette change.
+_GRAY_LIGHT_RGB = "161, 151, 134"  # grayColor clair = #a19786
+_GRAY_DARK_RGB = "130, 121, 106"   # grayColor sombre = #82796a
+# Rabaissée (2026-08-26, retour utilisateur en direct juste après : "the
+# background image is not transparent enough, let's make it more discrete")
+# -- le passage à `grayColor` ci-dessus a résolu le vrai problème (contraste
+# quasi nul avec l'ancien token), mais avec CE contraste bien plus élevé,
+# les mêmes 0.55/0.45 qui rendaient l'image simplement VISIBLE la rendaient
+# maintenant trop présente/distrayante. Réduites tout en gardant le même
+# écart clair > sombre déjà établi (plus haute en clair, cf. commentaire
+# ci-dessus).
+_BACKGROUND_OPACITY_LIGHT = 0.28
+_BACKGROUND_OPACITY_DARK = 0.22
 
 
 def _logo_html(mark_px: int, word_px: int) -> str:
@@ -710,14 +808,17 @@ def _inject_background() -> None:
     sélecteur Light/Dark/System de Streamlit (fait déjà établi lors du
     premier pipeline JS, voir l'historique) et `color-scheme` est une
     propriété HÉRITÉE : le pseudo-élément `::before` du masque, descendant
-    de `.stApp`, en hérite directement, sans script. `_GROUND_LIGHT`/
-    `_GROUND_DARK` : les mêmes hex que `secondaryBackgroundColor` du thème
-    (`.streamlit/config.toml`), dupliqués en dur puisqu'aucune variable ne
-    les expose.
+    de `.stApp`, en hérite directement, sans script.
 
     La gravure n'est plus qu'un MASQUE alpha (voir `_background_mask_data_
-    uri`) peint de la couleur du thème à 35% d'opacité -- un seul asset pour
-    les deux thèmes, jamais de négatif couleur à générer. `position: fixed`
+    uri`) peint d'un gris neutre du thème (`grayColor`, voir `_GRAY_LIGHT_RGB`/
+    `_GRAY_DARK_RGB` -- PAS `secondaryBackgroundColor` comme au premier passage
+    T-D02, voir le commentaire de ces constantes pour le pourquoi du
+    changement) à une opacité PROPRE À CHAQUE THÈME (`_BACKGROUND_OPACITY_
+    LIGHT`/`_BACKGROUND_OPACITY_DARK`, bakée dans l'alpha rgba de la couleur
+    -- `opacity` seul est un scalaire, ne peut pas varier par thème sans JS)
+    -- un seul asset pour les deux thèmes, jamais de négatif couleur à
+    générer. `position: fixed`
     sur un pseudo-élément `::before` (pas `background-image` direct sur
     `stAppViewContainer`) : évite tout recalcul de `background-size: cover`
     au changement de contenu (le piège de zoom déjà rencontré avec
@@ -726,18 +827,29 @@ def _inject_background() -> None:
     `z-index` posé sur le contenu (`stAppViewBlockContainer`) et l'en-tête
     (`stHeader`) pour rester au-dessus du masque, qui n'occupe que
     `z-index: 0`."""
-    html = _TYPOGRAPHY_STYLE
+    # `st.markdown(unsafe_allow_html=True)` pour la typographie/panels, PAS
+    # `st.html()` (2026-08-26, bug trouvé en direct) : `_TYPOGRAPHY_STYLE`
+    # (quelques Ko) disparaissait SILENCIEUSEMENT du DOM (aucune exception)
+    # dès qu'un `st.html()` distinct portant le bloc de fond (~1,7 Mo, base64
+    # de l'image masque) était rendu dans la MÊME page -- vérifié que ce
+    # n'était pas une histoire de taille de payload concaténé (même en
+    # appelant `st.html()` deux fois séparément, un seul des deux survivait
+    # dans le DOM final, peu importe l'ordre) : Streamlit semble fusionner/
+    # écraser deux éléments `st.html()` consécutifs plutôt que d'en garder
+    # deux distincts. Un TYPE D'ÉLÉMENT DIFFÉRENT (`st.markdown` pour l'un,
+    # `st.html` pour l'autre) n'est plus sujet à cette fusion -- vérifié en
+    # direct après ce changement.
+    st.markdown(_TYPOGRAPHY_STYLE, unsafe_allow_html=True)
     if os.path.exists(_BACKGROUND_PATH):
         version = os.path.getmtime(_BACKGROUND_PATH)
         mask_uri = _background_mask_data_uri(_BACKGROUND_PATH, version)
         if mask_uri is not None:
-            html += (
+            st.html(
                 _BACKGROUND_STYLE_TEMPLATE
                 .replace("__MASK_URI__", mask_uri)
-                .replace("__LIGHT_GROUND__", _GROUND_LIGHT)
-                .replace("__DARK_GROUND__", _GROUND_DARK)
+                .replace("__LIGHT_TINT__", f"rgba({_GRAY_LIGHT_RGB}, {_BACKGROUND_OPACITY_LIGHT})")
+                .replace("__DARK_TINT__", f"rgba({_GRAY_DARK_RGB}, {_BACKGROUND_OPACITY_DARK})")
             )
-    st.html(html)
 
 
 _panel_counter = itertools.count()
@@ -1942,6 +2054,11 @@ def _aroma_wheel(intensity: dict[str, float], vocabulary: list[str]):
     if not vocabulary:
         return None
     dark = st.context.theme.type == "dark"
+    # `panel_bg` (2026-08-26, voir `_PANEL_BG_LIGHT`/`_PANEL_BG_DARK` pour le
+    # pourquoi complet) : fond EXPLICITE du graphique, pour qu'il se fonde
+    # dans la carte `_panel()` qui l'entoure plutôt que d'afficher le fond
+    # de PAGE par défaut de `theme="streamlit"`.
+    panel_bg = _PANEL_BG_DARK if dark else _PANEL_BG_LIGHT
     # "axis labels at body colour" -- tokens `textColor` réels du thème.
     text_color = "#f9f4ed" if dark else "#201e1d"
     # 8.3 (2026-08-24, retour Claude Design) : "axis spokes at border
@@ -2045,7 +2162,7 @@ def _aroma_wheel(intensity: dict[str, float], vocabulary: list[str]):
     # ci-dessus nécessaire à chaque fois.
     return (
         (grid + polygon_fill + polygon_line + points + text)
-        .properties(width=500, height=500)
+        .properties(width=500, height=500, background=panel_bg)
         .configure_view(strokeWidth=0)
     )
 
@@ -2341,6 +2458,7 @@ def _heatmap_chart(shown, hop_order, descriptor_order):
     """Une grille houblon x descripteur pour LE SOUS-ENSEMBLE de
     descripteurs donné -- factorisé pour être appelé une fois par section
     (roue quantitative / autres descripteurs, voir `_descriptor_heatmap`)."""
+    panel_bg = _PANEL_BG_DARK if st.context.theme.type == "dark" else _PANEL_BG_LIGHT
     rows = []
     for h in shown:
         for d in descriptor_order:
@@ -2371,7 +2489,7 @@ def _heatmap_chart(shown, hop_order, descriptor_order):
         # varie avec la sélection, une largeur fixe tronque les libellés en
         # silence (labelOverlap les faisait disparaître un sur deux, vérifié
         # en direct avec 10 houblons).
-        .properties(width=alt.Step(45), height=alt.Step(18))
+        .properties(width=alt.Step(45), height=alt.Step(18), background=panel_bg)
     )
 
 
@@ -2766,17 +2884,40 @@ def _compare_field_db_values(comp: dict, field: str, absolute: bool) -> list[flo
     return values
 
 
+# Plancher de position normalisée (2026-08-26, bug signalé par l'utilisateur :
+# "if I enter Columbus and Nugget, without normalization Columbus has a Thiol
+# data, but with normalization we lose it"). Root cause vérifiée en direct :
+# Columbus porte le thiol MINIMUM connu de toute la base (0.7 ug_kg, sur 22
+# houblons mesurés) -- `_normalize_minmax` renvoyait donc exactement 0.0, et
+# `mark_bar` (`_compare_detail_barplot`) a un `x2` implicite à la valeur DE
+# DONNÉE 0 en mode linéaire (jamais au minimum du domaine) : une barre dont
+# `Value == 0` a `x == x2`, largeur nulle, INVISIBLE -- exactement le même
+# mécanisme déjà documenté et corrigé pour l'échelle log (`_log_scale_and_
+# baseline`), mais jamais traité côté Min-max/Quantile jusqu'ici. Un houblon
+# au minimum de la base n'est pas une donnée absente (elle EST là, `RawValue`
+# le montre au survol) -- seule la barre doit rester visible. Plancher
+# arbitrairement petit (2% de la largeur du domaine [0, 1]) : assez fin pour
+# ne pas fausser visuellement une comparaison entre deux vraies valeurs
+# proches du minimum, assez large pour rester un trait visible/survolable.
+_COMPARE_MIN_NORMALIZED_POSITION = 0.02
+
+
 def _normalize_minmax(value: float, db_values: list[float]) -> float:
     """Position min-max de `value` dans `db_values` (0 = minimum connu de la
     base pour ce composé, 1 = maximum). Cas dégénéré (une seule valeur
     connue dans toute la base, ou toutes identiques -- `hi == lo`) : 1.0
     plutôt qu'une division par zéro -- ce houblon EST le maximum (et le
     minimum) connu, une barre pleine plutôt qu'un 0.5 arbitraire qui
-    suggérerait une position "moyenne" non fondée sur rien."""
+    suggérerait une position "moyenne" non fondée sur rien. Résultat plancé
+    à `_COMPARE_MIN_NORMALIZED_POSITION` (jamais exactement 0.0) -- voir le
+    commentaire de cette constante : une position à 0 rendrait une barre
+    invisible (largeur nulle) dans `_compare_detail_barplot`, alors que la
+    donnée existe bel et bien (houblon au minimum connu, pas une donnée
+    manquante)."""
     lo, hi = min(db_values), max(db_values)
     if hi == lo:
         return 1.0
-    return (value - lo) / (hi - lo)
+    return max((value - lo) / (hi - lo), _COMPARE_MIN_NORMALIZED_POSITION)
 
 
 def _normalize_quantile(value: float, db_values: list[float]) -> float:
@@ -2785,14 +2926,18 @@ def _normalize_quantile(value: float, db_values: list[float]) -> float:
     (`bisect_left`/`bisect_right`) pour rester correct sur des valeurs à
     égalité plutôt qu'un rang arbitraire entre doublons. Cas dégénéré (une
     seule valeur connue dans toute la base) : 1.0, même raison que
-    `_normalize_minmax`."""
+    `_normalize_minmax`. Même plancher `_COMPARE_MIN_NORMALIZED_POSITION`
+    (même raison : une position à 0 -- possible ici sur une base à un seul
+    élément connu avant le cas dégénéré ci-dessus, ou par construction si
+    jamais `bisect_left` renvoyait 0 ET `bisect_right` aussi -- resterait une
+    barre invisible dans `_compare_detail_barplot`)."""
     n = len(db_values)
     if n <= 1:
         return 1.0
     sorted_values = sorted(db_values)
     lo = bisect.bisect_left(sorted_values, value)
     hi = bisect.bisect_right(sorted_values, value)
-    return (lo + hi) / (2 * n)
+    return max((lo + hi) / (2 * n), _COMPARE_MIN_NORMALIZED_POSITION)
 
 
 _COMPARE_LABEL_ANGLE = -45
@@ -2873,6 +3018,31 @@ def _compare_dual_axis_barplot(rows: list[dict], primary_fields: list[str], prim
         return None
     descriptors = descriptors or {}
     process_notes = process_notes or {}
+    # `gridColor` explicite (2026-08-26, retour utilisateur en direct : les
+    # lignes de grille des ticks étaient visibles en thème SOMBRE mais
+    # totalement invisibles en thème CLAIR) -- la couleur de grille par
+    # défaut de `theme="streamlit"` n'a jamais été pensée pour le fond crème
+    # de la palette Organic (contraste quasi nul contre `#f5ead8`). Clair :
+    # token `borderColor` réel (`#dcd3c4`, `.streamlit/config.toml`). Sombre :
+    # PAS ce même token (`#474238`) -- essayé d'abord, signalé trop
+    # contrasté/clair en direct contre le fond sombre (`#201e1d`/`#2e2b25`) ;
+    # assombri à mi-chemin entre ce token et le fond (`#34302b`, jamais une
+    # teinte de contraste choisie au hasard).
+    dark = st.context.theme.type == "dark"
+    grid_color = "#34302b" if dark else "#dcd3c4"
+    # `panel_bg` (2026-08-26, voir `_PANEL_BG_LIGHT`/`_PANEL_BG_DARK`) : fond
+    # explicite du graphique, pour qu'il se fonde dans la carte `_panel()`
+    # qui l'entoure au lieu du fond de PAGE par défaut de `theme="streamlit"`.
+    panel_bg = _PANEL_BG_DARK if dark else _PANEL_BG_LIGHT
+    # Bande alternée (2026-08-26, retour utilisateur explicite : "reuse the
+    # 2nd barplot alternated background color to separate axis categories
+    # for the 1st barplot as well") -- même mécanisme et même teinte "6%
+    # neutral" que `_compare_detail_barplot` (voir son docstring), tourné à
+    # 90° : une bande PLEINE HAUTEUR (`y=0`/`y2=height`, pas `x`/`x2` comme
+    # sur l'autre barplot -- ici `Field` est sur X, catégoriel, pas Y) tous
+    # les deux champs.
+    band_color = "#f9f4ed" if dark else "#201e1d"
+    height = 320
     field_order = primary_fields + secondary_fields
     axis_kwargs = {
         "labelAngle": _COMPARE_LABEL_ANGLE,
@@ -2890,7 +3060,13 @@ def _compare_dual_axis_barplot(rows: list[dict], primary_fields: list[str], prim
     }
     x_enc = alt.X("Field:N", scale=alt.Scale(domain=field_order), title=None,
                   axis=alt.Axis(**axis_kwargs))
-    offset_enc = alt.XOffset("Hop:N", scale=alt.Scale(domain=list(colors.keys())))
+    # `paddingOuter=0.2` (2026-08-26, retour utilisateur en direct : la bande
+    # alternée -- voir plus bas -- ne "collait" pas aux groupes de barres,
+    # quel que soit le nombre de houblons comparés) : marge visuelle entre
+    # chaque groupe de barres et le bord de sa bande, plutôt que des barres
+    # collées aux bords (défaut Vega-Lite pour un `xOffset` sans padding
+    # explicite).
+    offset_enc = alt.XOffset("Hop:N", scale=alt.Scale(domain=list(colors.keys()), paddingOuter=0.2))
     color_enc = alt.Color("Hop:N", scale=alt.Scale(domain=list(colors.keys()),
                                                    range=list(colors.values())))
     tooltip = ["Hop:N", "Field:N", alt.Tooltip("Value:Q", format=".2f")]
@@ -2903,7 +3079,11 @@ def _compare_dual_axis_barplot(rows: list[dict], primary_fields: list[str], prim
 
     primary_rows = [r for r in rows if r["Field"] in primary_fields]
     secondary_rows = [r for r in rows if r["Field"] in secondary_fields]
-    layers = []
+    layers = [
+        alt.Chart(alt.Data(values=[{"Field": f} for i, f in enumerate(field_order) if i % 2 == 1]))
+        .mark_rect(opacity=0.06, color=band_color)
+        .encode(x=x_enc, y=alt.value(0), y2=alt.value(height)),
+    ]
     resolved_fields = [f for f in field_order if f in descriptors or f in process_notes]
     if resolved_fields:
         # Couche invisible EN PREMIER (sous les barres, voir docstring) :
@@ -2924,16 +3104,21 @@ def _compare_dual_axis_barplot(rows: list[dict], primary_fields: list[str], prim
         layers.append(
             alt.Chart(alt.Data(values=primary_rows)).mark_bar()
             .encode(x=x_enc, xOffset=offset_enc, color=color_enc, tooltip=tooltip,
-                   y=alt.Y("Value:Q", title=primary_title)))
+                   y=alt.Y("Value:Q", title=primary_title,
+                          axis=alt.Axis(gridColor=grid_color))))
     if secondary_rows:
         layers.append(
             alt.Chart(alt.Data(values=secondary_rows)).mark_bar()
             .encode(x=x_enc, xOffset=offset_enc, color=color_enc, tooltip=tooltip,
-                   y=alt.Y("Value:Q", title=secondary_title)))
-    if not layers:
+                   y=alt.Y("Value:Q", title=secondary_title,
+                          axis=alt.Axis(gridColor=grid_color))))
+    if not primary_rows and not secondary_rows:
+        # `layers` contient TOUJOURS au moins la bande alternée désormais --
+        # ne plus tester `not layers` (ne serait plus jamais vrai) pour
+        # décider s'il y a réellement quelque chose à tracer.
         return None
-    chart = layers[0] if len(layers) == 1 else alt.layer(*layers).resolve_scale(y="independent")
-    return chart.properties(width=_COMPARE_CHART_WIDTH, height=320)
+    chart = alt.layer(*layers).resolve_scale(y="independent")
+    return chart.properties(width=_COMPARE_CHART_WIDTH, height=height, background=panel_bg)
 
 
 def _compound_display_label(compound: str) -> str:
@@ -2973,7 +3158,9 @@ def _compare_detail_barplot(rows: list[dict], primary_fields: list[str], primary
                             log_scale: bool = False,
                             x_domain: tuple[float, float] | None = None,
                             value_tooltip_title: str | None = None,
-                            raw_value_title: str | None = None):
+                            raw_value_title: str | None = None,
+                            primary_db_values: list[float] | None = None,
+                            secondary_db_values: list[float] | None = None):
     """T-D09c (2026-08-24, spec Claude Design §8.3, retour utilisateur sur le
     premier essai de ce ticket) : version HORIZONTALE de
     `_compare_dual_axis_barplot`, réservée au seul barplot "Detailed
@@ -3090,12 +3277,32 @@ def _compare_detail_barplot(rows: list[dict], primary_fields: list[str], primary
     height = 24 + n_compounds * (n_hops * 14 + 18)
 
     dark = st.context.theme.type == "dark"
-    # Bande alternée "6% neutral" et séparateur de barre "background-coloured"
-    # (spec §8.3) : le vrai fond de carte est `light-dark(#ebddc5, #2e2b25)`
-    # (voir `_TYPOGRAPHY_STYLE`) -- marks Altair "libres" ici aussi, un ton
-    # par thème plutôt que `light-dark()` (CSS uniquement).
+    # Bande alternée "6% neutral" (spec §8.3) : le vrai fond de carte est
+    # `light-dark(#ebddc5, #2e2b25)` (voir `_TYPOGRAPHY_STYLE`) -- marks
+    # Altair "libres" ici aussi, un ton par thème plutôt que `light-dark()`
+    # (CSS uniquement).
     band_color = "#f9f4ed" if dark else "#201e1d"
-    stroke_color = "#2e2b25" if dark else "#ebddc5"
+    # `grid_color` (2026-08-26, retour utilisateur en direct, même cause et
+    # même correctif que `_compare_dual_axis_barplot` ci-dessus : invisible en
+    # clair avec la couleur par défaut de `theme="streamlit"`, puis signalé
+    # trop clair/contrasté en sombre avec le token `borderColor` -- assombri
+    # à mi-chemin vers le fond).
+    grid_color = "#34302b" if dark else "#dcd3c4"
+    # `panel_bg` (2026-08-26, voir `_PANEL_BG_LIGHT`/`_PANEL_BG_DARK`) : fond
+    # explicite du graphique, pour qu'il se fonde dans la carte `_panel()`
+    # qui l'entoure au lieu du fond de PAGE par défaut de `theme="streamlit"`.
+    panel_bg = _PANEL_BG_DARK if dark else _PANEL_BG_LIGHT
+    # Le séparateur de barre "background-coloured" (`stroke_color`, ancienne
+    # spec §8.3) a été RETIRÉ (2026-08-26, retour utilisateur en direct :
+    # "it look like you added a black contour on the bar... Remove these") --
+    # `st.context.theme.type` reste parfois bloqué sur son ancienne valeur
+    # tant qu'aucune VRAIE interaction widget n'a eu lieu (piège déjà
+    # documenté ailleurs dans ce fichier, T51 addendum 2) : un rerun avec un
+    # theme.type resté "dark" alors que l'app est visuellement en clair
+    # donnait un contour SOMBRE sur un fond clair -- lu à tort comme un
+    # contour noir permanent plutôt qu'un artefact de thème. Aucune barre
+    # n'a besoin d'un contour pour rester lisible (la couleur de remplissage
+    # suffit, comme le barplot 1 juste au-dessus, qui n'en a jamais eu).
 
     y_enc = alt.Y("Field:N", scale=alt.Scale(domain=field_order), title=None,
                   axis=alt.Axis(labelLimit=200, labelExpr=_compound_axis_expr(field_order)))
@@ -3138,9 +3345,26 @@ def _compare_detail_barplot(rows: list[dict], primary_fields: list[str], primary
     # la valeur est EXACTEMENT le minimum du domaine aurait une largeur
     # nulle (x == x2), invisible -- la marge de 10% garantit un filet visible
     # même pour le plus petit composé.
-    def _log_scale_and_baseline(values: list[float]) -> tuple[alt.Scale, float]:
-        domain_min = min(values) * 0.9
-        return alt.Scale(type="log", domain=[domain_min, max(values)]), domain_min
+    # `db_values` (2026-08-26, retour utilisateur explicite en direct : "keep
+    # the thiol axis to start at 0 even with the normalisations, for some
+    # reason you decided to start the axis at the minimal value") -- le
+    # domaine calculé UNIQUEMENT sur `values` (les houblons SÉLECTIONNÉS)
+    # rendait le bas de l'axe dépendant de la sélection courante : avec 1-2
+    # houblons choisis dont les thiols sont proches l'un de l'autre (ex.
+    # Columbus 0.7 µg/kg), le domaine se réduisait à une fenêtre minuscule
+    # autour de CES valeurs précises -- visuellement "l'axe démarre sur la
+    # valeur choisie", pas sur une référence stable. `db_values` (toutes les
+    # valeurs connues de CE composé sur TOUTE la base, même source que
+    # `_compare_field_db_values`/Min-max) élargit le domaine à la vraie plage
+    # existante -- le bas de l'axe reste ancré près du minimum RÉEL de la
+    # base (le plus proche de 0 qu'un log puisse représenter, `log(0)` restant
+    # indéfini), stable quelle que soit la sélection, au lieu de l'arbitraire
+    # minimum LOCAL des houblons actuellement affichés.
+    def _log_scale_and_baseline(values: list[float],
+                                db_values: list[float] | None = None) -> tuple[alt.Scale, float]:
+        reference = list(values) + list(db_values or [])
+        domain_min = min(reference) * 0.9
+        return alt.Scale(type="log", domain=[domain_min, max(reference)]), domain_min
 
     # `x_domain` (Min-max/Quantile, voir docstring) fige le domaine plutôt
     # que de laisser Vega-Lite l'auto-zoomer sur les seuls houblons
@@ -3149,11 +3373,13 @@ def _compare_detail_barplot(rows: list[dict], primary_fields: list[str], primary
     linear_scale = (alt.Scale(type="linear", domain=list(x_domain)) if x_domain
                     else alt.Scale(type="linear"))
     if log_scale and primary_rows:
-        x_scale_primary, x2_primary = _log_scale_and_baseline([r["Value"] for r in primary_rows])
+        x_scale_primary, x2_primary = _log_scale_and_baseline(
+            [r["Value"] for r in primary_rows], primary_db_values)
     else:
         x_scale_primary, x2_primary = linear_scale, None
     if log_scale and secondary_rows:
-        x_scale_secondary, x2_secondary = _log_scale_and_baseline([r["Value"] for r in secondary_rows])
+        x_scale_secondary, x2_secondary = _log_scale_and_baseline(
+            [r["Value"] for r in secondary_rows], secondary_db_values)
     else:
         x_scale_secondary, x2_secondary = linear_scale, None
 
@@ -3184,29 +3410,31 @@ def _compare_detail_barplot(rows: list[dict], primary_fields: list[str], primary
             # secondaire -- thiols, un seul composé tout en bas de la
             # grille -- en haut, sans rapport visuel avec sa propre barre) :
             # orienté pour que chaque axe reste proche de ce qu'il annote.
-            x=alt.X("Value:Q", title=primary_title, axis=alt.Axis(orient="top"),
+            x=alt.X("Value:Q", title=primary_title,
+                   axis=alt.Axis(orient="top", gridColor=grid_color),
                    scale=x_scale_primary))
         if x2_primary is not None:
             primary_encoding["x2"] = alt.X2Datum(x2_primary)
         layers.append(
             alt.Chart(alt.Data(values=primary_rows))
-            .mark_bar(stroke=stroke_color, strokeWidth=1)
+            .mark_bar()
             .encode(**primary_encoding))
     if secondary_rows:
         secondary_encoding = dict(
             y=y_enc, yOffset=y_offset_enc, color=color_enc, tooltip=tooltip,
-            x=alt.X("Value:Q", title=secondary_title, axis=alt.Axis(orient="bottom"),
+            x=alt.X("Value:Q", title=secondary_title,
+                   axis=alt.Axis(orient="bottom", gridColor=grid_color),
                    scale=x_scale_secondary))
         if x2_secondary is not None:
             secondary_encoding["x2"] = alt.X2Datum(x2_secondary)
         layers.append(
             alt.Chart(alt.Data(values=secondary_rows))
-            .mark_bar(stroke=stroke_color, strokeWidth=1)
+            .mark_bar()
             .encode(**secondary_encoding))
     if len(layers) <= 1:
         return None
     chart = alt.layer(*layers).resolve_scale(x="independent")
-    return chart.properties(width=_COMPARE_CHART_WIDTH, height=height)
+    return chart.properties(width=_COMPARE_CHART_WIDTH, height=height, background=panel_bg)
 
 
 def _aroma_wheel_compare(intensities: dict[str, dict[str, float]], vocabulary: list[str],
@@ -3229,6 +3457,10 @@ def _aroma_wheel_compare(intensities: dict[str, dict[str, float]], vocabulary: l
     if not vocabulary or not intensities:
         return None
     dark = st.context.theme.type == "dark"
+    # `panel_bg` (2026-08-26, voir `_PANEL_BG_LIGHT`/`_PANEL_BG_DARK`) : fond
+    # explicite du graphique, pour qu'il se fonde dans la carte `_panel()`
+    # qui l'entoure au lieu du fond de PAGE par défaut de `theme="streamlit"`.
+    panel_bg = _PANEL_BG_DARK if dark else _PANEL_BG_LIGHT
     # "axis labels at body colour" -- tokens `textColor` réels du thème.
     text_color = "#f9f4ed" if dark else "#201e1d"
     # 8.3 (2026-08-24, retour Claude Design) : "axis spokes at border
@@ -3409,6 +3641,7 @@ def _aroma_wheel_compare(intensities: dict[str, dict[str, float]], vocabulary: l
     return (
         (grid + polygon_fill + polygon_line + points + text)
         .properties(width=_COMPARE_RADAR_SIZE, height=_COMPARE_RADAR_SIZE,
+                   background=panel_bg,
                    autosize=alt.AutoSizeParams(type="fit-x", contains="padding"))
         .configure_view(strokeWidth=0)
     )
@@ -3430,13 +3663,19 @@ def _compare(con):
             st.write("Choose at least one hop.")
     if not selected:
         return
-    # 8.2/§8 "stable per-hop colour" (2026-08-24, retour Claude Design) :
-    # assignation par position TRIÉE de la sélection (`sorted(selected)`,
-    # sur la clé `variety` -- stable, indépendant de la locale/casse du nom
-    # affiché), pas l'ordre de clic -- deux houblons gardent la même couleur
-    # qu'on les sélectionne A-puis-B ou B-puis-A.
-    ordered = sorted(selected)
-    colors = {hops[v]["name"]: _COMPARE_PALETTE[i] for i, v in enumerate(ordered)}
+    # Couleur/légende par ORDRE DE SÉLECTION (2026-08-26, retour utilisateur
+    # explicite : "I would like the Hop order in the legend to be kept, and
+    # not use the alphabetical order to assign colors") -- REVIREMENT sur la
+    # décision T-D09/§8.2 ("stable per-hop colour", 2026-08-24) qui triait
+    # alphabétiquement (`sorted(selected)`) précisément pour qu'un houblon
+    # garde la même couleur qu'on le sélectionne en premier ou en second.
+    # `selected` (renvoyé par `st.multiselect` dans l'ORDRE OÙ l'utilisateur a
+    # ajouté chaque houblon, jamais retrié par le widget lui-même) est
+    # désormais utilisé tel quel : le premier houblon choisi est toujours la
+    # première couleur/entrée de légende, quel que soit son nom -- au prix de
+    # la stabilité précédente (retirer puis rajouter un houblon dans un ordre
+    # différent change maintenant sa couleur), assumé par ce revirement.
+    colors = {hops[v]["name"]: _COMPARE_PALETTE[i] for i, v in enumerate(selected)}
 
     with _panel():
         st.subheader("Aroma wheel")
@@ -3495,7 +3734,30 @@ def _compare(con):
         principal_rows, ["Alpha acids", "Beta acids", "Co-humulone\n(% of hop)"], "Percent (%)",
         ["Total oil\n(ml/100g)"], "Total oil (ml/100g)", colors)
     if principal_chart is not None:
-        st.altair_chart(principal_chart, width="content")
+        # `theme=None` (2026-08-26, retour utilisateur en direct : la bande
+        # alternée -- ajoutée le jour même, voir `_compare_dual_axis_
+        # barplot` -- ne "collait" pas aux groupes de barres, quel que soit
+        # le nombre de houblons comparés). Root cause isolée en reproduisant
+        # HORS Streamlit (même technique que le bug du barplot log-scale,
+        # voir plus haut dans ce fichier -- spec Vega-Lite exportée via
+        # `chart.to_dict()`, servie par `vegaEmbed()` seul dans une page de
+        # test, mesures `getBoundingClientRect()` sur les marks réels) :
+        # avec CE spec exact, `theme="streamlit"` (T-D01/T-D09, dernier
+        # `theme=None` retiré du projet, voir CLAUDE.md) décale
+        # systématiquement le sous-groupe de barres (`xOffset`) vers la
+        # droite de sa bande catégorielle -- ~19px de marge à gauche contre
+        # ~8px à droite, mesuré identiquement sur les 4 catégories, peu
+        # importe `paddingOuter` -- alors que `theme=None` (ou n'importe
+        # quel Vega-Embed hors Streamlit) centre parfaitement le même spec.
+        # PAS le même bug que T-D01 (qui concernait des COULEURS écrasées
+        # par le thème global) -- ici c'est la GÉOMÉTRIE du sous-scale
+        # `xOffset` qui est faussée par le thème Streamlit, jamais documenté
+        # avant faute d'avoir eu un repère visuel (la bande alternée) pour
+        # le remarquer. Seul CE graphique (grouped bars + xOffset) a besoin
+        # de `theme=None` -- tout le reste (couleurs, grille, fond) est déjà
+        # explicite dans cette fonction, rien à perdre en désactivant le
+        # thème Streamlit ici.
+        st.altair_chart(principal_chart, width="content", theme=None)
     else:
         with _panel():
             st.write("No principal composition data for the selected hops.")
@@ -3633,6 +3895,16 @@ def _compare(con):
     # `_compare_dual_axis_barplot`) -- deux infos indépendantes par composé.
     process_notes = {c: label for c in present_oil_compounds + thiols_fields
                      if (label := _process_survival_label(c)) is not None}
+    # `primary_db_values`/`secondary_db_values` (2026-08-26, retour
+    # utilisateur explicite -- voir `_log_scale_and_baseline`) : SEULEMENT en
+    # mode Log, sinon calcul inutile (Min-max/Quantile ont déjà `db_values`
+    # par composé plus haut ; None/Log-désactivé n'en ont pas besoin).
+    primary_db_values = secondary_db_values = None
+    if log_scale:
+        primary_db_values = [v for f in present_oil_compounds
+                             for v in _compare_field_db_values(comp, f, show_absolute)]
+        secondary_db_values = [v for f in thiols_fields
+                               for v in _compare_field_db_values(comp, f, show_absolute)]
     # T-D09c (2026-08-24, spec Claude Design §8.3) : rotation horizontale,
     # voir `_compare_detail_barplot` -- réservée à CE barplot (le "Principal
     # info" ci-dessus, 4 champs seulement, garde la disposition verticale).
@@ -3640,9 +3912,18 @@ def _compare(con):
         detail_rows, present_oil_compounds, primary_title,
         thiols_fields, secondary_title, colors, descriptors=descriptors,
         process_notes=process_notes, log_scale=log_scale, x_domain=x_domain,
-        value_tooltip_title=value_tooltip_title, raw_value_title=raw_value_title)
+        value_tooltip_title=value_tooltip_title, raw_value_title=raw_value_title,
+        primary_db_values=primary_db_values, secondary_db_values=secondary_db_values)
     if detail_chart is not None:
-        st.altair_chart(detail_chart, width="content")
+        # `theme=None` (2026-08-26, même correctif et même root cause que
+        # le barplot "Principal info" ci-dessus -- voir son commentaire
+        # complet) : ce barplot groupe aussi ses barres par houblon via un
+        # canal offset (`yOffset` ici, pas `xOffset`, mais le même
+        # mécanisme Vega-Lite sous-jacent), et souffrait du même décalage
+        # asymétrique sous `theme="streamlit"`. Vérifié en direct après ce
+        # changement : barres centrées dans leur bande catégorielle, quel
+        # que soit le nombre de houblons comparés.
+        st.altair_chart(detail_chart, width="content", theme=None)
         if descriptors or process_notes:
             # 2 lignes, une par niveau d'info (2026-08-24, retour utilisateur
             # explicite : "use 2 lines for the two information level 'Smells
