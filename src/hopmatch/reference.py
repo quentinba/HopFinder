@@ -437,6 +437,14 @@ CONTRAST_AFFINITY: dict[str, list[str]] = {
 # réelles (α-pinène, β-citronellol) : voir le commentaire au-dessus de
 # `PROCESS_SURVIVAL` -- pas d'entrée pour un composé qui ne s'afficherait
 # jamais.
+#
+# `class`="Oxygen containing" (2026-08-27, corrigé sur signalement direct de
+# l'utilisateur -- une session précédente avait paraphrasé le libellé de la
+# figure Janish en "Oxygenated", pas le terme littéral de la source ("Oxygen
+# Containing Compounds"). Puisque ce champ est documenté ci-dessus comme
+# SOURCÉ (pas un prior), il doit reprendre le libellé exact du livre --
+# corrigé sur les 4 entrées concernées (linalool/geraniol/ketones/
+# isobutyrate).
 PROCESS_SURVIVAL: dict[str, dict[str, str]] = {
     "myrcene":       {"class": "Hydrocarbons", "subclass": "Monoterpenes",
                       "annotation": "dry hop / late additions", "confidence": "high"},
@@ -450,14 +458,14 @@ PROCESS_SURVIVAL: dict[str, dict[str, str]] = {
                       "annotation": "direct traces, contributes via oxidation", "confidence": "high"},
     "selinene":      {"class": "Hydrocarbons", "subclass": "Sesquiterpenes",
                       "annotation": "direct traces, contributes via oxidation", "confidence": "high"},
-    "linalool":      {"class": "Oxygenated", "subclass": "Monoterpene alcohols",
+    "linalool":      {"class": "Oxygen containing", "subclass": "Monoterpene alcohols",
                       "annotation": "survives boiling", "confidence": "high"},
-    "geraniol":      {"class": "Oxygenated", "subclass": "Monoterpene alcohols",
+    "geraniol":      {"class": "Oxygen containing", "subclass": "Monoterpene alcohols",
                       "annotation": "survives boiling", "confidence": "high"},
-    "ketones":       {"class": "Oxygenated",
+    "ketones":       {"class": "Oxygen containing",
                       "subclass": "Other (ketones, esters, aldehydes, epoxides)",
                       "annotation": "intermediate transfer", "confidence": "low"},
-    "isobutyrate":   {"class": "Oxygenated",
+    "isobutyrate":   {"class": "Oxygen containing",
                       "subclass": "Other (ketones, esters, aldehydes, epoxides)",
                       "annotation": "intermediate transfer", "confidence": "low"},
     "thiols":        {"class": "Sulfur compounds", "subclass": "Thiols",
