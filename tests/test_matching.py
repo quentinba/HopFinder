@@ -294,13 +294,16 @@ def test_process_survival_returns_none_for_unmapped_compound():
     assert matching.process_survival("nonexistent") is None
 
 def test_process_survival_returns_full_structure_for_mapped_compound():
-    # myrcene : monoterpène (Janish), annotation qualitative jamais
-    # chiffrée -- les 4 champs demandés (classe/sous-classe/annotation/
-    # confiance) présents, `confidence` DANS la structure (pas seulement en
-    # commentaire) pour que la GUI puisse afficher une réserve visible.
+    # myrcene : monoterpène (Janish) -- les 4 champs demandés (classe/sous-
+    # classe/annotation/confiance) présents, `confidence` DANS la structure
+    # (pas seulement en commentaire) pour que la GUI puisse afficher une
+    # réserve visible. Annotation quantifiée (2026-08-27, Scott Janish, The
+    # New IPA, relayé par l'utilisateur) : ~50% de perte à 10 min de boil,
+    # quasi totale à 60 min -- partagée avec linalool (même comportement),
+    # jamais avec beta-pinène (même sous-classe mais donnée non établie).
     info = matching.process_survival("myrcene")
     assert info == {"class": "Hydrocarbons", "subclass": "Monoterpenes",
-                    "annotation": "dry hop / late additions", "confidence": "high"}
+                    "annotation": "boil-sensitive, survives whirlpool", "confidence": "high"}
 
 def test_process_survival_low_confidence_entries_flagged():
     # isobutyrate/ketones : agrégats BarthHaas sans molécule nominative

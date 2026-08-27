@@ -447,7 +447,7 @@ CONTRAST_AFFINITY: dict[str, list[str]] = {
 # isobutyrate).
 PROCESS_SURVIVAL: dict[str, dict[str, str]] = {
     "myrcene":       {"class": "Hydrocarbons", "subclass": "Monoterpenes",
-                      "annotation": "dry hop / late additions", "confidence": "high"},
+                      "annotation": "boil-sensitive, survives whirlpool", "confidence": "high"},
     "beta-pinene":   {"class": "Hydrocarbons", "subclass": "Monoterpenes",
                       "annotation": "dry hop / late additions", "confidence": "high"},
     "humulene":      {"class": "Hydrocarbons", "subclass": "Sesquiterpenes",
@@ -459,9 +459,9 @@ PROCESS_SURVIVAL: dict[str, dict[str, str]] = {
     "selinene":      {"class": "Hydrocarbons", "subclass": "Sesquiterpenes",
                       "annotation": "direct traces, contributes via oxidation", "confidence": "high"},
     "linalool":      {"class": "Oxygen containing", "subclass": "Monoterpene alcohols",
-                      "annotation": "survives boiling", "confidence": "high"},
+                      "annotation": "boil-sensitive, survives whirlpool", "confidence": "high"},
     "geraniol":      {"class": "Oxygen containing", "subclass": "Monoterpene alcohols",
-                      "annotation": "survives boiling", "confidence": "high"},
+                      "annotation": "heat-resistant, persists through boiling", "confidence": "high"},
     "ketones":       {"class": "Oxygen containing",
                       "subclass": "Other (ketones, esters, aldehydes, epoxides)",
                       "annotation": "intermediate transfer", "confidence": "low"},
@@ -504,9 +504,11 @@ PROCESS_SURVIVAL: dict[str, dict[str, str]] = {
 # spec originale du ticket T74.
 PROCESS_SURVIVAL_EXPLANATIONS: dict[str, str] = {
     "dry hop / late additions":
-        "Volatile, non-polar hydrocarbons — mostly stripped away by evaporation during a "
+        "Volatile, non-polar hydrocarbon — mostly stripped away by evaporation during a "
         "boil. Only additions with little or no boil exposure (dry hop, whirlpool, "
-        "flame-out) keep them close to the measured amount.",
+        "flame-out) keep it close to the measured amount. Grouped with myrcene by "
+        "subclass (Monoterpenes) but without the same specifically-quantified boil-time "
+        "figures — see 'boil-sensitive, survives whirlpool' below for those.",
     "direct traces, contributes via oxidation":
         "Heavier than the monoterpene hydrocarbons above, so a small amount can persist "
         "as a direct trace of the same molecule. For humulene and caryophyllene "
@@ -516,10 +518,54 @@ PROCESS_SURVIVAL_EXPLANATIONS: dict[str, str] = {
         "this class-level annotation (sesquiterpene hydrocarbons that can oxidize into "
         "different, oxygenated compounds, e.g. farnesene → farnesol) but the boil-time "
         "specifics above are not established for them in this source.",
-    "survives boiling":
-        "Already oxygenated (an -OH group makes these far less volatile and more "
-        "water-soluble than any hydrocarbon above) — a meaningful share persists as the "
-        "same molecule through a boil, not just in late/dry-hop additions.",
+    "boil-sensitive, survives whirlpool":
+        # Corrigé 2026-08-27 (signalé par l'utilisateur, discussion avec un autre outil
+        # IA en lisant Scott Janish, The New IPA) : le libellé précédent pour LE LINALOL
+        # SEUL ("survives boiling") était FAUX -- l'ancien raisonnement ("oxygéné donc peu
+        # volatil donc résiste à l'ébullition") ne tient pas : Janish donne pour le
+        # linalol le MÊME ordre de perte QUANTIFIÉ que le myrcène sous ébullition active
+        # (~50% réduit à 10 min, quasi rien à 60 min, message utilisateur explicite : "This
+        # sentence is true for myrcene and linalol in Scott Janish's book"). D'où le
+        # partage de CETTE MÊME annotation entre myrcène et linalol (retour utilisateur
+        # direct : "Why myrcene and linalol don't have the same tooltip? ... this is the
+        # same behaviour right?" -- un premier jet les avait gardés séparés par erreur,
+        # corrigé le même jour). Beta-pinène reste sur l'annotation générique "dry hop /
+        # late additions" : même sous-classe chimique (Monoterpenes) que le myrcène, mais
+        # pas la même donnée quantifiée spécifique -- jamais étendue à un composé sans
+        # preuve. Ce qui rend le linalol (et par extension le myrcène) "survivable"
+        # (recherche Yakima Chief, voir CLAUDE.md section "Règles procédé & survivables")
+        # est plus étroit qu'une résistance générale à l'ébullition : ajouté au whirlpool/
+        # knockout (après l'ébullition active, exposition moindre), une part significative
+        # passe dans le fermenteur. NE PAS regrouper avec le géraniol (voir son annotation
+        # séparée "heat-resistant, persists through boiling" ci-dessous) : même sous-classe
+        # chimique que le linalol mais comportement de boil RÉELLEMENT différent, précisé
+        # le même jour par l'utilisateur après une première correction qui les avait
+        # encore confondus.
+        "Scott Janish's The New IPA reports the same order of loss for myrcene and "
+        "linalool under active boiling — roughly 50% reduced after 10 minutes, "
+        "essentially gone after a full 60-minute boil (linalool isn't boil-resistant "
+        "just because it's oxygenated). What makes them 'survivable' (Yakima Chief's "
+        "research) is narrower than boil-resistance: added at whirlpool/knockout — past "
+        "active boiling, lower heat exposure — a meaningful fraction carries through "
+        "into the fermenter.",
+    "heat-resistant, persists through boiling":
+        # Ajouté 2026-08-27 (même correction round, relayé par l'utilisateur depuis Scott
+        # Janish, The New IPA) : géraniol a un comportement de boil DIFFÉRENT du linalol
+        # malgré la même sous-classe chimique ("Monoterpene alcohols") -- groupé par
+        # Janish avec beta-eudesmol/humulène/humulene epoxide I/beta-farnésène/
+        # caryophyllène (points d'ébullition plus hauts, décroissance progressive mais
+        # encore présents à 60 min), PAS avec myrcène/linalol (perte quasi totale à 60
+        # min). Mécanisme chimique différent de celui des sesquiterpènes ci-dessus
+        # (persistance directe, pas une oxydation vers un nouveau composé) -- seule la
+        # résistance thermique RELATIVE est comparable, jamais présentée comme le même
+        # phénomène chimique.
+        "Unlike linalool (same 'Monoterpene alcohols' subclass), geraniol has a higher "
+        "boiling point and is more resistant to boiling wort — Scott Janish's The New "
+        "IPA groups it with humulene/caryophyllene/farnesene in this respect: it "
+        "decreases gradually over a full boil but is still present at 60 minutes, unlike "
+        "myrcene/linalool which are essentially gone by then. Also the key "
+        "biotransformation molecule: converted by yeast during active fermentation into "
+        "β-citronellol.",
     "intermediate transfer":
         "BarthHaas doesn't specify which individual molecule(s) make up this aggregated "
         "measurement, so no volatility-based transfer behavior can be stated with "
