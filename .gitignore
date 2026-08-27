@@ -13,6 +13,8 @@ venv/
 data/foodb_*/
 data/*.csv
 !data/fixtures/**
+# téléchargées à l'ingestion, jamais committées (T81, data/cache/<source>/)
+data/cache/
 # artefacts AppleDouble macOS présents dans le tar.gz FooDB lui-même
 # (vérifié : foodb_2020_4_7_csv.tar.gz en contient, cf. ingest._extract_foodb_tarball)
 data/._*

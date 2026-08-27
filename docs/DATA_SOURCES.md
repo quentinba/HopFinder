@@ -307,6 +307,36 @@ même livre, utilisées pour deux besoins différents, **jamais confondues** :
 
 **The Good Scents Company** — descripteurs parfumeur fins, **pas d'API, CGU restrictives**. Optionnel.
 
+## Styles de bière (référence)
+
+**BJCP 2021, via `beerjson/bjcp-json`** — https://github.com/beerjson/bjcp-json
+(`styles/bjcp_styleguide-2021.json`, format BeerJSON 2.01)
+- Accès : JSON statique servi par `raw.githubusercontent.com`, aucune authentification.
+  Téléchargé à l'ingestion (`ingest.download_bjcp_styles`), jamais committé, mis en cache sous
+  `data/cache/bjcp/` (même pattern que le dump FooDB).
+- Qualité : texte officiel BJCP 2021 (le millésime le plus récent pour la bière — 2025 ne
+  concerne que le cidre, mead resté en 2015), 110 styles, `style_id`/`category_id`/vital
+  statistics typées (unité explicite : `sg`/`%`/`IBUs`/`SRM`) + texte descriptif complet
+  (`overall_impression`, `aroma`, `appearance`, `flavor`, `mouthfeel`, `comments`, `history`,
+  `ingredients`, `style_comparison`, `examples`).
+- **17/110 styles n'ont AUCUNE vital stat** (specialty/wood-aged/fruit/spice/smoke/alternative
+  fermentables/historical) : héritent du style de base choisi par le brasseur, écrit `NULL`,
+  jamais `0`.
+- **3 styles provisoires (X1, X2, X4) ont des clés espagnoles/portugaises qui ont fuité** à la
+  place de leurs équivalents anglais (`sabor`→`flavor`, `historia`→`history`,
+  `impresion_general`/`impressao_geral`→`overall_impression`, etc. — voir
+  `parsers._BJCP_LEAKED_LOCALE_KEYS` pour la table complète). `marcacoes` (X4, portugais) porte
+  en réalité l'équivalent de `tags` (vérifié : contenu au même format que les `tags` anglais
+  d'un autre style, et `tags` est bien `None` sur X4), pas un doublon de `comments`.
+- Statut : `ingest.ingest_beer_styles` implémenté (table `beer_styles`, CLI
+  `hopmatch ingest-styles --year {2021,2015}`, défaut 2021). Millésime 2015 **n'existe pas**
+  dans ce dépôt — échoue explicitement plutôt que de retomber sur 2021. Les deux millésimes
+  (si le 2015 devenait un jour disponible) coexistent via `guideline_year`, jamais fusionnés
+  (même règle que Yakima/BarthHaas).
+- `beer-analytics` (scheb, GPLv3) avait aussi ces styles (BJCP 2021 + `alt_names`) mais n'est
+  **plus nécessaire pour les styles eux-mêmes** — seuls ses `alt_names`/`alt_names_extra`
+  restent utiles (réconciliation d'un nom de style libre vers un `style_id`, T84/T91-T92).
+
 ## Liant
 
 **PubChem (PUG-REST)** — https://pubchem.ncbi.nlm.nih.gov

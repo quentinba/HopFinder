@@ -1,7 +1,14 @@
-import pandas as pd
+import copy
+import json
+from pathlib import Path
 
-from hopmatch import ingest
+import pandas as pd
+import pytest
+
+from hopmatch import ingest, parsers
 from hopmatch.schema import connect, init_db
+
+FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
 def test_canonical_compound_prefers_structural_cid_match():
@@ -409,3 +416,115 @@ def test_ingest_foodb_curated_and_auto_names_coexist_for_same_food(tmp_path):
     con.close()
     assert "basilic" in notes
     assert "sweet basil" in notes
+
+
+def _bjcp_fixture_payload() -> dict:
+    with open(FIXTURES_DIR / "bjcp_sample.json", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def test_parse_beerjson_styles_returns_one_row_per_style():
+    rows = parsers.parse_beerjson_styles(_bjcp_fixture_payload())
+    assert {r["style_id"] for r in rows} == {"21A", "28A", "X1"}
+
+
+def test_parse_beerjson_styles_extracts_vital_stats_with_correct_unit():
+    # 21A : style complet, les 5 vital stats sont présentes avec leur unité
+    # attendue (sg/%/IBUs/SRM) -- valeurs réelles vérifiées sur bjcp-json.
+    rows = {r["style_id"]: r for r in parsers.parse_beerjson_styles(_bjcp_fixture_payload())}
+    s = rows["21A"]
+    assert s["og_min"] == 1.056 and s["og_max"] == 1.07
+    assert s["fg_min"] == 1.008 and s["fg_max"] == 1.014
+    assert s["abv_min"] == 5.5 and s["abv_max"] == 7.5
+    assert s["ibu_min"] == 40 and s["ibu_max"] == 70
+    assert s["srm_min"] == 6 and s["srm_max"] == 14
+
+
+def test_parse_beerjson_styles_leaves_vital_stats_null_never_zero_when_absent():
+    # 28A (Brett Beer) : un des 17 styles réels sans AUCUNE vital stat --
+    # hérite du style de base choisi par le brasseur, ce n'est PAS un trou de
+    # données à combler par 0.
+    rows = {r["style_id"]: r for r in parsers.parse_beerjson_styles(_bjcp_fixture_payload())}
+    s = rows["28A"]
+    for field in ("og_min", "og_max", "fg_min", "fg_max", "abv_min", "abv_max",
+                  "ibu_min", "ibu_max", "srm_min", "srm_max"):
+        assert s[field] is None, f"{field} devrait être NULL, jamais 0"
+
+
+def test_parse_beerjson_styles_raises_on_unexpected_unit():
+    # unité inattendue (ex. "plato" au lieu de "sg") -- doit échouer
+    # bruyamment plutôt qu'écrire une valeur dans la mauvaise unité.
+    payload = _bjcp_fixture_payload()
+    style = next(s for s in payload["beerjson"]["styles"] if s["style_id"] == "21A")
+    style = copy.deepcopy(style)
+    style["original_gravity"]["minimum"]["unit"] = "plato"
+    payload = {"beerjson": {"version": payload["beerjson"]["version"],
+                            "styles": [style]}}
+    with pytest.raises(ValueError, match="unité inattendue"):
+        parsers.parse_beerjson_styles(payload)
+
+
+def test_parse_beerjson_styles_maps_leaked_spanish_keys_to_english_fields():
+    # X1 : style provisoire aux clés espagnoles qui ont fuité (sabor,
+    # historia, ingredientes, impresion_general, aspecto, sensacion_en_boca,
+    # comentarios) -- doivent remplir les champs anglais correspondants,
+    # jamais rester orphelines ni écraser une valeur anglaise déjà présente.
+    payload = _bjcp_fixture_payload()
+    x1 = next(s for s in payload["beerjson"]["styles"] if s["style_id"] == "X1")
+    rows = {r["style_id"]: r for r in parsers.parse_beerjson_styles(payload)}
+    s = rows["X1"]
+    assert s["flavor"] == x1["sabor"]
+    assert s["history"] == x1["historia"]
+    assert s["ingredients"] == x1["ingredientes"]
+    assert s["overall_impression"] == x1["impresion_general"]
+    assert s["appearance"] == x1["aspecto"]
+    assert s["mouthfeel"] == x1["sensacion_en_boca"]
+    assert s["comments"] == x1["comentarios"]
+
+
+def test_parse_beerjson_styles_leaked_key_never_overwrites_real_english_value():
+    # garde-fou : un style qui aurait À LA FOIS "flavor" (anglais) et "sabor"
+    # (fuite) ne doit jamais laisser "sabor" écraser "flavor" -- même si ce
+    # cas n'existe pas dans les données réelles actuelles.
+    payload = {"beerjson": {"version": 2.01, "styles": [
+        {"style_id": "ZZ", "name": "Test", "category": "Test", "category_id": "99",
+         "type": "beer", "flavor": "real english value", "sabor": "should be ignored"},
+    ]}}
+    rows = parsers.parse_beerjson_styles(payload)
+    assert rows[0]["flavor"] == "real english value"
+
+
+def test_parse_beerjson_styles_sets_source_to_bjcp_json():
+    rows = parsers.parse_beerjson_styles(_bjcp_fixture_payload())
+    assert all(r["source"] == "bjcp-json" for r in rows)
+
+
+def test_download_bjcp_styles_rejects_unsupported_year_without_network_call():
+    # 2015 n'existe pas dans beerjson/bjcp-json -- doit échouer AVANT tout
+    # appel réseau (pas de dépendance à un 404 distant pour ce cas).
+    with pytest.raises(ValueError, match="2015"):
+        ingest.download_bjcp_styles(year=2015)
+
+
+def test_ingest_beer_styles_creates_table_without_wiping_existing_data(tmp_path, monkeypatch):
+    # base déjà peuplée (hops) mais sans encore la table beer_styles (le cas
+    # réel d'une base construite avant T81) -- ingest_beer_styles doit créer
+    # SEULEMENT beer_styles, jamais vider hops via init_db.
+    db_path = tmp_path / "test.db"
+    con = connect(str(db_path))
+    init_db(con)
+    con.execute("INSERT INTO hops VALUES ('citra', 'Citra', 'United States', 'yakima', NULL)")
+    con.execute("DROP TABLE beer_styles")
+    con.commit(); con.close()
+
+    monkeypatch.setattr(ingest, "download_bjcp_styles",
+                        lambda year=2021, dest_dir=None, force=False:
+                            str(FIXTURES_DIR / "bjcp_sample.json"))
+    ingest.ingest_beer_styles(str(db_path), year=2021)
+
+    con = connect(str(db_path))
+    hops = [r[0] for r in con.execute("SELECT variety FROM hops")]
+    n_styles = con.execute("SELECT count(*) FROM beer_styles").fetchone()[0]
+    con.close()
+    assert hops == ["citra"]  # pas vidé par un init_db caché
+    assert n_styles == 3

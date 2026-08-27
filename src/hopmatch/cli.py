@@ -145,6 +145,14 @@ def main(argv=None):
     bm.add_argument("--sleep", type=float, default=1.0)
     bm.add_argument("--limit", type=int)
 
+    st = sub.add_parser("ingest-styles",
+                        help="ingérer les styles BJCP (beerjson/bjcp-json) ; "
+                             "téléchargé automatiquement si absent du cache")
+    st.add_argument("--db", default=DEFAULT_DB)
+    st.add_argument("--year", type=int, choices=(2021, 2015), default=2021,
+                    help="millésime BJCP -- 2015 n'existe pas dans ce dépôt et échoue "
+                         "explicitement (voir BACKLOG.md T81)")
+
     am = sub.add_parser("amplify", help="cas d'usage : amplify")
     am.add_argument("note")
     am.add_argument("--db", default=DEFAULT_DB)
@@ -219,6 +227,8 @@ def main(argv=None):
         ingest.ingest_flavordb2(a.db, sleep=a.sleep); return 0
     if a.cmd == "ingest-beermaverick":
         ingest.ingest_beermaverick(a.db, limit=a.limit, sleep=a.sleep); return 0
+    if a.cmd == "ingest-styles":
+        ingest.ingest_beer_styles(a.db, year=a.year); return 0
 
     con = connect(a.db)
     try:
