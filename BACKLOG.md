@@ -1870,6 +1870,66 @@ Mais la transparence doit être RÉELLE, pas un simple adverbe :
 
   C'est l'analyse qui manquait à `combine()` et qui a coûté son retrait.
 
+## 10bis. Idée hors épique (trouvée en auditant un concurrent)
+
+- [ ] **T129 — Familles d'arôme comme filtre facetté (Browse / By-descriptor)**
+
+  **Origine** : audit demandé par l'utilisateur (2026-08-27) du Каталог
+  (Catalog) de hop-finder.vercel.app pour voir s'il apporte quelque chose
+  d'absent de ce backlog. Conclusion de l'audit : presque tout recoupe déjà
+  du décidé/planifié (leur tri « survivabilité » = les données pixel déjà
+  rejetées en D2 ; leurs tags de style = T83/T84 ; leur « souvent utilisé
+  avec » chiffré = `hop_pairings` BeerMaverick + T87 ; leur tri popularité =
+  T108). **Seule chose distincte** : leur filtre latéral groupe les ~175
+  mots d'arôme en **9 familles larges** (tropical, agrumes, baies, fruits à
+  noyau, floral, herbacé, épicé, résineux/boisé, sucré/dessert), chacune
+  avec un compteur, plutôt qu'une liste plate de mots à cocher un par un.
+  Explicitement écarté de ce ticket, sur demande utilisateur : tout ce qui
+  suppose un compte utilisateur côté hop-finder (favoris, stock personnel)
+  — hors de portée d'un outil sans compte.
+
+  **Ce que c'est, et ce que ce n'est PAS** : une taxonomie d'AFFICHAGE pour
+  filtrer plus vite, rien côté données. **Pas** une nouvelle source externe
+  à ingérer — le vocabulaire complet (138 termes réels, `hop_descriptors`)
+  est déjà en base. Le seul travail est de définir la table de groupement
+  {mot -> famille}.
+
+  ⚠ **Ne PAS dériver les familles automatiquement.** Précédent direct dans
+  ce projet : les descripteurs auto-dérivés de FooDB ont convergé vers des
+  mots génériques et ont été rejetés **deux fois** (voir CLAUDE.md) ; le tri
+  des 49 mots BarthHaas hors vocabulaire (T79) a été fait **à la main avec
+  l'utilisateur**, jamais par heuristique. Même règle ici : proposer une
+  répartition initiale des 138 termes réels de `hop_descriptors` en ~8-10
+  familles (calquées librement sur l'idée du concurrent, PAS recopiées mot
+  pour mot — leur liste est en russe et sur LEUR vocabulaire, pas le nôtre),
+  puis la faire **valider/corriger par l'utilisateur** avant tout câblage
+  GUI. Un mot qui ne rentre clairement dans aucune famille reste hors
+  groupement plutôt que forcé quelque part au jugé.
+
+  **Où l'utiliser** :
+  1. `by-descriptor` — le sélecteur de pills est actuellement une liste
+     plate des 138 termes (voir `app._by_descriptor`) ; un premier niveau
+     par famille réduirait le bruit visuel avant de choisir les mots précis.
+  2. `browse` — filtre facetté optionnel sur la liste de houblons (n'existe
+     pas aujourd'hui : Browse n'a qu'un `st.selectbox` à un houblon, pas de
+     liste filtrable — vérifier si ça vaut la peine d'ajouter une vue liste
+     avant de faire ce filtre, sinon ce point ne s'applique qu'à
+     `by-descriptor`).
+
+  **Nouvelle constante** : `reference.DESCRIPTOR_FAMILIES` (dict
+  `{descriptor: famille}`), sur le modèle de `DESCRIPTOR_ALIASES` — jamais
+  un fichier YAML séparé pour ce qui reste une table de mapping courte et
+  stable, cohérent avec le choix déjà fait pour les alias.
+
+  **Test** : garde-fou vérifiant que toute clé de
+  `reference.DESCRIPTOR_FAMILIES` existe réellement dans le vocabulaire
+  `hop_descriptors` — même principe que
+  `test_ingredient_descriptors_keys_and_terms_match_real_vocabulary`.
+
+  **Statut** : opportuniste, ne bloque rien et n'est bloqué par rien
+  -- à faire quand une session GUI légère est utile entre deux tickets plus
+  lourds.
+
 ## 11. Ordre d'attaque recommandé
 
 Tous les tickets sont désormais au niveau **spec d'implémentation** : DDL,
@@ -1911,7 +1971,8 @@ bloquent rien : T96/T97 (espèces de thiols, méthyl géranate), T116/T128
 (lots YCH, si des numéros deviennent disponibles), **T117** (onglet
 Survivables sur indice dérivé — faisable dès maintenant, ne dépend de rien),
 T118 (Brewfather), T100/T101 (régression, T101 conditionné par T100),
-T102 (Blend Explorer), T109/T110/T112 (vocabulaire), T113/T114 (docs).
+T102 (Blend Explorer), T109/T110/T112 (vocabulaire), T113/T114 (docs),
+**T129** (familles d'arôme, GUI seule — faisable dès maintenant).
 
 ### Dépendances dures — à ne pas contourner
 
