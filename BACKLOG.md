@@ -1294,8 +1294,35 @@ Elles sont écrites pour qu'aucune décision implicite ne reste à deviner.
 
 ## 9. Épique H — Plomberie / dette
 
-- [ ] **T125 — Compare Hops : bracket « Oxygen containing » manquante quand
+- [x] **T125 — Compare Hops : bracket « Oxygen containing » manquante quand
   `isobutyrate` est présent, + renommage du libellé de classe**
+
+  **Compte rendu (2026-08-27)** : le bug de bracket manquante **ne se
+  reproduit plus** — vérifié en direct sur la reproduction exacte du ticket
+  (Ella, Galaxy, Huell Melon, Vic Secret), dans les deux thèmes, en mode
+  absolu et % d'huile : les 5 brackets s'affichent, aucun `WARN Conflicting
+  legend property` en console. Le `.resolve_scale(color="independent")` déjà
+  présent sur le `hconcat` (ajouté dans le même commit 9c9c961 pour un
+  symptôme voisin, "Thiols disparu") corrige apparemment aussi celui-ci en
+  effet de bord. Aucun changement de code nécessaire pour cette partie —
+  le ticket avait raison sur le diagnostic (rendu Vega-Lite, pas la logique
+  Python) mais le correctif était déjà arrivé avant cette passe.
+  Renommage appliqué (`_CATEGORY_CLASS_DISPLAY`). Vérification du cas court
+  demandée par le ticket : le cas **2 lignes** (Simcoe/Mosaic ont en réalité
+  des données isobutyrate/ketones ; testé à la place sur Admiral+Ahtanum,
+  vraiment sans ces champs) déborde de ~3px sur 156px disponibles mais est
+  **visuellement invisible** (zoom vérifié, aucun artefact). Un cas **pire,
+  non anticipé par le ticket**, existe aussi : 10 houblons de la base n'ont
+  qu'UN SEUL champ parmi linalool/géraniol/isobutyrate/ketones (ex. Boadicea,
+  Bramling Cross, tous deux "linalool seul") — les comparer entre eux réduit
+  le run "Oxygen containing" à 1 ligne, et le libellé déborde alors
+  visiblement (reproduit et capturé). Signalé à l'utilisateur avec le
+  compromis (`_CATEGORY_ROW_HEIGHT_FLOOR` est une hauteur de ligne globale à
+  tout le barplot détaillé, l'augmenter pour couvrir ce cas gonflerait
+  toutes les comparaisons, pas seulement celle-ci) : **décision utilisateur
+  = ne pas toucher au floor**, ce cas est trop niche (ne se produit que si
+  2 houblons comparés partagent exactement le même champ unique) pour
+  justifier l'impact visuel global. `_CATEGORY_ROW_HEIGHT_FLOOR` reste à 78.
 
   **Symptôme** (utilisateur, 2026-08-27, usage réel) : dans le 2ᵉ barplot
   « Detailed composition », en comparant des houblons portant `isobutyrate`,

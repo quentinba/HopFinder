@@ -193,7 +193,9 @@ _RECENT_UPDATES = [
                    "legend was dropped as redundant — the same one already "
                    "appears twice higher up on this page). The browser-tab "
                    "icon is now the plain orange hop mark with no "
-                   "background, matching the sidebar logo."),
+                   "background, matching the sidebar logo. The \"Oxygen "
+                   "cont.\" category label is now spelled out in full as "
+                   "\"Oxygen containing comp.\"."),
     ("2026-08-26", "The hop-engraving background image is now visible, but "
                    "discreetly, in both light and dark mode (it was "
                    "nearly invisible at first, then too prominent once "
@@ -3273,7 +3275,7 @@ _CATEGORY_SUBCLASS_DISPLAY = {
     "Other (ketones, esters, aldehydes, epoxides)": "Ketones/esters",
 }
 _CATEGORY_CLASS_DISPLAY = {
-    "Oxygen containing": "Oxygen cont.",
+    "Oxygen containing": "Oxygen containing comp.",  # T125 (2026-08-27) : libellé complet, la place a été confirmée par l'utilisateur
     "Sulfur compounds": "Sulfur comp.",  # 2026-08-27, 4e retour : "comps." débordait encore de sa boîte
 }
 _CATEGORY_UNCATEGORIZED = "Uncategorized"
