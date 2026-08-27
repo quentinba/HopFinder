@@ -111,6 +111,26 @@ CREATE TABLE beer_styles (
 """
 SCHEMA += BEER_STYLES_SCHEMA
 
+# Houblon -> style, ÉDITORIAL (T83, épique A) : suggestion d'un producteur
+# (Yakima `imported_fields.beer_types`) ou d'un agrégateur de recettes
+# (BeerMaverick, section "Beer Styles using {Hop} Hops") -- PAS une mesure,
+# PAS du BJCP (vocabulaire libre de la source). `style_label` = l'étiquette
+# BRUTE telle qu'écrite par la source (ex. BeerMaverick écrit parfois
+# "Pale Ales" au pluriel là où Yakima écrit "Pale Ale" -- gardées comme deux
+# lignes distinctes, jamais fusionnées au jugé). `style_id` = l'id BJCP
+# SEULEMENT si la correspondance est certaine (`data/mappings/beer_style_
+# aliases.yaml`, T84), NULL sinon -- ne jamais rattacher au jugé. Constante
+# séparée (même raison que `BEER_STYLES_SCHEMA` juste au-dessus) : plusieurs
+# ingesteurs (`crawl_yakima`, `ingest_beermaverick`) doivent pouvoir créer
+# CETTE seule table sur une base déjà peuplée, sans passer par `init_db`.
+HOP_BEER_STYLES_SCHEMA = """
+CREATE TABLE hop_beer_styles (
+    variety TEXT, style_label TEXT, style_id TEXT, source TEXT,
+    PRIMARY KEY (variety, style_label, source)
+);
+"""
+SCHEMA += HOP_BEER_STYLES_SCHEMA
+
 # alpha_acid/beta_acid retirés de ce filtre (2026-08-19, demande utilisateur) :
 # non-aromatiques (jamais utilisés dans le scoring moléculaire, qui n'itère
 # que sur les molécules de la NOTE -- aucune note FooDB ne référence jamais
@@ -135,7 +155,8 @@ def init_db(con: sqlite3.Connection) -> None:
         "DROP TABLE IF EXISTS aroma_notes; DROP TABLE IF EXISTS note_descriptors;"
         "DROP TABLE IF EXISTS flavornet_compounds; DROP TABLE IF EXISTS flavordb2_thresholds;"
         "DROP TABLE IF EXISTS pubchem_cids;"
-        "DROP TABLE IF EXISTS beer_styles;")
+        "DROP TABLE IF EXISTS beer_styles;"
+        "DROP TABLE IF EXISTS hop_beer_styles;")
     con.executescript(SCHEMA)
 
 

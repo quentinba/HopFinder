@@ -30,7 +30,8 @@ import re
 import sqlite3
 
 from . import parsers, reference
-from .schema import init_db, validate_and_repair, DROP_COMPOUNDS, ensure_table, BEER_STYLES_SCHEMA
+from .schema import (init_db, validate_and_repair, DROP_COMPOUNDS, ensure_table,
+                     BEER_STYLES_SCHEMA, HOP_BEER_STYLES_SCHEMA)
 
 MAPPINGS_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "data", "mappings")
 
@@ -596,6 +597,23 @@ def ingest_flavordb2(out_db: str, sleep: float = 0.3, timeout: float = 30.0) -> 
           + (f" | {errors} erreurs réseau (à retenter)." if errors else "."))
 
 
+# T83 (2026-08-27) : houblon -> style éditorial, deux sources (Yakima
+# `beer_types`, BeerMaverick "Beer Styles using X Hops") -- même table,
+# jamais fusionnées (source tracée par ligne). Partagé entre `crawl_yakima`
+# et `ingest_beermaverick` pour ne pas dupliquer la résolution via T84.
+def _write_hop_beer_styles(con: sqlite3.Connection, variety: str, labels: list[str],
+                           source: str, alias_map: dict[str, str | None]) -> None:
+    """Écrit une ligne `hop_beer_styles` par étiquette BRUTE de `labels` --
+    `style_id` résolu via `alias_map` (`data/mappings/beer_style_aliases.
+    yaml`, T84) SEULEMENT si l'étiquette y est explicitement listée, `NULL`
+    sinon (une étiquette absente du YAML -- pas encore triée à la main --
+    reste `NULL`, jamais devinée par fuzzy-matching)."""
+    for label in labels:
+        style_id = alias_map.get(label)
+        con.execute("INSERT OR REPLACE INTO hop_beer_styles VALUES (?,?,?,?)",
+                    (variety, label, style_id, source))
+
+
 # --------------------------------------------------------------------------- #
 # Crawl Yakima Chief (réseau réel) — via Algolia, pas de HTML/checkpoint
 # --------------------------------------------------------------------------- #
@@ -638,6 +656,9 @@ def crawl_yakima(out_db: str, limit: int | None = None, timeout: float = 30.0) -
     con = connect(out_db)
     if not con.execute("SELECT name FROM sqlite_master WHERE name='hops'").fetchone():
         init_db(con); seed_reference(con); con.commit()
+    else:
+        ensure_table(con, "hop_beer_styles", HOP_BEER_STYLES_SCHEMA)  # base existante : ne PAS la vider
+    style_aliases = _load_yaml_mapping("beer_style_aliases.yaml")
 
     resp = requests.post(ALGOLIA_URL, params=ALGOLIA_PARAMS, json=BODY,
                          timeout=timeout, headers={"User-Agent": "hopmatch/0.1 (research)"})
@@ -695,6 +716,9 @@ def crawl_yakima(out_db: str, limit: int | None = None, timeout: float = 30.0) -
         conf = _ingest_variety(con, variety, name, region, comp, descriptors, "yakima",
                                aroma_intensity=aroma_intensity)
         stats[conf] += 1
+        beer_types = (hit.get("imported_fields") or {}).get("beer_types") or []
+        if beer_types:
+            _write_hop_beer_styles(con, variety, beer_types, "yakima", style_aliases)
         if hit.get("uid"):
             uid_to_variety[hit["uid"]] = variety
         similar_by_uid[hit.get("uid")] = [
@@ -883,6 +907,9 @@ def ingest_beermaverick(out_db: str, limit: int | None = None, sleep: float = 1.
     con = connect(out_db)
     if not con.execute("SELECT name FROM sqlite_master WHERE name='hops'").fetchone():
         init_db(con); seed_reference(con); con.commit()
+    else:
+        ensure_table(con, "hop_beer_styles", HOP_BEER_STYLES_SCHEMA)  # base existante : ne PAS la vider
+    style_aliases = _load_yaml_mapping("beer_style_aliases.yaml")
 
     sitemap = requests.get(f"{BASE}/beerm-sitemap.xml", timeout=timeout,
                            headers={"User-Agent": "hopmatch/0.1 (research)"}).text
@@ -892,15 +919,25 @@ def ingest_beermaverick(out_db: str, limit: int | None = None, sleep: float = 1.
     print(f"BeerMaverick : {len(slugs)} pages houblon (sitemap)")
 
     index = _build_hop_name_index(con)
-    covered = skipped = n_pairings = n_subs = n_tags = n_purpose = 0
+    covered = skipped = n_pairings = n_subs = n_tags = n_purpose = n_styles = 0
     for i, slug in enumerate(slugs, 1):
         variety = _resolve_hop_variety(index, slug)
         if not variety:
             skipped += 1
             continue
         try:
-            html = requests.get(f"{BASE}/hop/{slug}/", timeout=timeout,
-                                headers={"User-Agent": "hopmatch/0.1 (research)"}).text
+            resp = requests.get(f"{BASE}/hop/{slug}/", timeout=timeout,
+                               headers={"User-Agent": "hopmatch/0.1 (research)"})
+            # BeerMaverick ne déclare pas de charset dans son en-tête
+            # Content-Type ("text/html" nu) -- `requests` retombe alors sur
+            # ISO-8859-1 par défaut HTTP (RFC 2616) même si le contenu réel
+            # est UTF-8, corrompant tout caractère non-ASCII (ex. "Kölsch"
+            # -> "KÃ¶lsch", trouvé en vérifiant les styles T83 en direct sur
+            # la base réelle, 2026-08-27). `.apparent_encoding` détecte le
+            # VRAI encodage par analyse du contenu (chardet/charset-
+            # normalizer), fiable ici (contenu HTML normal, pas binaire).
+            resp.encoding = resp.apparent_encoding
+            html = resp.text
         except Exception as e:  # noqa
             print(f"  !! {slug}: {e}"); continue
         for name, freq in parsers.parse_beermaverick_pairings(html):
@@ -925,6 +962,10 @@ def ingest_beermaverick(out_db: str, limit: int | None = None, sleep: float = 1.
         if purpose is not None:
             con.execute("UPDATE hops SET purpose=? WHERE variety=?", (purpose, variety))
             n_purpose += 1
+        styles = parsers.parse_beermaverick_styles(html)
+        if styles:
+            _write_hop_beer_styles(con, variety, styles, "beermaverick", style_aliases)
+            n_styles += len(styles)
         covered += 1
         if i % 10 == 0:
             con.commit()
@@ -932,7 +973,7 @@ def ingest_beermaverick(out_db: str, limit: int | None = None, sleep: float = 1.
     con.commit(); con.close()
     print(f"  {covered} variétés couvertes ({skipped} pages sans équivalent local), "
          f"{n_pairings} pairings, {n_subs} substitutions, {n_tags} descripteurs, "
-         f"{n_purpose} purpose (aromatic/bittering/both).")
+         f"{n_purpose} purpose (aromatic/bittering/both), {n_styles} style labels.")
 
 
 def _find_csv(folder: str, name: str) -> str:

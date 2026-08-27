@@ -500,8 +500,37 @@ Elles sont écrites pour qu'aucune décision implicite ne reste à deviner.
 
   ⚠ Texte utilisateur en **anglais**. ⚠ `_RECENT_UPDATES` même commit.
 
-- [ ] **T83 — Table `hop_beer_styles` (houblon → style, éditorial)**
+- [x] **T83 — Table `hop_beer_styles` (houblon → style, éditorial)**
   *Priorité utilisateur explicite : « super important ».*
+
+  **Compte rendu (2026-08-27)** : implémenté avec une extension trouvée en
+  vérification live (au-delà de la source Yakima explicitement spécée) —
+  BeerMaverick porte AUSSI cette info, dans une section "Beer Styles using
+  {Hop} Hops" (texte libre, noms en `<b>`), jamais exploitée avant :
+  vérifiée stable sur 5 pages réelles (Citra, Mosaic, Simcoe, Centennial,
+  Admiral y compris low-volume). `parsers.parse_beermaverick_styles`
+  ajouté, écrit avec `source='beermaverick'` — jamais fusionné avec Yakima
+  (`ingest._write_hop_beer_styles`, partagé entre les deux crawlers).
+  BeerMaverick porte un vocabulaire BEAUCOUP plus large et moins propre que
+  les 47 étiquettes Yakima (96 étiquettes non résolues après un premier
+  crawl réel, pluriels incohérents type "Pale Ale"/"Pale Ales") —
+  volontairement laissées `NULL` (jamais devinées), une passe de tri manuel
+  supplémentaire pour ce vocabulaire est un suivi séparé, pas fait ici (le
+  YAML T84 n'a couvert que les 47 étiquettes Yakima révisées avec
+  l'utilisateur).
+  **Bug d'encodage trouvé et corrigé en vérifiant sur données réelles** :
+  BeerMaverick ne déclare pas de charset dans son en-tête HTTP
+  (`Content-Type: text/html` nu) — `requests` retombait sur ISO-8859-1par
+  défaut (RFC 2616) alors que le contenu réel est UTF-8, corrompant tout
+  caractère non-ASCII ("Kölsch" → "KÃ¶lsch"). Corrigé par
+  `resp.encoding = resp.apparent_encoding` avant `.text` dans
+  `ingest_beermaverick`. Recrawlé, vérifié corrigé sur la base réelle.
+  GUI : 4e bloc dans `_hop_associations` (Browse), groupé par source comme
+  les descripteurs (`_descriptors_grouped_by_source`), réserve éditoriale
+  systématique. Vérifié réel : 163 variétés distinctes couvertes (yakima
+  143 + beermaverick 144, union), 454 lignes Yakima (71 résolues) + 573
+  lignes BeerMaverick (76 résolues), `hops` intact (189) après les deux
+  crawls (`ensure_table`, même pattern que T81/T84).
 
   **Source déjà crawlée, jamais exploitée** :
   `imported_fields.beer_types` de l'API Algolia Yakima, présent sur

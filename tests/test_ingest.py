@@ -575,3 +575,61 @@ def test_beer_style_aliases_yaml_values_exist_in_real_bjcp_styles():
     for label, style_id in mapping.items():
         if style_id is not None:
             assert style_id in real_style_ids, (label, style_id)
+
+
+def test_write_hop_beer_styles_resolves_known_label_and_nulls_unknown(tmp_path):
+    con = connect(str(tmp_path / "t.db"))
+    init_db(con)
+    con.commit()
+    alias_map = {"American Pale Ale": "18B", "Lager": None}
+    ingest._write_hop_beer_styles(con, "citra", ["American Pale Ale", "Lager"], "yakima", alias_map)
+    rows = {r[0]: r[1] for r in con.execute(
+        "SELECT style_label, style_id FROM hop_beer_styles WHERE variety='citra'")}
+    assert rows == {"American Pale Ale": "18B", "Lager": None}
+
+
+def test_write_hop_beer_styles_leaves_null_for_label_absent_from_alias_map(tmp_path):
+    # une étiquette pas encore triée à la main (absente du YAML T84) reste
+    # NULL -- jamais devinée par correspondance approximative.
+    con = connect(str(tmp_path / "t.db"))
+    init_db(con)
+    con.commit()
+    ingest._write_hop_beer_styles(con, "citra", ["Some New Label"], "yakima", {})
+    row = con.execute(
+        "SELECT style_id FROM hop_beer_styles WHERE variety='citra' AND style_label='Some New Label'"
+    ).fetchone()
+    assert row[0] is None
+
+
+def test_write_hop_beer_styles_keeps_sources_separate_for_same_label(tmp_path):
+    # Yakima et BeerMaverick peuvent tous les deux suggérer "IPA" pour le
+    # même houblon -- deux lignes distinctes (source tracée par ligne),
+    # jamais fusionnées en une seule.
+    con = connect(str(tmp_path / "t.db"))
+    init_db(con)
+    con.commit()
+    ingest._write_hop_beer_styles(con, "citra", ["IPA"], "yakima", {})
+    ingest._write_hop_beer_styles(con, "citra", ["IPA"], "beermaverick", {})
+    rows = con.execute(
+        "SELECT source FROM hop_beer_styles WHERE variety='citra' AND style_label='IPA'").fetchall()
+    assert {r[0] for r in rows} == {"yakima", "beermaverick"}
+
+
+def test_write_hop_beer_styles_creates_table_without_wiping_existing_data(tmp_path):
+    # même piège que T81 (beer_styles) : hop_beer_styles doit pouvoir être
+    # créée sur une base déjà peuplée sans passer par init_db (qui viderait
+    # hops/hop_composition/etc.).
+    con = connect(str(tmp_path / "t.db"))
+    init_db(con)
+    con.execute("INSERT INTO hops VALUES ('citra', 'Citra', 'United States', 'yakima', NULL)")
+    con.execute("DROP TABLE hop_beer_styles")
+    con.commit(); con.close()
+
+    from hopmatch.schema import ensure_table, HOP_BEER_STYLES_SCHEMA
+    con = connect(str(tmp_path / "t.db"))
+    ensure_table(con, "hop_beer_styles", HOP_BEER_STYLES_SCHEMA)
+    ingest._write_hop_beer_styles(con, "citra", ["IPA"], "yakima", {})
+    con.commit()
+    hops = [r[0] for r in con.execute("SELECT variety FROM hops")]
+    con.close()
+    assert hops == ["citra"]

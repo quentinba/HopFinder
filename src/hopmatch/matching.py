@@ -555,6 +555,24 @@ def hop_substitutions(con, variety: str) -> list[dict]:
     return [{"name": r["substitute_name"], "variety": r["substitute_variety"]} for r in rows]
 
 
+def hop_beer_styles(con, variety: str) -> list[dict]:
+    """Styles éditoriaux suggérés pour ce houblon (T83 backlog,
+    `hop_beer_styles`) -- vocabulaire libre d'une source (Yakima
+    `imported_fields.beer_types`, ou BeerMaverick "Beer Styles using X
+    Hops"), PAS une fréquence mesurée en recettes réelles (voir l'épique B,
+    `style_hop_usage`, pour ça). `style_id` (BJCP, `data/mappings/beer_
+    style_aliases.yaml`, T84) est `None` quand l'étiquette n'a pas de
+    correspondance BJCP certaine -- affiché tel quel, jamais deviné.
+    Chaque ligne garde sa `source` : les deux sources ne sont JAMAIS
+    fusionnées (même règle que `hop_similar`/`hop_pairings`/`hop_
+    substitutions`, voir CLAUDE.md)."""
+    rows = con.execute(
+        "SELECT style_label, style_id, source FROM hop_beer_styles WHERE variety=? "
+        "ORDER BY source, style_label", (variety,))
+    return [{"label": r["style_label"], "style_id": r["style_id"], "source": r["source"]}
+           for r in rows]
+
+
 def _normalize_descriptors(descriptors: list[str]) -> set[str]:
     """Vocabulaire réel `hop_descriptors` (comme `by_descriptor`), pas inventé —
     même normalisation utilisée par `amplify`/`contrast` pour une sélection

@@ -655,6 +655,32 @@ def parse_beermaverick_tags(html: str) -> list[str]:
     return _BM_TAG_LINK_RE.findall(m.group(0))
 
 
+_BM_STYLES_RE = re.compile(r"Beer Styles.*?</h2>\s*<p>(.*?)</p>", re.S)
+_BM_STYLE_BOLD_RE = re.compile(r"<b>\s*([^<]+?)\s*</b>")
+
+
+def parse_beermaverick_styles(html: str) -> list[str]:
+    """
+    Extrait la section « Beer Styles using {Hop} Hops » d'une page
+    beermaverick.com/hop/{slug}/ — T83 (2026-08-27), trouvée en vérifiant si
+    BeerMaverick porte la même information éditoriale que `imported_fields.
+    beer_types` de Yakima, comme demandé par le ticket. Une phrase en texte
+    libre ("Some popular beer styles that make use of the X hop include
+    <b>Style1</b>, <b>Style2</b> & <b>StyleN</b>."), noms de style en
+    `<b>...</b>`, vérifiée stable sur 5 pages réelles (Citra, Mosaic, Simcoe,
+    Centennial, Admiral -- y compris un houblon à faible volume de
+    recettes). Renvoie les noms BRUTS tels qu'écrits par BeerMaverick (ex.
+    "Pale Ales", pluriel, sur la page Citra -- alors que Yakima écrit "Pale
+    Ale" au singulier) : jamais normalisé ici, la réconciliation vers un
+    style_id BJCP se fait à l'ingestion via `data/mappings/beer_style_
+    aliases.yaml` (T84), qui doit alors porter CHAQUE variante orthographique
+    réellement rencontrée. Section absente sur certaines pages -> []."""
+    m = _BM_STYLES_RE.search(html)
+    if not m:
+        return []
+    return _BM_STYLE_BOLD_RE.findall(m.group(1))
+
+
 # T81 (2026-08-27) : 3 styles provisoires (X1, X2, X4) du JSON BJCP 2021 ont
 # des clés espagnoles/portugaises qui ont fuité à la place de leurs
 # équivalents anglais (vérifié en direct sur les 3 styles réels). Mapping
