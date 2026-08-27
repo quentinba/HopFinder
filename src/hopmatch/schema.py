@@ -82,6 +82,35 @@ CREATE TABLE pubchem_cids (
 );
 """
 
+# Styles BJCP (T81, épique A) : source `beerjson/bjcp-json` (BeerJSON 2.01),
+# téléchargée à l'ingestion, jamais committée (même pattern que le dump
+# FooDB). Millésimes 2021/2015 JAMAIS fusionnés (même règle que Yakima/
+# BarthHaas) -- coexistent via `guideline_year`, clé primaire composite.
+# Ce n'est PAS une mesure de recette (voir `style_recipe_stats`, épique B,
+# beer-analytics) -- une fourchette de référence éditoriale BJCP.
+# 17/110 styles (2021) n'ont aucune vital stat (héritent du style de base
+# choisi par le brasseur, ex. specialty/fruit/historical) : NULL, jamais 0.
+# Constante SÉPARÉE de `SCHEMA` (plutôt qu'inline) : `ingest.ingest_beer_
+# styles` doit pouvoir créer CETTE seule table sur une base déjà peuplée par
+# d'anciens crawls (voir `ensure_table`) sans passer par `init_db`, qui DROP
+# + recrée TOUT -- ça viderait `hops`/`hop_composition`/etc. d'une base
+# réelle qui n'a jamais eu cette table.
+BEER_STYLES_SCHEMA = """
+CREATE TABLE beer_styles (
+    style_id TEXT, guideline_year INTEGER, category_id TEXT, category TEXT,
+    name TEXT, type TEXT, tags TEXT,
+    og_min REAL, og_max REAL, fg_min REAL, fg_max REAL,
+    abv_min REAL, abv_max REAL, ibu_min REAL, ibu_max REAL,
+    srm_min REAL, srm_max REAL,
+    overall_impression TEXT, aroma TEXT, appearance TEXT, flavor TEXT,
+    mouthfeel TEXT, comments TEXT, history TEXT, ingredients TEXT,
+    style_comparison TEXT, examples TEXT, category_description TEXT,
+    source TEXT,
+    PRIMARY KEY (style_id, guideline_year)
+);
+"""
+SCHEMA += BEER_STYLES_SCHEMA
+
 # alpha_acid/beta_acid retirés de ce filtre (2026-08-19, demande utilisateur) :
 # non-aromatiques (jamais utilisés dans le scoring moléculaire, qui n'itère
 # que sur les molécules de la NOTE -- aucune note FooDB ne référence jamais
@@ -105,8 +134,22 @@ def init_db(con: sqlite3.Connection) -> None:
         "DROP TABLE IF EXISTS molecules;"
         "DROP TABLE IF EXISTS aroma_notes; DROP TABLE IF EXISTS note_descriptors;"
         "DROP TABLE IF EXISTS flavornet_compounds; DROP TABLE IF EXISTS flavordb2_thresholds;"
-        "DROP TABLE IF EXISTS pubchem_cids;")
+        "DROP TABLE IF EXISTS pubchem_cids;"
+        "DROP TABLE IF EXISTS beer_styles;")
     con.executescript(SCHEMA)
+
+
+def ensure_table(con: sqlite3.Connection, table_name: str, create_sql: str) -> None:
+    """Crée `table_name` si elle est absente, SANS toucher aux autres tables
+    -- contrairement à `init_db` (qui DROP + recrée TOUT). Pour ajouter une
+    table neuve (T81 et les tickets suivants qui en ajoutent, voir BACKLOG.md
+    §1bis) à une base déjà peuplée par d'anciens crawls sans perdre leurs
+    données. `create_sql` doit rester identique au DDL correspondant dans
+    `SCHEMA` (les deux sont la même chaîne, ex. `BEER_STYLES_SCHEMA`)."""
+    if not con.execute(
+        "SELECT name FROM sqlite_master WHERE name=?", (table_name,)
+    ).fetchone():
+        con.executescript(create_sql)
 
 
 def _num(x):

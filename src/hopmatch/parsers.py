@@ -653,3 +653,120 @@ def parse_beermaverick_tags(html: str) -> list[str]:
     if not m:
         return []
     return _BM_TAG_LINK_RE.findall(m.group(0))
+
+
+# T81 (2026-08-27) : 3 styles provisoires (X1, X2, X4) du JSON BJCP 2021 ont
+# des clés espagnoles/portugaises qui ont fuité à la place de leurs
+# équivalents anglais (vérifié en direct sur les 3 styles réels). Mapping
+# EXPLICITE, jamais deviné par heuristique -- une clé absente de ce dict est
+# ignorée (jamais fusionnée au jugé). "comentarios" (espagnol ET portugais,
+# même orthographe) couvre X1 ET X4. "marcacoes" (portugais, X4) porte en
+# réalité l'équivalent de `tags` (vérifié : contenu "estilo-craft, fruta,
+# ácida, cerveja-specialty", même forme que les `tags` anglais d'un autre
+# style, et `tags` est bien `None` sur X4) -- pas un doublon de "comments"
+# comme son orthographe pourrait le laisser penser.
+# ⚠ "ejemplos_comerciales" (espagnol, X2) N'ÉTAIT PAS listée dans le ticket
+# T81 (qui ne mentionne que la variante portugaise "exemplos_comerciais",
+# X4) -- trouvée en vérifiant les 3 styles un par un plutôt que de recopier
+# la liste du ticket telle quelle. Les deux mappent vers `examples`.
+_BJCP_LEAKED_LOCALE_KEYS = {
+    # Espagnol (X1, X2)
+    "sabor": "flavor",
+    "historia": "history",
+    "ingredientes": "ingredients",
+    "impresion_general": "overall_impression",
+    "aspecto": "appearance",
+    "sensacion_en_boca": "mouthfeel",
+    "comentarios": "comments",
+    "ejemplos_comerciales": "examples",
+    # Portugais (X4)
+    "impressao_geral": "overall_impression",
+    "aparencia": "appearance",
+    "sensacao_de_boca": "mouthfeel",
+    "comparacoes_de_estilo": "style_comparison",
+    "exemplos_comerciais": "examples",
+    "marcacoes": "tags",
+}
+
+# unité attendue par champ de "vital statistics" BeerJSON -- vérifiée sur les
+# 110 styles réels (2026-08-27) : jamais d'autre unité observée, mais on ne
+# suppose rien à l'exécution (voir `_bjcp_vital_stat_bounds`).
+_BJCP_VITAL_STAT_UNITS = {
+    "original_gravity": "sg", "final_gravity": "sg",
+    "alcohol_by_volume": "%", "international_bitterness_units": "IBUs",
+    "color": "SRM",
+}
+
+
+def _bjcp_vital_stat_bounds(style: dict, field: str) -> tuple[float | None, float | None]:
+    """(min, max) d'une vital stat BeerJSON (`style[field]` = {"minimum":
+    {"unit","value"}, "maximum": {...}}), ou (None, None) si le style n'a pas
+    cette vital stat (17/110 styles réels, spécialités héritant du style de
+    base -- normal, jamais un trou de données à combler par 0). Lève une
+    erreur explicite si l'unité observée diffère de `_BJCP_VITAL_STAT_UNITS`
+    (ex. un jour "plato"/"ebc") plutôt que d'écrire une valeur dans la
+    mauvaise unité en silence."""
+    obj = style.get(field)
+    if not obj:
+        return None, None
+    expected_unit = _BJCP_VITAL_STAT_UNITS[field]
+    bounds = []
+    for bound in ("minimum", "maximum"):
+        b = obj.get(bound)
+        if not b:
+            bounds.append(None)
+            continue
+        unit = b.get("unit")
+        if unit != expected_unit:
+            raise ValueError(
+                f"BJCP {style.get('style_id')!r} : unité inattendue pour "
+                f"{field!r}.{bound} ({unit!r}, attendu {expected_unit!r}) -- "
+                f"format BeerJSON changé ? à vérifier avant d'ingérer.")
+        bounds.append(b.get("value"))
+    return tuple(bounds)
+
+
+def parse_beerjson_styles(payload: dict) -> list[dict]:
+    """Extrait les styles d'un payload BeerJSON 2.01 (`bjcp-json`,
+    `payload["beerjson"]["styles"]`) en une liste de dicts prêts à insérer
+    dans `beer_styles` (sans `guideline_year`, ajouté par l'appelant selon le
+    fichier téléchargé -- ce parseur ne sait pas quel millésime il lit).
+
+    Trois pièges traités explicitement (voir BACKLOG.md T81, vérifiés en
+    direct le 2026-08-27) :
+    1. 17/110 styles sans AUCUNE vital stat -- `_bjcp_vital_stat_bounds`
+       renvoie (None, None), jamais 0.
+    2. Unité de chaque vital stat vérifiée, jamais supposée -- voir
+       `_bjcp_vital_stat_bounds`.
+    3. 3 styles provisoires (X1, X2, X4) aux clés espagnoles/portugaises --
+       voir `_BJCP_LEAKED_LOCALE_KEYS`, résolu AVANT insertion, jamais par
+       heuristique."""
+    out = []
+    for s in payload["beerjson"]["styles"]:
+        row = {
+            "style_id": s.get("style_id"), "category_id": s.get("category_id"),
+            "category": s.get("category"), "name": s.get("name"), "type": s.get("type"),
+            "tags": s.get("tags"),
+            "overall_impression": s.get("overall_impression"), "aroma": s.get("aroma"),
+            "appearance": s.get("appearance"), "flavor": s.get("flavor"),
+            "mouthfeel": s.get("mouthfeel"), "comments": s.get("comments"),
+            "history": s.get("history"), "ingredients": s.get("ingredients"),
+            "style_comparison": s.get("style_comparison"), "examples": s.get("examples"),
+            "category_description": s.get("category_description"),
+            "source": "bjcp-json",
+        }
+        # clés localisées qui ont fuité (X1/X2/X4) : ne comblent QUE les
+        # champs anglais absents, ne remplacent jamais une valeur déjà là.
+        for leaked_key, target_field in _BJCP_LEAKED_LOCALE_KEYS.items():
+            if row.get(target_field) is None and s.get(leaked_key) is not None:
+                row[target_field] = s[leaked_key]
+        og_min, og_max = _bjcp_vital_stat_bounds(s, "original_gravity")
+        fg_min, fg_max = _bjcp_vital_stat_bounds(s, "final_gravity")
+        abv_min, abv_max = _bjcp_vital_stat_bounds(s, "alcohol_by_volume")
+        ibu_min, ibu_max = _bjcp_vital_stat_bounds(s, "international_bitterness_units")
+        srm_min, srm_max = _bjcp_vital_stat_bounds(s, "color")
+        row.update(og_min=og_min, og_max=og_max, fg_min=fg_min, fg_max=fg_max,
+                  abv_min=abv_min, abv_max=abv_max, ibu_min=ibu_min, ibu_max=ibu_max,
+                  srm_min=srm_min, srm_max=srm_max)
+        out.append(row)
+    return out

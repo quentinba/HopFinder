@@ -30,7 +30,7 @@ import re
 import sqlite3
 
 from . import parsers, reference
-from .schema import init_db, validate_and_repair, DROP_COMPOUNDS
+from .schema import init_db, validate_and_repair, DROP_COMPOUNDS, ensure_table, BEER_STYLES_SCHEMA
 
 MAPPINGS_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "data", "mappings")
 
@@ -1301,3 +1301,110 @@ def ingest_foodb(out_db: str, foodb_csv_dir: str | None = None,
         else:
             print(f"  aucun composé whitelisté pour {len(no_hit)} aliments (aucun composé "
                  f"Flavornet trouvé, ignorés).")
+
+
+# --------------------------------------------------------------------------- #
+# Styles BJCP (T81, épique A)
+# --------------------------------------------------------------------------- #
+BJCP_STYLES_URL_TEMPLATE = (
+    "https://raw.githubusercontent.com/beerjson/bjcp-json/main/styles/"
+    "bjcp_styleguide-{year}.json"
+)
+BJCP_CACHE_DIR = "data/cache/bjcp"
+# Seul le millésime 2021 existe réellement dans `beerjson/bjcp-json` (vérifié
+# en direct le 2026-08-27 -- voir BACKLOG.md T81). Un `--year 2015` doit
+# échouer avec un message clair, jamais retomber silencieusement sur 2021 :
+# vérifié AVANT tout appel réseau (pas de dépendance à un 404 distant pour
+# détecter ce cas).
+BJCP_SUPPORTED_YEARS = {2021}
+
+
+def download_bjcp_styles(year: int = 2021, dest_dir: str = BJCP_CACHE_DIR,
+                         force: bool = False) -> str:
+    """
+    Télécharge le styleguide BJCP (`beerjson/bjcp-json`, BeerJSON 2.01) pour
+    `year` s'il n'est pas déjà en cache, et renvoie le chemin du fichier JSON
+    local. Jamais committé (même pattern que `download_foodb_dump`) --
+    `dest_dir` par défaut sous `data/cache/bjcp/`, un fichier par millésime
+    (`bjcp_styleguide-2021.json`) pour ne jamais fusionner deux millésimes au
+    téléchargement.
+
+    Idempotent : si le fichier est déjà présent, ne retélécharge rien (sauf
+    `force=True`). Écrit dans un fichier temporaire puis renomme (jamais
+    directement dans `dest_dir`) pour ne jamais laisser un fichier partiel/
+    corrompu passer pour un cache valide si le téléchargement est interrompu.
+    """
+    import requests
+    import tempfile
+
+    if year not in BJCP_SUPPORTED_YEARS:
+        raise ValueError(
+            f"BJCP {year} : ce millésime n'existe pas dans beerjson/bjcp-json "
+            f"(seuls {sorted(BJCP_SUPPORTED_YEARS)} sont disponibles) -- "
+            f"vérifié le 2026-08-27, voir BACKLOG.md T81. Pas de repli "
+            f"silencieux sur 2021.")
+
+    dest_path = os.path.join(dest_dir, f"bjcp_styleguide-{year}.json")
+    if os.path.exists(dest_path) and not force:
+        print(f"BJCP {year} : déjà en cache ({dest_path!r}), pas de retéléchargement.")
+        return dest_path
+
+    url = BJCP_STYLES_URL_TEMPLATE.format(year=year)
+    print(f"BJCP {year} : téléchargement depuis {url!r}...")
+    os.makedirs(dest_dir, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(suffix=".json", dir=dest_dir)
+    os.close(fd)
+    try:
+        resp = requests.get(url, timeout=30, headers={"User-Agent": "hopmatch/0.1 (research)"})
+        resp.raise_for_status()
+        with open(tmp_path, "wb") as f:
+            f.write(resp.content)
+        os.replace(tmp_path, dest_path)
+    except BaseException:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        raise
+    print(f"BJCP {year} : {dest_path!r} prêt.")
+    return dest_path
+
+
+def ingest_beer_styles(out_db: str, year: int = 2021,
+                       cache_dir: str = BJCP_CACHE_DIR, force_download: bool = False) -> None:
+    """
+    Télécharge (si besoin) et ingère le styleguide BJCP `year` dans
+    `beer_styles` (table T81) -- `parsers.parse_beerjson_styles` fait le gros
+    du travail, cette fonction ajoute `guideline_year` (le parseur ne sait
+    pas quel millésime il lit) et écrit en base.
+
+    Millésimes JAMAIS fusionnés (même règle que Yakima/BarthHaas) : chaque
+    appel avec un `year` différent ajoute ses propres lignes via `INSERT OR
+    REPLACE` sur (style_id, guideline_year), sans toucher aux autres
+    millésimes déjà en base.
+    """
+    import json
+
+    path = download_bjcp_styles(year=year, dest_dir=cache_dir, force=force_download)
+    with open(path, encoding="utf-8") as f:
+        payload = json.load(f)
+    rows = parsers.parse_beerjson_styles(payload)
+
+    con = sqlite3.connect(out_db)
+    if not con.execute("SELECT name FROM sqlite_master WHERE name='hops'").fetchone():
+        init_db(con)  # base totalement neuve -- même garde que les autres crawlers
+    else:
+        ensure_table(con, "beer_styles", BEER_STYLES_SCHEMA)  # base existante : ne PAS la vider
+    for row in rows:
+        con.execute(
+            "INSERT OR REPLACE INTO beer_styles VALUES "
+            "(:style_id, :guideline_year, :category_id, :category, :name, :type, :tags, "
+            ":og_min, :og_max, :fg_min, :fg_max, :abv_min, :abv_max, :ibu_min, :ibu_max, "
+            ":srm_min, :srm_max, :overall_impression, :aroma, :appearance, :flavor, "
+            ":mouthfeel, :comments, :history, :ingredients, :style_comparison, :examples, "
+            ":category_description, :source)",
+            {**row, "guideline_year": year})
+    con.commit()
+    n_no_vitals = sum(1 for r in rows if r["og_min"] is None and r["ibu_min"] is None
+                      and r["abv_min"] is None and r["srm_min"] is None and r["fg_min"] is None)
+    print(f"BJCP {year} : {len(rows)} styles ingérés dans {out_db!r} "
+         f"({n_no_vitals} sans vital stats, héritent du style de base).")
+    con.close()

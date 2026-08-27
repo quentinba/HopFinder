@@ -325,7 +325,24 @@ Elles sont écrites pour qu'aucune décision implicite ne reste à deviner.
 
 ## 2. Épique A — Styles BJCP (référence)
 
-- [ ] **T81 — Table `beer_styles` + commande `ingest-styles`**
+- [x] **T81 — Table `beer_styles` + commande `ingest-styles`**
+
+  **Compte rendu (2026-08-27)** : implémenté tel quel, avec une correction au
+  ticket trouvée en vérifiant les 3 styles à clés localisées un par un plutôt
+  que de recopier sa liste : **`ejemplos_comerciales`** (espagnol, style X2)
+  n'était pas dans la liste du ticket (qui ne mentionnait que la variante
+  portugaise `exemplos_comerciais`, X4) — les deux mappent vers `examples`,
+  ajoutées à `parsers._BJCP_LEAKED_LOCALE_KEYS`. Confirmé aussi que
+  `marcacoes` (X4) porte l'équivalent de `tags`, pas de `comments`.
+  Piège évité en cours de route : `ingest_beer_styles` créait initialement la
+  table via `init_db` (qui DROP + recrée TOUTES les tables) quand
+  `beer_styles` manquait — aurait vidé `hops`/`hop_composition`/etc. d'une
+  base réelle déjà peuplée qui n'a jamais eu cette table. Corrigé par
+  `schema.ensure_table` (crée UNE SEULE table manquante, sans toucher aux
+  autres), réutilisable pour les prochains tickets qui ajoutent une table.
+  Vérifié sur données réelles : `SELECT count(*) FROM beer_styles` → 110,
+  `WHERE og_min IS NULL` → 17, `hops` intact (189, inchangé) après ingestion,
+  `--year 2015` échoue explicitement avant tout appel réseau.
 
   **Source** : `https://raw.githubusercontent.com/beerjson/bjcp-json/main/styles/bjcp_styleguide-2021.json`
   (525 Ko, BeerJSON 2.01). **Téléchargé à l'ingestion, jamais committé**
