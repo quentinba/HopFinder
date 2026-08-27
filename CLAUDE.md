@@ -342,6 +342,164 @@ Contrainte respectée : jamais touché `matching`/`ingest`/`parsers`/`reference`
   généré une fois par script ponctuel PIL) — la marque nue perd sa silhouette
   sous ~24px.
 
+## Règles procédé & « survivables » (mémoire durable pour le modèle prédictif)
+
+Base de connaissance pour le futur modèle « quel houblon à quel moment du
+procédé » (backlog T99-T101, épique E). **Ces règles sont un PRIOR SOURCÉ, pas
+une mesure** : elles viennent d'une publication industrielle citable, elles sont
+appliquées à NOS mesures, et elles doivent être étiquetées comme telles en GUI
+(même traitement que le préfixe `Inferred:` de `infer_purpose_from_alpha_acid`).
+
+### Les 8 composés « survivables » Yakima Chief
+
+Composés bière-solubles qui traversent le côté chaud et la fermentation active
+(analyse GC-QTOF + GC-SCD). Noms de champs EXACTS de l'API YCH Tools
+(`/api/lot`, voir plus bas) — à réutiliser tels quels si on ingère un jour :
+
+| Champ API | Composé | Classe | Odeur (source : handbook YCH 2022) |
+|---|---|---|---|
+| `isobutylIsobutyrate` | isobutyl isobutyrate | ester | fruité |
+| `twoMethylbutylIsobutyrate` | 2-méthylbutyl isobutyrate (« 2MIB ») | ester | pomme verte, abricot |
+| `isoamylIsobutyrate` | isoamyl isobutyrate | ester | fruité |
+| `methylGeranate` | méthyl géranate | ester terpénique | — |
+| `twoNonanone` | 2-nonanone | cétone | fruité, floral, herbacé |
+| `linalool` | linalol | alcool monoterpénique | fruité/floral (« Froot Loops »), booster de fruité |
+| `geraniol` | géraniol | alcool monoterpénique | géranium, agrume |
+| `threeMercaptohexanol` | 3-mercaptohexanol (3MH) | thiol | pamplemousse, groseille à maquereau |
+
+Historique de version du modèle (à ne pas confondre) : **7 composés** dans le
+webinar 2020 (« Sulfur: The Next Aroma Frontier »), le marqueur 2019 « butanoic
+acid, 3-methylbutyl ester » ayant été retiré ; **8 composés** dans la version
+moderne (ajout de l'isobutyl isobutyrate).
+
+### Les 4 règles d'usage (handbook YCH 2022, texte, citable)
+
+1. **Hauts survivables → utilisables TÔT.** Late kettle, whirlpool, dry hop en
+   fermentation active (AFDH). Exemple donné : Ekuanot® > Palisade® pour un
+   whirlpool à fort impact.
+2. **Bas survivables → réserver au TARDIF.** Dry hop post-fermentation (PFDH).
+   Exemple donné : Willamette.
+3. **Blender pour ÉQUILIBRER les concentrations, pas pour les empiler.**
+   Exemple donné : Loral® (linalol) + Talus® (géraniol) = dynamique ;
+   Loral® + Crystal (tous deux linalol) = plat, unidimensionnel.
+4. **Charger le moût tôt en survivables favorise la BIOTRANSFORMATION.**
+   Fortes concentrations d'alcools monoterpéniques + thiols en whirlpool/AFDH
+   = conditions du métabolisme levurien des composés houblon.
+
+Précisions du même document, utiles au modèle :
+- Le géraniol est partiellement biotransformé en **β-citronellol** par certaines
+  levures (amplifie le profil agrume/floral). Le β-citronellol n'est **pas**
+  dans le houblon, il apparaît en bière.
+- Le nérol (isomère du géraniol) n'est **pas détectable** par l'analyse YCH.
+- Une addition **late kettle** perd beaucoup de volatils, mais les composés
+  solubles dans le moût (**alcools monoterpéniques, 3MH**) passent au fermenteur.
+- Ordre de grandeur des seuils : myrcène ~20 ppb vs **4MMP ~0,05 ppb**
+  (deux ordres de grandeur d'écart — les soufrés pèsent malgré des
+  concentrations minuscules).
+- L'**isomérisation** des acides alpha se produit au-dessus de 79 °C / 175 °F,
+  **whirlpool compris** (pas seulement à l'ébullition).
+
+⚠ **Ne PAS recréer le bug de `--biotransform`** (retiré le 2026-08-12) : la
+règle 4 et la conversion géraniol→citronellol sont un phénomène PROCÉDÉ, à
+n'appliquer qu'au moment du procédé. La version retirée comptait deux fois la
+même mesure (les 29 notes demandant du citronellol demandaient toutes aussi du
+géraniol). Toute réutilisation ici doit rester au niveau « stade de procédé »,
+jamais rentrer dans le scoring note→molécule.
+
+### Côté chaud vs côté froid (SOURCÉ — `docs/mapping_compounds.txt`)
+
+Distinction que le modèle procédé doit porter. Sourcée depuis
+`mapping_compounds.txt` (fourni par l'utilisateur, relu et corrigé le
+2026-08-27) — Janish *The New IPA*, JAFC, ASBC, OSU Hop Lab (Shellhammer),
+Takoi et al. :
+
+- **Le côté chaud CRÉE de l'arôme** : oxydation des sesquiterpènes
+  (humulène, caryophyllène) en époxydes/humulénol/oxyde de caryophyllène →
+  caractère noble, épicé, boisé. Ces produits ne sont **pas mesurés dans le
+  houblon** (ils se forment dans la chaudière) : un houblon riche en humulène/
+  caryophyllène est donc un *précurseur* de côté chaud, jamais une mesure
+  directe de ce qu'on obtiendra.
+- **Le côté froid PRÉSERVE** : thiols, esters, monoterpènes très volatils
+  (myrcène) sont perdus à l'ébullition → dry hop.
+- **Cas mixte** : linalol et géraniol survivent au whirlpool (règle 1) ET
+  bénéficient de l'AFDH (règle 4). Ils ne sont donc PAS « côté froid seulement »,
+  contrairement à l'intuition. C'est le point qui rend le modèle non trivial.
+
+`reference.PROCESS_SURVIVAL` (annotation qualitative par classe de composé,
+classification sourcée Janish) est la structure existante à étendre — jamais une
+valeur numérique inventée, cf. la vérification programmatique déjà en place.
+
+⚠ **Homonymie « 2-MIB », piège corrigé le 2026-08-27.** Le sigle désigne DEUX
+molécules sans rapport : le **2-méthylbutyl isobutyrate** (ESTER, pomme verte/
+abricot, l'un des 8 survivables Yakima, champ `twoMethylbutylIsobutyrate`) et le
+**2-méthylisobornéol** (alcool terpénique, terreux/moisi type géosmine, seuil
+5-10 ng/L, **faux-goût venant de l'EAU** — cyanobactéries — pas du houblon).
+L'un est à maximiser, l'autre à éviter. `mapping_compounds.txt` les confondait ;
+l'entrée a été scindée et annotée.
+
+⚠ **Ce que les agrégats BarthHaas contiennent** (même source) :
+`isobutyrate` = isobutyl isobutyrate + isoamyl isobutyrate + 2-méthylbutyl
+isobutyrate ; `ketones` = 2-nonanone + 2-undécanone notamment ;
+`thiols` = 3MH/3SH + 4MMP + 3MHA. Donc `isobutyrate` recouvre **3 des 8**
+survivables Yakima et `ketones` **1** — ne jamais relire ces champs comme des
+molécules uniques.
+
+### API de lot Yakima Chief — explorée et TRANCHÉE (2026-08-27)
+
+Les valeurs de survivables par variété n'existent publiquement que sous forme
+d'IMAGE (poster/handbook YCH, `© all rights reserved`) — d'où les
+reconstructions au pixel du hop-finder russe et de thirdleapbrew. **Mais** YCH
+Tools expose une API JSON publique donnant les mesures OFFICIELLES du labo :
+
+```
+GET https://tools.yakimachief.com/api/lot?lotNumber[]=<LOT>[&lotNumber[]=<LOT2>]
+```
+
+**Exploré et vérifié en direct** sur 3 lots réels (`23-WA346-027`,
+`P92-IUCIT3082`, `PC1-IUCIT1079`, trouvés via une URL de partage
+`tools.yakimachief.com/lookup?lots[]=…` indexée par les moteurs de recherche) :
+
+- **La réponse contient le nom de variété** (`variety`, `varietyCode`,
+  `cultivar`) — donc **aucun mapping lot↔houblon n'est à construire**, chaque
+  lot s'auto-étiquette. Plus `cropYear`, `productName`/`productCode`
+  (CON02 balle / PEL02 T90 / PEL06 Cryo), `farms[].grownBy`.
+- `brewingValues` : `uvAlpha`, `uvBeta`, `hsi`, `hplcAlpha/Beta/Cohumulone/
+  Colupulone`, `moisture`, `lcvAlpha75`.
+- `oilComponents` : mêmes % d'huile que ce qu'on a déjà.
+- **`survivables` : 22 champs**, bien au-delà des 8 du modèle publié —
+  les 8 (`isobutylIsobutyrate`, `twoMethylbutylIsobutyrate`,
+  `isoamylIsobutyrate`, `methylGeranate`, `twoNonanone`, `linalool`,
+  `geraniol`, `threeMercaptohexanol`) **plus** `alphaPinene`, `betaPinene`,
+  `myrcene`, `limonene`, `methylHexanoate`, `methylHeptanoate`,
+  `methylOctanoate`, `methylNonanoate`, `methylDecanoate`, `geranylAcetate`,
+  `transCaryophyllene`, `humulene`, **`caryophylleneOxide`**,
+  `transBetaFarnesene` (plusieurs souvent `null`).
+
+⚠ **Unité NON déclarée par l'API.** Les ordres de grandeur suggèrent des ppm
+(myrcène ~9 263 sur un T90 à 2,6 % d'huile ≈ cohérent avec des mg/kg), mais
+alors le 3MH à 0,7-1,5 serait ~700-1500 µg/kg, **20 à 50× au-dessus** de
+l'agrégat `thiols` BarthHaas (0-34 µg/kg). Hypothèse plausible non vérifiée :
+YCH mesurerait le 3MH **total, précurseurs liés compris** (conjugués cystéine/
+glutathion), bien plus abondants que le thiol libre. À élucider avant toute
+ingestion — ne jamais poser ces valeurs à côté des nôtres sans l'avoir tranché.
+
+⚠ **Ce sont des mesures PAR LOT, pas par variété** : sur les 3 lots Citra 2023
+ci-dessus, le Cryo (PEL06) affiche ~2× les survivables du T90 (PEL02) — normal
+(concentré de lupuline), mais cela interdit de traiter un lot comme
+représentatif d'une variété.
+
+**Décision (utilisateur, 2026-08-27) : source ABANDONNÉE comme socle
+systématique.** Les numéros de lot ne sont pas énumérables (pas d'index, et
+énumérer par force brute serait un scan de leur API — exclu). 3 lots trouvés,
+tous Citra 2023 : impossible d'en faire un jeu de données. L'onglet Survivables
+tourne donc sur l'**indice dérivé de nos propres mesures** (linalol, géraniol,
+isobutyrate, thiols — déjà en base). Le client de lot reste un ticket
+opportuniste au cas où de vrais numéros deviendraient disponibles.
+
+⇒ **Aucune valeur lue sur un graphique n'entre nulle part.** Si un jour des
+chiffres entrent, c'est par cette API, avec de vrais numéros de lot, dans une
+table séparée (`hop_lot_analysis`) qui n'est PAS une mesure de variété.
+
 ## Conventions
 - Commentaires/docstrings en français (cohérent avec l'existant).
 - **Exception : le texte UTILISATEUR de la GUI (`app.py`) est en ANGLAIS**

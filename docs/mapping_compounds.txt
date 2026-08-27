@@ -1,0 +1,134 @@
+
+================================================================================
+MAPPING CHIMIQUE COMPLET & VERIFIÉ (BARPLOT + COMPOSÉS HOPFINDER)
+================================================================================
+
+--------------------------------------------------------------------------------
+1. HYDROCARBONS (40 - 80% des huiles totales) — Très volatils
+--------------------------------------------------------------------------------
+
+• Myrcene (Myrcène)
+  - Barplot Image 1 : Myrcene (Quantité très élevée : 0.2 - 0.9 ml/100g)
+  - Arbre Janish    : HYDROCARBONS > Monoterpenes > myrcene
+  - Unité Barplot   : ml/100g
+  - Profil Sensa    : Résineux, vert, piney, poivré/herbacé, agrumes bruts.
+  - Note Brassicole : Extrêmement volatil. Évaporation rapide au boil ; apport majeur en Dry Hopping à froid.
+  - Sources         : The New IPA (Janish) ; OSU Hop Lab (Shellhammer).
+
+• Humulene (α-humulene)
+  - Barplot Image 1 : Humulene (Quantité élevée : 0.1 - 0.7 ml/100g)
+  - Arbre Janish    : HYDROCARBONS > Sesquiterpenes > a-humulene
+  - Unité Barplot   : ml/100g
+  - Profil Sensa    : Boisé, terreux, résineux, légèrement poivré.
+  - Note Brassicole : Sous sa forme pure hydrocarbonée, il s'évapore au boil/ fermentation. Son arôme épicé "noble" caractéristique provient de ses dérivés d'oxydation thermique (humulene epoxides I, II, III) formés au kettle/whirlpool.
+  - Sources         : The New IPA (Janish) ; JAFC.
+
+• Caryophyllene (β-caryophyllene)
+  - Barplot Image 1 : Caryophyllene (0.05 - 0.3 ml/100g)
+  - Arbre Janish    : HYDROCARBONS > Sesquiterpenes > b-caryophyllene
+  - Unité Barplot   : ml/100g
+  - Profil Sensa    : Épicé, poivre noir, boisé, clou de girofle.
+  - Note Brassicole : Comme l'humulène, très volatil sous forme brute ; s'oxyde au chaud en caryophyllene oxide pour donner la persistance épicée.
+  - Sources         : The New IPA (Janish) ; ASBC.
+
+• Farnesene (β-farnesene)
+  - Barplot Image 1 : Farnesene (Traces à ~0.15 ml/100g, très présent dans le Saaz)
+  - Arbre Janish    : HYDROCARBONS > Sesquiterpenes > b-farnesene
+  - Unité Barplot   : ml/100g
+  - Profil Sensa    : Herbacé, boisé, pomme verte/florale subtile.
+  - Sources         : Siebel Institute ; The New IPA (Janish).
+
+• β-pinene (Bêta-pinène)
+  - Barplot Image 1 : β-pinene (Traces / < 0.05 ml/100g)
+  - Arbre Janish    : HYDROCARBONS > Monoterpenes > b-pinene
+  - Unité Barplot   : ml/100g
+  - Profil Sensa    : Résine de pin, boisé, herbal frais.
+  - Sources         : Fenaroli's Handbook of Flavor Ingredients.
+
+
+--------------------------------------------------------------------------------
+2. OXYGEN CONTAINING COMPOUNDS (~30% des huiles) — Solubles & "Survivables"
+--------------------------------------------------------------------------------
+
+[MONOTERPENE ALCOHOLS]
+
+• Linalool (Linalol)
+  - Barplot Image 1 : Linalool (< 0.05 ml/100g)
+  - Arbre Janish    : OXYGEN CONTAINING > Monoterpenes Alcohols > linalool
+  - Unité Barplot   : ml/100g
+  - Profil Sensa    : Floral (lavande/bergamote), agrumes denses, myrtille.
+  - Note Brassicole : Excellent marqueur d'intensité aromatique. Soluble et très résistant à l'ébullition/fermentation ("survivable").
+  - Sources         : The New IPA (Janish) ; Journal of Inst. of Brewing.
+
+• Geraniol (Géraniol)
+  - Barplot Image 1 : Geraniol (< 0.05 ml/100g)
+  - Arbre Janish    : OXYGEN CONTAINING > Monoterpenes Alcohols > geraniol
+  - Unité Barplot   : ml/100g
+  - Profil Sensa    : Floral, rose, géranium, fruits doux.
+  - Note Brassicole : Molécule clé de la biotransformation : convertie par la levure pendant la fermentation en β-citronellol (arôme citron vert/agrumes).
+  - Sources         : Takoi et al. (2010, 2014) ; YCH Survivables Research.
+
+[!] ATTENTION HOMONYMIE — "2-MIB" désigne DEUX molécules sans rapport
+    (corrigé le 2026-08-27, l'entrée d'origine confondait les deux) :
+
+• 2-MIB = 2-Méthylbutyl isobutyrate  <-- CELUI DE YAKIMA CHIEF
+  - Classe          : ESTER (et NON un alcool monoterpénique).
+  - Barplot Image 1 : Compris dans l'agrégat "Isobutyrate" (voir plus bas).
+  - Arbre Janish    : OXYGEN CONTAINING > Other Oxygen Containing Compounds > esters
+  - Profil Sensa    : Pomme verte, abricot.
+  - Note Brassicole : L'un des 8 composés "survivables" du modèle Yakima Chief.
+                      Champ `twoMethylbutylIsobutyrate` de l'API YCH Tools
+                      (tools.yakimachief.com/api/lot). Arôme RECHERCHÉ.
+  - Sources         : YCH Survivable Compounds (handbook 2022, webinar 2020) ;
+                      Scott Janish (Survivables: Unpacking Hot-Side Hop Flavor).
+
+• 2-MIB = 2-Méthylisobornéol  <-- MOLÉCULE DIFFÉRENTE, DÉFAUT, PAS DU HOUBLON
+  - Classe          : Alcool terpénique bicyclique.
+  - Profil Sensa    : Terreux, moisi, sous-bois, sol mouillé (Geosmin-like).
+  - Note Critique   : Seuil de perception ultra-bas (5-10 ng/L). En brassage,
+                      il s'agit d'un faux-goût provenant principalement de
+                      l'EAU (cyanobactéries), et non d'une qualité aromatique
+                      du houblon. N'a RIEN à voir avec les survivables Yakima
+                      et ne doit jamais être compté comme un apport aromatique.
+  - Sources         : Water Research Journal ; ASBC Methods of Analysis.
+
+
+[ESTERS & ISOBUTYRATES]
+
+• Isobutyrate (Sous-groupe du barplot incluant : Isobutyl isobutyrate, Isoamyle isobutyrate, 2-Methylbutyl isobutyrate)
+  - Barplot Image 1 : Isobutyrate (< 0.05 ml/100g)
+  - Arbre Janish    : OXYGEN CONTAINING > Other Oxygen Containing Compounds > esters
+  - Unité Barplot   : ml/100g
+  - Profil Sensa    : Fruité intense, pomme verte, abricot, ananas, bonbon.
+  - Détail des molécules spécifiques :
+      * Isobutyl isobutyrate : Pomme, poire, solvant doux à forte dose.
+      * Isobutyrate d'isoamyle : Banane, papaye, bonbon fruité.
+      * Géranate de méthyle (Methyl geranate) : Floral (rose), agrumes doux ; ester terpénique extrêmement stable / "survivable".
+  - Sources         : Scott Janish (Survivables: Unpacking Hot-Side Hop Flavor) ; YCH Research.
+
+
+[KETONES (CÉTONES)]
+
+• Ketones (Sous-groupe du barplot incluant notamment la 2-Nonanone, 2-Undecanone)
+  - Barplot Image 1 : Ketones (< 0.05 ml/100g)
+  - Arbre Janish    : OXYGEN CONTAINING > Other Oxygen Containing Compounds > ketones
+  - Unité Barplot   : ml/100g
+  - Profil Sensa    : Fruité, floral, melon, pêche, notes douces lactées/fromagées à forte concentration.
+  - Détail composé  :
+      * 2-Nonanone : Melon, pêche, fraîcheur florale/savonneuse.
+  - Sources         : Scott Janish (*The New IPA*) ; Flavor and Fragrance Journal.
+
+
+--------------------------------------------------------------------------------
+3. SULFUR CONTAINING COMPOUNDS (< 1% des huiles) — Impact aromatique majeur
+--------------------------------------------------------------------------------
+
+• Thiols (Sous-groupe du barplot incluant : 3MH / 3SH, 4MMP, 3MHA)
+  - Barplot Image 1 : Thiols (Présents en quantités mesurées en µg/kg et non en ml)
+  - Arbre Janish    : SULFUR CONTAINING > Thiols and Other Sulphur Containing Compounds > EXAMPLES: 3SH (3MH)
+  - Unité Barplot   : µg/kg (Échelle distincte de 0 à 16 µg/kg en bas du graphique)
+  - Profil Sensa    : Fruit de la passion, pamplemousse rose, goyave, cassis, tropical intense.
+  - Détail composé  :
+      * 3MH (3-Mercaptohexan-1-ol) / 3SH (3-Sulfanylhexan-1-ol) : Seuil de perception extrêmement bas (~60 ng/L dans la bière). Apporte des notes explosives de fruit de la passion et de pamplemousse.
+  - Sources         : Tom Shellhammer (OSU) ; Scott Janish (*The New IPA*) ; Kishimoto et al.
+================================================================================
