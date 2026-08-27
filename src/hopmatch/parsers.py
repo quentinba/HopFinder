@@ -461,6 +461,36 @@ def _strip_yakima_brand_suffix(display_name: str | None) -> str | None:
     return re.sub(r"\s+", " ", cleaned).strip()
 
 
+_BARE_HOPS_SUFFIX_RE = re.compile(r"\s+Hops$")
+
+
+def strip_bare_hops_suffix(name: str | None) -> str | None:
+    """Retire un suffixe « Hops » NU (précédé d'une simple espace) du nom
+    affiché — T123 (2026-08-27), trouvé en listant des exemples
+    d'isobutyrate : 7 fiches BarthHaas ("Luna Hops", "Dolcita Hops"...)
+    portent « Hops » comme habillage marketing de leur page, jamais une
+    partie du nom de variété.
+
+    Garde stricte, sur le modèle de `_strip_yakima_brand_suffix` : ne JAMAIS
+    retirer « Hops » si le nom contient un qualificatif à tiret ("<nom> -
+    <région> Hops", ex. "Kohatu - NZ Hops", 11 cas Yakima réels, fournisseur
+    NZ Hops Ltd explicitement conservé par T51) -- détecté par la présence
+    de " - " (tiret entouré d'espaces) N'IMPORTE OÙ dans le nom, jamais par
+    le seul caractère précédant "Hops" (insuffisant : dans "Kohatu - NZ
+    Hops", le mot juste avant "Hops" est "NZ", pas un tiret). Un tiret SANS
+    espaces autour (ex. "Wai-iti - NZ Hops", cultivar réel) n'est pas cette
+    séquence -- seul le vrai séparateur qualificatif déclenche la garde,
+    vérifié sur les 11 cas réels. Repli explicite vers "ne rien retirer" en
+    cas de doute (aucun tiret détecté mais forme non prévue) plutôt que de
+    deviner."""
+    if not name or not _BARE_HOPS_SUFFIX_RE.search(name):
+        return name
+    if " - " in name:
+        return name
+    cleaned = _BARE_HOPS_SUFFIX_RE.sub("", name)
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
 def parse_yakima_hit(hit: dict) -> tuple[str, str, str, dict, list[str], dict[str, float]]:
     """
     Extrait (variety, name, region, comp, descriptors, aroma_intensity) d'un
@@ -485,7 +515,8 @@ def parse_yakima_hit(hit: dict) -> tuple[str, str, str, dict, list[str], dict[st
     """
     imp = hit.get("imported_fields") or {}
     variety = (hit.get("url") or "").rsplit("/", 1)[-1]
-    name = strip_trademark_symbols(_strip_yakima_brand_suffix(imp.get("display_name"))) or variety
+    name = (strip_trademark_symbols(strip_bare_hops_suffix(_strip_yakima_brand_suffix(
+        imp.get("display_name")))) or variety)
     region = imp.get("country_name") or ""
     descriptors = [d.strip().lower() for d in (imp.get("aromas") or []) if d and d.strip()]
 

@@ -1248,7 +1248,23 @@ Elles sont écrites pour qu'aucune décision implicite ne reste à deviner.
   BarthHaas en T79 (15 retenus comme alias, le reste gardé distinct).
   ⚠ À faire **après** T112, pour ne pas empiler deux revues de vocabulaire.
 
-- [ ] **T123 — Suffixe « Hops » parasite dans le nom affiché (18 houblons)**
+- [x] **T123 — Suffixe « Hops » parasite dans le nom affiché (18 houblons)**
+
+  **Compte rendu (2026-08-27)** : `parsers.strip_bare_hops_suffix` (nouvelle
+  fonction, gardée par la présence de `" - "` n'importe où dans le nom plutôt
+  que par le seul caractère précédant « Hops » — cette dernière lecture
+  littérale du ticket ne distinguait pas "Luna Hops" de "Kohatu - NZ Hops"
+  puisque le mot juste avant « Hops » dans les deux cas n'est pas un tiret ;
+  la présence de `" - "` dans la chaîne entière, elle, sépare correctement
+  les 7 cas à nettoyer des 11 à garder, vérifié sur les 18 cas réels).
+  Câblée aux DEUX pipelines de nom (BarthHaas `crawl_barthhaas`, Yakima
+  `parse_yakima_hit`), même endroit que `strip_trademark_symbols`, pour que
+  la correction reste symétrique aux deux sources. `crawl-barthhaas` et
+  `crawl-yakima` relancés sur la base réelle : `SELECT count(*) FROM hops
+  WHERE name LIKE '% Hops'` → **11**, tous `- NZ Hops` ; les 7 anciens
+  (Dolcita, Huell Classic, Luna, Ariana, Eclipse, El Dorado, Krush)
+  vérifiés individuellement, noms corrects, fusion multi-source (El Dorado,
+  Krush) intacte.
 
   **Symptôme** : 18 lignes de `hops` ont un nom d'affichage finissant par
   « Hops ». Trouvé le 2026-08-27 en listant des exemples d'isobutyrate.
