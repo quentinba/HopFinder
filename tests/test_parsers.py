@@ -156,6 +156,43 @@ def test_parse_flavordb2_detail():
     assert cas_list == ["22564-99-4", "78-70-6"]
     assert threshold == 7.0  # seul le seuil AROME est retenu, pas le goût
 
+def test_clean_yakima_description_converts_p_tags_to_paragraph_breaks():
+    # gabarit trimmé d'un vrai imported_fields.description (Citra, 2026-08-27)
+    html = ("<p>Developed by the Hop Breeding Company and released in 2007, "
+           "Citra&#039; HBC 394 is known for its high alpha-acid content.</p>"
+           "<p>The dominant aromatic profile of Citra is tropical citrus.</p>")
+    text = parsers.clean_yakima_description(html)
+    assert text == (
+        "Developed by the Hop Breeding Company and released in 2007, Citra' "
+        "HBC 394 is known for its high alpha-acid content.\n\n"
+        "The dominant aromatic profile of Citra is tropical citrus.")
+
+def test_clean_yakima_description_handles_br_as_paragraph_break_inside_p():
+    # gabarit trimmé de Kohatu (2026-08-27) : <br><br> comme séparateur DANS
+    # un même <p>, pas de <p> propre pour le lien de fiche produit.
+    html = ('<p>Kohatu is a descendant of Hallertauer Mittlefruher.'
+           '<br><br><a target="_blank" rel="noopener noreferrer nofollow" '
+           'href="https://www.yakimachief.com/x.pdf">View Kohatu Product Sheet</a></p>')
+    text = parsers.clean_yakima_description(html)
+    assert text == (
+        "Kohatu is a descendant of Hallertauer Mittlefruher.\n\n"
+        "[View Kohatu Product Sheet](https://www.yakimachief.com/x.pdf)")
+
+def test_clean_yakima_description_converts_em_to_markdown_italics():
+    # gabarit trimmé de Dolcita (2026-08-27) : disclaimer de marque déposée en <em>
+    html = "<p>Some text.<br><br><em>Dolcita is a trademark of Hop Breeding Company, LLC</em></p>"
+    text = parsers.clean_yakima_description(html)
+    assert "*Dolcita is a trademark of Hop Breeding Company, LLC*" in text
+
+def test_clean_yakima_description_strips_unknown_tags_defensively():
+    # jamais de balise résiduelle qui fuiterait telle quelle dans la GUI
+    html = "<p>Some <span class=\"x\">weird</span> markup.</p>"
+    assert parsers.clean_yakima_description(html) == "Some weird markup."
+
+def test_clean_yakima_description_absent_returns_none():
+    assert parsers.clean_yakima_description(None) is None
+    assert parsers.clean_yakima_description("") is None
+
 def test_parse_yakima_hit():
     # gabarit trimmé d'un vrai hit Algolia YCH (variété Admiral)
     hit = {

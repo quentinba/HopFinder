@@ -193,6 +193,12 @@ _TOOL_SUMMARY_BY_MODE = {t["mode"]: t for t in _TOOL_SUMMARIES}
 # un `git log` en direct exigerait aussi que `.git` soit présent dans le
 # conteneur déployé, ce qui n'est pas garanti.
 _RECENT_UPDATES = [
+    ("2026-08-27", "Browse a hop now has a collapsed \"Producer description\" "
+                   "section right under the identity metadata, with the "
+                   "hop's own marketing description from Yakima Chief Hops "
+                   "(cleaned up from their raw HTML, links included) — "
+                   "clearly labeled as producer marketing text, not a "
+                   "neutral characterization."),
     ("2026-08-27", "Browse a hop now shows identity metadata right under "
                    "the hop's name: cultivar code, breeder, release year "
                    "and pedigree (cross/lineage) when known, plus badges "
@@ -1212,6 +1218,25 @@ def _render_hop_identity(h: dict) -> None:
         st.caption(" · ".join(parts))
     if h.get("pedigree"):
         st.caption(f"Pedigree: {h['pedigree']}")
+
+
+def _render_hop_description(h: dict) -> None:
+    """T107 (2026-08-27) : description éditoriale du producteur
+    (`imported_fields.description`, Yakima Algolia, nettoyée en markdown --
+    `parsers.clean_yakima_description`, jamais le HTML brut). `st.expander`
+    REPLIÉ (`_panel_expander`, niveau "Detail" de la hiérarchie à trois
+    surfaces T-D04, toujours à l'intérieur d'une carte de section) --
+    demande explicite du ticket : c'est du texte MARKETING d'un vendeur,
+    jamais présenté comme une caractérisation neutre, même esprit que la
+    réserve affichée sur les pairings BeerMaverick. Absent -> rien affiché
+    (pas d'expander vide)."""
+    if not h.get("description"):
+        return
+    source_label = {"yakima": "Yakima Chief Hops"}.get(h.get("description_source"), h.get("description_source"))
+    with _panel_expander("Producer description"):
+        st.caption(f":material/info: Producer description ({source_label}) — "
+                  "marketing text from the hop's producer, not a neutral characterization.")
+        st.markdown(h["description"])
 
 
 def _render_key_stats(hcomp: dict) -> None:
@@ -2363,6 +2388,9 @@ def _browse(con):
         # les key stats" (ticket), placée après purpose/region qui ont une
         # exigence utilisateur antérieure et plus forte d'être EN PREMIER.
         _render_hop_identity(h)
+        # T107 : description éditoriale -- "sous les métadonnées de T106"
+        # (ticket), donc ici, avant key stats.
+        _render_hop_description(h)
         # Alpha/beta acids, co-humulone, total oil : demande utilisateur explicite
         # (2026-08-19), "il manque un élément principal : les infos les plus
         # importantes de yakima" -- voir `_render_key_stats`.

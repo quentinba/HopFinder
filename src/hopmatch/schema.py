@@ -16,10 +16,17 @@ SCHEMA = """
 -- experimental/organic/blend) en 0/1, NULL si la variété n'est pas couverte
 -- par Yakima -- jamais 0 par défaut (affirmerait "non expérimental" sans
 -- preuve).
+-- description/description_source (T107) : texte éditorial MARKETING du
+-- producteur (imported_fields.description, Yakima Algolia, 153/153
+-- variétés) -- nettoyé en markdown à l'ingestion (parsers.clean_yakima_
+-- description), jamais le HTML brut. `description_source` littéral
+-- ("yakima") pour permettre l'attribution explicite en GUI même si une
+-- autre source de description apparaissait un jour.
 CREATE TABLE hops (
     variety TEXT PRIMARY KEY, name TEXT, region TEXT, sources TEXT, purpose TEXT,
     cultivar TEXT, breeder TEXT, release_year INTEGER, pedigree TEXT,
-    is_experimental INTEGER, is_organic INTEGER, is_blend INTEGER
+    is_experimental INTEGER, is_organic INTEGER, is_blend INTEGER,
+    description TEXT, description_source TEXT
 );
 CREATE TABLE hop_composition (
     variety TEXT, compound TEXT, vmin REAL, vmax REAL, unit TEXT, source TEXT,
@@ -192,6 +199,9 @@ HOP_IDENTITY_COLUMNS = {
     "cultivar": "TEXT", "breeder": "TEXT", "release_year": "INTEGER", "pedigree": "TEXT",
     "is_experimental": "INTEGER", "is_organic": "INTEGER", "is_blend": "INTEGER",
 }
+
+# T107, même principe que HOP_IDENTITY_COLUMNS ci-dessus.
+HOP_DESCRIPTION_COLUMNS = {"description": "TEXT", "description_source": "TEXT"}
 
 
 def ensure_columns(con: sqlite3.Connection, table_name: str, columns: dict[str, str]) -> None:
