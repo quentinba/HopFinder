@@ -1,0 +1,83 @@
+# Editorial style label -> BJCP 2021 style_id, or null.
+#
+# T84 backlog. Two intended uses, one file (never fused/deduplicated
+# differently per use):
+#   1. Yakima Chief's `imported_fields.beer_types` (Algolia, T83) -- 47
+#      distinct labels observed live on 144/153 varieties (2026-08-27),
+#      counts noted below for reference. Editorial vocabulary written by
+#      Yakima's own content team, NOT BJCP terminology.
+#   2. Free-text style strings from MMuM recipes (T91/T92), in GERMAN
+#      (e.g. "India Pale Ale (sonstige)", "Deutsches Pilsner", "Amber
+#      Ale") -- not yet added, MMuM ingestion (T91) hasn't run. Add German
+#      keys to this SAME file when T91/T92 land, reviewed the same way.
+#
+# Every non-null value here was checked BY HAND against BJCP 2021
+# (`beer_styles.style_id`, 110 real styles) -- never fuzzy-matched or
+# auto-derived (see CLAUDE.md: FooDB auto-derived descriptors were
+# rejected twice for the same failure mode -- converging on a plausible-
+# looking but wrong generic answer). Reviewed with the user 2026-08-27.
+#
+# A label is left `null` whenever more than one BJCP style is a
+# defensible match (e.g. "Wheat" -> American Wheat Beer 1D or Weissbier
+# 10A, both equally arguable) -- guessing one would misrepresent a hop's
+# real style range as more precise than the source label actually is.
+# "All Styles"/"Ale"/"Amber"/"Imperial Ale" are called out explicitly by
+# the T83 ticket text itself as having no BJCP equivalent.
+#
+# Counts = number of Yakima varieties carrying that exact label (live
+# Algolia fetch, 2026-08-27) -- for traceability only, not used at runtime.
+
+# --- Resolved (15) ---------------------------------------------------------
+"American Pale Ale": "18B"       # 17 -- exact BJCP name match
+"Saison": "25B"                  # 13 -- exact BJCP name match
+"Biere De Saison": "25B"         # 1  -- same style, alternate spelling
+"Kolsch": "5B"                   # 7  -- Kölsch, exact match modulo accent
+"Double IPA": "22A"              # 5  -- exact BJCP name match
+"Altbier": "7B"                  # 4  -- exact BJCP name match
+"Biere De Garde": "24C"          # 3  -- Bière de Garde, exact match modulo accent
+"Gueuze": "23E"                  # 1  -- exact BJCP name match
+"Fruit Beer": "29A"              # 1  -- exact BJCP name match (category 29's base style)
+"Belgian Style Blonde": "25A"    # 1  -- Belgian Blond Ale ("Belgian" qualifier disambiguates from 18A)
+# Medium-confidence, accepted as proposed by the user (2026-08-27):
+"NEIPA": "21C"                   # 5  -- Hazy IPA. BJCP 2021 renamed New England IPA -> Hazy IPA
+                                  #      under 21C (21B is the generic "Specialty IPA" catch-all).
+                                  #      Correction to this ticket's own original example ("21B") --
+                                  #      verified against our real ingested beer_styles table.
+"Helles": "4A"                   # 7  -- Munich Helles (bare "Helles", not "Helles Bock" 4C)
+"American Style Lager": "1B"     # 2  -- American Lager, closest literal match
+"ESB": "11C"                     # 2  -- Strong Bitter, well-known historical synonym for "ESB"
+"Blonde Ale": "18A"              # 2  -- exact BJCP name match (vs. Belgian Blond Ale 25A, see above)
+"Belgian Style Lambic": "23D"    # 1  -- Lambic (bare style, not Gueuze/Fruit Lambic specifically)
+
+# --- No defensible single BJCP match (32) -----------------------------------
+"Lager": null                    # 65 -- spans 1A/1B/2A/3A/4A/... no single style
+"IPA": null                      # 56 -- spans 21A/21B/21C/12C/22A -- see "American IPA" would be a guess
+"Pale Ale": null                 # 45 -- spans 18B (American)/11C/12C (English) -- distinct from "American Pale Ale" above
+"Pilsner": null                  # 40 -- spans 2A/3A/3B/5D -- no single "Pilsner" BJCP id
+"Wheat": null                    # 23 -- American Wheat Beer 1D vs Weissbier 10A, both defensible (ticket's own example)
+"Stout": null                    # 22 -- spans 15B/15C/16A/16B/16C/16D/20B/20C
+"Belgian Style Ale": null        # 17 -- spans 24A-26D
+"English Style Ale": null        # 16 -- too broad
+"Porter": null                   # 15 -- English 13C / American 20A / Baltic 9C
+"Ale": null                      # 14 -- explicitly called out in T83 as having no BJCP equivalent
+"English Style Bitter": null     # 13 -- spans 11A/11B/11C
+"American Style Ale": null       # 11 -- too broad
+"Bock": null                     # 9  -- spans 4C/6C/9A/9B/10C
+"Barley Wine": null              # 5  -- English 17D vs American 22C
+"English Style Pale Ale": null   # 5  -- no clean 1:1 BJCP entry
+"German Style Ale": null         # 4  -- Altbier/Kölsch both qualify
+"Brown Ale": null                # 4  -- British 13B vs American 19C
+"All Styles": null               # 4  -- explicitly called out in T83 as having no BJCP equivalent
+"German Style Lager": null       # 3  -- spans multiple German lager styles
+"Red Ale": null                  # 2  -- Irish Red Ale 15A is the only formal match, but unqualified here
+"Bitter": null                   # 2  -- spans 11A/11B/11C
+"Amber": null                    # 2  -- explicitly called out in T83 as having no BJCP equivalent
+"Weisse": null                   # 1  -- Berliner Weisse 23A vs Weissbier 10A, genuinely ambiguous unqualified
+"American Wild Ale": null        # 1  -- matches category 28's NAME, not any single style_id within it
+"Trappist/Belgian Ale": null     # 1  -- spans 24B and all of 26A-26D
+"English Ale": null              # 1  -- too broad
+"Imperial Ale": null             # 1  -- explicitly called out in T83 as having no BJCP equivalent
+"Cask Conditioned Ale": null     # 1  -- a serving/conditioning method, not a BJCP style
+"American Style Pilsner": null   # 1  -- no matching BJCP entry
+"Summer Ale": null               # 1  -- not a formal BJCP style name
+"Rye Ale": null                  # 1  -- rye is an ingredient variant across many styles, not its own BJCP style
