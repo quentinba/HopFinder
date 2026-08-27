@@ -1,0 +1,495 @@
+# T106 (2026-08-27) : breeder/release_year/pedigree, curation manuelle à partir
+# des paragraphes « Origin and Geneology » de BeerMaverick (prose libre, phrasée
+# différemment à chaque houblon -- voir CLAUDE.md/parsers.parse_beermaverick_origin
+# pour pourquoi ce n'est PAS extrait par regex). Clé = nom de CULTIVAR DE BASE
+# (suffixe de marque « - NZ Hops»/« - MacHops» retiré), appliqué à TOUTES les
+# variétés `hops` partageant ce même nom de base (ex. « Amarillo » ET
+# « Amarillo (Germany) », « Motueka - NZ Hops » ET « Motueka - MacHops » --
+# même cultivar, crops/licences différents, même généalogie). Champ absent du
+# texte source -> omis (jamais deviné). Non exhaustif (142/203 variétés
+# couvertes par une page BeerMaverick) -- une variété absente d'ici reste NULL,
+# jamais de valeur fabriquée.
+
+Admiral:
+  breeder: Wye College
+  pedigree: Cross between Challenger and Northdown.
+  release_year: 1998
+Agnus:
+  pedigree: Bred from a number of varieties including Bor, Fuggles, Northern Brewer, Saaz and Sladek (Czech
+    Republic).
+  release_year: 2001
+Ahtanum:
+  breeder: Yakima Chief Ranches
+  pedigree: Lineage unknown; open pollinated.
+  release_year: 1997
+Amarillo:
+  breeder: Virgil Gamache Farms
+  pedigree: Accidentally discovered growing alongside a Liberty hop field (1990); patented 2003 as VGXP01.
+    Also known as Amarillo Gold.
+Aramis:
+  pedigree: 2002 cross between the French variety Strisselspalt and the English variety WGV (Whitbread
+    Golding Variety).
+Ariana:
+  breeder: Hüll Hop Research Center
+  pedigree: Cross between Herkules and a wild male hop.
+Aurora:
+  pedigree: Cross between Northern Brewer and a TG seedling originating in Yugoslavia. Also known as Super
+    Styrian / Styrian Aurora.
+Azacca:
+  breeder: American Dwarf Hop Association
+  pedigree: Descendant of Northern Brewer and Summit; cross between Toyomidori and an unknown variety.
+  release_year: 2013
+Bitter Gold:
+  pedigree: Lineage includes Brewer's Gold, Bullion, Comet and Fuggle.
+  release_year: 1999
+Boadicea:
+  pedigree: Dwarf variety derived from open pollination of a second-generation wild, Japanese female hop.
+Bobek:
+  pedigree: Diploid hybrid of Northern Brewer and a Tettnanger seedling of unknown origin.
+Bramling Cross:
+  breeder: Wye College
+  pedigree: Cross between Bramling (a traditional Golding variety) and a wild Manitoban (Canadian) hop.
+  release_year: 1927
+Bravo:
+  pedigree: Zeus crossed with a male (98004 x USDA 19058m).
+  release_year: 2006
+Brewers Gold:
+  breeder: Wye College
+  pedigree: Ancestor to many major high-alpha hops (Sterling, Galena, Horizon, Centennial, Nugget).
+  release_year: 1919
+Bru-1:
+  breeder: Brulotte Farms (Toppenish, WA)
+  pedigree: Developed through open pollination.
+CTZ:
+  breeder: Charles Zimmerman
+  pedigree: Umbrella name for Columbus/Tomahawk/Zeus (genetically distinct but similar hops), not a single
+    variety. Exact lineage unknown; widely assumed Brewer's Gold and undisclosed American varieties.
+Callista:
+  pedigree: Cross between Hallertau Tradition and a Huell male. Also known as Grungeist.
+Cascade:
+  breeder: USDA breeding program (Oregon State University)
+  pedigree: Cross between Fuggle and the Russian hop Serebrianka (1967); originally designated USDA 56013.
+  release_year: 1972
+Cashmere:
+  breeder: Washington State University
+  pedigree: Cross between Cascade and Northern Brewer.
+  release_year: 2013
+Celeia:
+  pedigree: Triploid offspring of Styrian Golding, Aurora and a Slovenian wild hop. Also known as Styrian
+    Golding Celeia.
+Centennial:
+  pedigree: Cross between Brewers Gold and Fuggle (bred 1974); other sources cite Brewers Gold, Fuggle,
+    East Kent Golding and Bavarian hops.
+  release_year: 1990
+Challenger:
+  breeder: Wye College
+  pedigree: Granddaughter of Northern Brewer crossed with a downy-mildew-resistant male; 'cousin' of Target,
+    niece of Northdown.
+  release_year: 1972
+Chelan:
+  breeder: John I. Haas, Inc.
+  pedigree: Daughter of Galena.
+  release_year: 1994
+Chinook:
+  pedigree: Cross between a Petham Golding and a USDA-selected high-alpha male.
+Citra:
+  breeder: Hop Breeding Company (Yakima, WA)
+  pedigree: Cross of two unnamed varieties (X-114/HBC 394); parentage included American Tettnanger, Brewer's
+    Gold, Hallertau Mittelfrüh, East Kent Goldings and an unknown (likely American wild) hop.
+  release_year: 2008
+Cluster:
+  pedigree: Pedigree not known; possibly a cross between an English variety and an American male hop.
+    One of the oldest US hop varieties.
+Columbia:
+  pedigree: Developed in the 1960s (Corvallis, OR); lineage includes a tetraploid Fuggle (USDA 21003)
+    and a Fuggle seedling 2-4. Sister of Willamette.
+Columbus:
+  breeder: Charles Zimmerman
+  pedigree: Exact lineage unknown; widely assumed Brewer's Gold and undisclosed American varieties. Developed
+    in the 1980s. Genetically distinct from but similar to Zeus; grouped with Tomahawk/Zeus as CTZ.
+Comet:
+  breeder: USDA
+  pedigree: Parentage is English Sunshine and a native American hop, giving it a wild American characteristic.
+  release_year: 1974
+Crystal:
+  pedigree: Triploid of Hallertau Mittelfrueh crossed with (Cascade x USDA 65009-64034M); half-sister
+    of Mt. Hood, Liberty and Ultra.
+Diamant:
+  breeder: Hüll breeding institute
+  pedigree: Daughter of Spalter and a male derived at Hüll.
+  release_year: 2019
+Dr. Rudi:
+  pedigree: Triploid bred from an open cross of Smoothcone. Renamed from an earlier name to Dr. Rudi in
+    2012.
+  release_year: 1976
+East Kent Goldings:
+  pedigree: Lineage unknown; used in England since 1790.
+Eclipse:
+  breeder: HPA (Hop Products Australia)
+  pedigree: Ancestry traceable to 1915; first developed 2004. Cross-pollination generations featured Fuggle,
+    Brewer's Gold, Comet and Pride of Ringwood.
+  release_year: 2020
+Ekuanot:
+  breeder: Hop Breeding Company
+  pedigree: Originally released as HBC 366.
+  release_year: 2014
+El Dorado:
+  breeder: CLS Farms (Moxee, WA)
+  pedigree: Lineage traces to Brewer's Gold, Bullion, Comet and Fuggle.
+  release_year: 2010
+Ella:
+  pedigree: Shares the same mother as Galaxy; father is a variety from Spalt, Germany. Bred 2001. Formerly
+    known as Stella.
+  release_year: 2007
+Endeavour:
+  breeder: Wye College
+  pedigree: Cross between Cascade and a Hedgerow Hop; granddaughter of Target. Bred 2002.
+Enigma:
+  breeder: Hop Products Australia
+  pedigree: Breeding program using Swiss Tettnang and North American hops; originally cultivated 2002.
+  release_year: 2013
+Ernest:
+  breeder: Prof. Ernest Salmon (Wye College)
+  pedigree: Selected as seedling code OZ97a (1923) from seed collected in 1921, an open-pollination of
+    Neomex AA7.
+Falconer's Flight 7Cs Blend:
+  breeder: Hopunion
+  pedigree: Proprietary hop blend, not a single cultivar.
+Falconer's Flight Blend:
+  breeder: Hopunion, LLC
+  pedigree: Proprietary blend of Pacific Northwest hops, not a single cultivar.
+  release_year: 2010
+First Gold:
+  breeder: Wye College
+  pedigree: Cross of WGV (Whitbread Golding Variety) with a dwarf male. Also known as Prima Donna.
+  release_year: 1995
+Fuggle:
+  breeder: Richard Fuggle (Kent, England)
+  pedigree: Chance seedling selected in 1861; propagated from 1875.
+Galaxy:
+  breeder: Hop Products Australia
+  pedigree: 'Breeding started 1994: Australian female J78 (progeny of Pride of Ringwood) crossed with
+    a male derived from the high-alpha German Perle.'
+  release_year: 2009
+Galena:
+  pedigree: Open-pollinated seedling of Brewer's Gold; created in Idaho, 1968.
+  release_year: 1978
+Glacier:
+  pedigree: Cross between Elsasser F and 8685-014 M; composition ~1/2 Elsasser, 5/32 Brewer's Gold, 1/8
+    Northern Brewer, 1/16 Bullion, plus minor Early Green/German Aroma/East Kent Golding/Bavarian/unknown.
+  release_year: 2000
+Green Bullet:
+  breeder: New Zealand DSIR Research Station
+  pedigree: Parents were a Smoothcone and an open-pollinated variety.
+  release_year: 1972
+HBC 630:
+  breeder: Hop Breeding Company
+  pedigree: Granddaughter of Warrior; cross made 2008 between HBC 364 and male parent 21-10-21.
+Hallertau Blanc:
+  pedigree: Cross between a Cascade female and a Huell male.
+  release_year: 2012
+Hallertauer Tradition:
+  pedigree: Daughter of Hallertau Gold; also has Hallertau Mittelfrüh and Saaz in its lineage.
+  release_year: 1993
+Harmonie:
+  pedigree: Cross between a Czech Bitter female (50% Saaz) and a selected Czech aroma male.
+  release_year: 2004
+Helga:
+  breeder: Hop Products Australia
+  pedigree: Bred from Hallertau Mittelfrüh; formerly known as Southern Hallertau. Retired after the 2017
+    harvest.
+  release_year: 1986
+Herkules:
+  breeder: Hop Research Center (Hüll)
+  pedigree: Daughter of Hallertau Taurus.
+  release_year: 2006
+Horizon:
+  pedigree: Diploid hop; half-sister to Nugget.
+Huell Melon:
+  breeder: Hop Research Center (Hüll)
+  pedigree: Daughter of Cascade and a Huell male.
+  release_year: 2012
+Idaho 7:
+  breeder: Jackson Hop Farm (Wilder, ID)
+  release_year: 2015
+Idaho Gem:
+  breeder: Gooding Farms (Parma, ID)
+Jarrylo:
+  pedigree: Parentage includes Summit (mother) and ADHA 75-2 (father).
+Kazbek:
+  pedigree: Bred from Saaz and a wild Russian landrace hop from the Caucasus.
+Kohatu:
+  pedigree: Descendant of Hallertau Mittelfrüh.
+  release_year: 2011
+Liberty:
+  pedigree: Triploid seedling of the German Hallertau variety; half-sister to Ultra, Mt. Hood and Crystal;
+    extension of the Hallertau hop family.
+  release_year: 1983
+Loral:
+  pedigree: Father is Nugget, mother is Glacier (granddaughter of Tardif De Bourgogne, giving it French
+    ancestry on the mother's side).
+  release_year: 2016
+Lublin:
+  pedigree: Cultivar of Saaz, also referred to as Lubelska/Lublelski.
+Magnat:
+  pedigree: Daughter of Magnum; pedigree of Lubelski and a Yugoslavian male.
+  release_year: 2012
+Magnum:
+  breeder: German Hop Institute (Hüll)
+  release_year: 1980
+Mandarina Bavaria:
+  pedigree: Daughter of Cascade, and Hallertau Blanc/Hüll Melon males (94/045/001 x wild PM).
+  release_year: 2012
+Marynka:
+  pedigree: Daughter of Brewer's Gold.
+Millennium:
+  pedigree: Daughter of Nugget.
+  release_year: 2000
+Monroe:
+  pedigree: Derived from a wild American hop.
+Mosaic:
+  breeder: Hop Breeding Company (HBC)
+  pedigree: Daughter of Simcoe (YCH 14) and a Nugget-derived male whose lineage included Tomahawk, Brewers
+    Gold, Early Green and an unknown variety.
+  release_year: 2012
+Motueka:
+  breeder: Hort Research
+  pedigree: Cross between Saaz and a New Zealand breeding selection. Initially called Belgian Saaz (abbreviated
+    'B' Saaz).
+  release_year: 1998
+NZ Pacific Jade:
+  breeder: HortResearch Centre (Riwaka, NZ)
+  pedigree: Triploid high-alpha variety; ancestry includes New Zealand First Choice (related to Late Cluster)
+    and an Old Line Saazer male.
+  release_year: 2004
+NZ Southern Cross:
+  pedigree: Cross between NZ Smooth Cone and the result of a Californian and English Fuggle.
+  release_year: 1994
+Nectaron:
+  breeder: New Zealand's Plant & Food Research
+  pedigree: Full sister to Waimea and daughter of Pacific Jade; first bred 2004, expanded 2016-2017.
+  release_year: 2020
+Nelson Sauvin:
+  breeder: Hort Research (Riwaka Research Centre)
+  pedigree: Triploid variety from a Smoothcone and NZ male cross.
+  release_year: 2000
+Newport:
+  breeder: Oregon State University
+  pedigree: Offspring of Magnum and a USDA male variety.
+  release_year: 1992
+Northdown:
+  breeder: Wye College
+  pedigree: Offspring of Northern Brewer and Challenger; aunt to Target.
+  release_year: 1970
+Northern Brewer:
+  pedigree: German cross between a Canterbury Golding and 'OB21', a male seedling of Brewers Gold.
+Nugget:
+  pedigree: Cross between Brewers Gold and a high-alpha-acid male.
+  release_year: 1983
+Olympic:
+  pedigree: Descendant of Brewer's Gold, Fuggle and East Kent Golding.
+  release_year: 1983
+Opal:
+  pedigree: Daughter of Hallertau Gold.
+Pacific Crest Blend:
+  pedigree: Proprietary blend of hops, not a single cultivar.
+Pacific Gem:
+  pedigree: Ancestry includes Smoothcone, Californian Late Cluster and Fuggle.
+  release_year: 1987
+Pacifica:
+  breeder: HortResearch
+  pedigree: Noble European ancestry via an open cross with Hallertau Mittelfrüh.
+  release_year: 1994
+Palisade:
+  breeder: Yakima Chief Ranch
+  pedigree: Bred via open pollination.
+Pekko:
+  pedigree: Lineage includes an open-pollinated male with ADHA 538 as the female.
+Perle:
+  breeder: Hüll (Germany)
+  pedigree: Cross between Northern Brewer and 63/5/27M.
+  release_year: 1978
+Phoenix:
+  breeder: Horticulture Research International (HRI), Wye College
+  pedigree: Seedling of Yeoman.
+  release_year: 1996
+Pilgrim:
+  breeder: Horticulture Research International, Wye College
+  pedigree: Half-sister to First Gold (same father); mother from breeding lines derived from Wye Challenger
+    and Wye Target.
+  release_year: 2001
+Pilot:
+  breeder: Horticulture Research International (HRI), Wye College
+  release_year: 2001
+Pioneer:
+  breeder: Wye College
+  pedigree: Bred from Omega; sister to Herald.
+  release_year: 1996
+Polaris:
+  pedigree: Cross between 94/075/758 and 97/060/720 (a derivative of Huell material).
+Premiant:
+  pedigree: Cross of bitter varieties with Czech Saaz aroma varieties.
+Pride of Ringwood:
+  pedigree: Bred in Australia from the English variety Pride of Kent.
+  release_year: 1965
+Progress:
+  breeder: Wye College
+  pedigree: Daughter of Whitbread Golding and O.B.79; cousin to Target.
+  release_year: 1951
+Rakau:
+  breeder: Hort Research
+  release_year: 2007
+Relax:
+  pedigree: From a Huell breeding line.
+Riwaka:
+  pedigree: Triploid variety crossed with an old line Saazer and specially developed New Zealand breeding
+    selections. Also known as D-Saaz.
+  release_year: 1996
+Saaz:
+  pedigree: Bred from the original centuries-old Czech Republic landrace variety; this US-grown selection
+    shares lineage with Czech-grown Saaz. Name derives from the Czech city of Žatec.
+Saaz Late:
+  pedigree: Selection from progenies of an F1 generation, parental combination of developed breeding material
+    with origin in Saaz.
+  release_year: 2010
+Sabro:
+  pedigree: Result of a cross-pollination of a female Neomexicanus hop.
+  release_year: 2018
+Santiam:
+  breeder: USDA
+  pedigree: Parent varietals are Swiss Tettnanger, German Hallertau Mittelfrüh and Cascade.
+  release_year: 1997
+Saphir:
+  breeder: Hop Research Center (Hüll)
+  release_year: 2002
+Simcoe:
+  breeder: Select Botanicals Group (developed; created by Charles E. Zimmermann)
+  pedigree: Proprietary/trademarked variety; parentage kept secret, reportedly derived via open pollination.
+    Previously named YCR 14.
+  release_year: 2000
+Sladek:
+  pedigree: Bred with breeding material with an origin in Northern Brewer and Saaz.
+Smaragd:
+  breeder: Hop Research Institute (Hüll, Germany)
+  pedigree: Formerly known as Emerald.
+Sorachi Ace:
+  pedigree: Cross between Brewer's Gold, Saaz and Beikei No. 2 male; developed in Japan for Sapporo Breweries,
+    Ltd.
+  release_year: 1984
+Sovereign:
+  breeder: Peter Darby (Wye College)
+  pedigree: Dwarf variety developed 1995 via open pollination; granddaughter of Pioneer.
+  release_year: 2004
+Spalter Select:
+  breeder: Hop Research Center (Hüll, Germany)
+  pedigree: Cross from 76/18/80 and 71/16/7; bred to resemble the Spalt, Tettnang and Saaz groups.
+  release_year: 1993
+Sterling:
+  breeder: USDA
+  pedigree: Pedigree includes Saaz, Cascade, Brewers Gold, Early Green and other European varieties; bred
+    1990.
+  release_year: 1998
+Sticklebract:
+  breeder: New Zealand Horticultural Research Center (Riwaka)
+  pedigree: Triploid variety, result of an open-pollinated NZ First Choice.
+  release_year: 1972
+Strisselspalt:
+  pedigree: Traditional variety of Alsace, France; one of the classical fine aromatic varieties. Also
+    known as Strisselspalter.
+Summer:
+  breeder: Tasmanian Bushy Park Breeding Garden
+  pedigree: Result of open pollination of a tetraploid Czech Saaz; bred 1997. Retired after the 2017 harvest
+    (HPA).
+Summit:
+  breeder: American Dwarf Hop Association
+  pedigree: Cross between Lexus and an unspecified male derived from numerous hops including Zeus, Nugget
+    and USDA male varieties.
+  release_year: 2003
+Super Pride:
+  pedigree: Daughter of Pride of Ringwood.
+Sussex Hop:
+  pedigree: Dwarf variety discovered in Northiam, East Sussex, in 2005.
+Sybilla:
+  pedigree: From a Lublin mother and wild Yugoslavian father.
+  release_year: 1996
+Sylva:
+  pedigree: Child of Saaz. Also known as Southern Saaz.
+  release_year: 1997
+Tahoma:
+  breeder: USDA / Washington State University
+  pedigree: Daughter of Glacier.
+  release_year: 2013
+Talus:
+  pedigree: Daughter of Sabro (HBC 438); open pollinated.
+Tango:
+  pedigree: Cross between Cascade and a male Hüll breeding line.
+Target:
+  breeder: Wye College
+  pedigree: Cousin of Challenger; descendant of Northern Brewer and Eastwell Goldings.
+  release_year: 1992
+Tettnanger:
+  pedigree: Landrace variety bred in Germany; genetically similar to Saaz.
+Topaz:
+  breeder: Hop Products Australia
+  pedigree: Bred from an existing Australian high-alpha-acid variety crossed with pollen from a Wye College
+    male; created 1985, commercialized 1997, gained popularity in 2011.
+  release_year: 1997
+Triskel:
+  pedigree: Cross developed 2006 between the French Strisselspalt variety and the male plant of the English
+    Yeoman variety.
+Triumph:
+  pedigree: Parentage includes Nugget, Brewers Gold, East Kent Goldings and Hallertau Mittelfrüh.
+  release_year: 2019
+Tsingdao Flower:
+  pedigree: Bred from a Chinese version of Cluster.
+Ultra:
+  pedigree: Combination of four parts Hallertau Mittelfrüh, one part Saaz and one part an unnamed varietal;
+    triploid, half-sister to Mt. Hood, Liberty and Crystal.
+Vanguard:
+  breeder: USDA
+  pedigree: Cross between a selected Hallertauer daughter and a USDA-selected German aroma male; triploid,
+    similar to Hallertauer Mittelfrüh. Bred 1982.
+  release_year: 1997
+Vic Secret:
+  breeder: Hop Products Australia
+  pedigree: Cross-pollination of high-alpha Australian and Wye College hops (English/European/North American
+    heritage); created 2000.
+  release_year: 2013
+Vista:
+  breeder: Dr. John Henning (USDA public breeding program)
+  pedigree: Result of a 2006 open-pollinated cross between a tetraploid Perle female and an unknown diploid
+    male.
+Vital:
+  breeder: Žatec breeding program
+  pedigree: Selected from breeding material with origin in Agnus.
+  release_year: 2008
+Wai-iti:
+  pedigree: Lineage includes Hallertauer Mittelfrüh as a 1/3 parent and Liberty as a grandparent.
+  release_year: 2011
+Waimea:
+  pedigree: Parentage stemming from Californian Late Cluster, Fuggle and Saaz.
+  release_year: 2012
+Wakatu:
+  pedigree: Triploid variety from an open pollination of Hallertau Mittelfrüh and a New Zealand-derived
+    male; originally released as Hallertau Aroma, renamed Wakatu in 2011.
+  release_year: 1988
+Warrior:
+  breeder: Select Botanicals Group and Yakima Chief Ranches
+Whitbread Goldings Variety:
+  pedigree: Likely has Fuggle parentage; bred from Bates' Brewer. Not a true Golding variety despite the
+    name.
+  release_year: 1911
+Willamette:
+  pedigree: Triploid seedling of the English Fuggle variety.
+  release_year: 1971
+Yakima Gold:
+  breeder: Washington State University
+  pedigree: Cross between Early Cluster and a native Slovenian male.
+  release_year: 2013
+Zeus:
+  pedigree: Daughter of Nugget. Exact further lineage unknown; widely assumed Brewer's Gold and undisclosed
+    American varieties played a role. Grouped with Columbus/Tomahawk as CTZ (genetically distinct but
+    similar).
+Zythos:
+  breeder: Hopunion
+  pedigree: Proprietary hop blend, not a single cultivar.

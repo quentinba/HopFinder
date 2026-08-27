@@ -68,6 +68,16 @@ couverture » ne pénalise pas.
   cette approche avait déjà dégénéré (point précédent). 506 entrées, vocabulaire
   restreint aux 138 descripteurs réels de `hop_descriptors`, garde-fou testé
   (`test_ingredient_descriptors_keys_and_terms_match_real_vocabulary`).
+- **`hops.breeder`/`release_year`/`pedigree` (T106) : curation manuelle
+  (`data/mappings/hop_breeder_pedigree.yaml`), PAS un parseur regex** — la
+  section « Origin and Geneology » de BeerMaverick est de la prose libre,
+  phrasée différemment à chaque houblon (vérifié sur 5 pages réelles : jusqu'à
+  3 acteurs distincts type "created by X, developed by Y, released through
+  Z"), un regex aurait deviné plus qu'il n'aurait extrait. Clé = nom de
+  cultivar de base (`ingest._cultivar_base_name`), appliquée à TOUTES les
+  lignes `hops` du même cultivar (`ingest._write_hop_identity`) — plusieurs
+  crops/licenciés distincts (ex. Amarillo US/Germany, Motueka NZ Hops/
+  MacHops) partagent la même généalogie mais sont des lignes `hops` séparées.
 - **`contrast_blend`/`amplify_blend` : plusieurs tailles (1-5), houblon de base
   choisi par l'utilisateur, mélange pertinence/pairing réel BeerMaverick — jamais
   une pure couverture gloutonne, jamais une cascade top→pairing→couverture.**

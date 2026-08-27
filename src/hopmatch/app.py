@@ -193,6 +193,14 @@ _TOOL_SUMMARY_BY_MODE = {t["mode"]: t for t in _TOOL_SUMMARIES}
 # un `git log` en direct exigerait aussi que `.git` soit présent dans le
 # conteneur déployé, ce qui n'est pas garanti.
 _RECENT_UPDATES = [
+    ("2026-08-27", "Browse a hop now shows identity metadata right under "
+                   "the hop's name: cultivar code, breeder, release year "
+                   "and pedigree (cross/lineage) when known, plus badges "
+                   "for Experimental, Organic and Blend varieties. Sourced "
+                   "from Yakima Chief (cultivar/experimental/organic/blend) "
+                   "and hand-reviewed from BeerMaverick's variety history "
+                   "pages (breeder/release year/pedigree) — missing fields "
+                   "are simply left out, never shown as a dash."),
     ("2026-08-27", "Browse a hop now shows a fourth association block: "
                    "editorial beer-style suggestions from Yakima and "
                    "BeerMaverick (e.g. \"American Pale Ale (18B)\"), grouped "
@@ -1166,6 +1174,44 @@ def _render_hop_rows(rows: list[dict], columns: list[tuple]) -> None:
                     column_config[header] = st.column_config.ListColumn()
         table_rows.append(entry)
     st.dataframe(table_rows, width="stretch", hide_index=True, column_config=column_config)
+
+
+def _render_hop_identity(h: dict) -> None:
+    """T106 (2026-08-27) : métadonnées d'identité -- cultivar/breeder/
+    release_year (Yakima pour cultivar/is_*, curation manuelle BeerMaverick
+    pour breeder/release_year/pedigree, voir data/mappings/hop_breeder_
+    pedigree.yaml et ingest._write_hop_identity) et pedigree. Badges
+    experimental/organic/blend SEULEMENT quand `1` (jamais affiché sur `0`
+    ou `None` -- `0` signifierait "confirmé non expérimental", une
+    affirmation qu'on n'a pas). Ligne de texte pour cultivar/breeder/année :
+    un champ absent est simplement OMIS de la ligne (jamais de "—", demande
+    explicite du ticket -- contrairement au reste de la GUI où "—" marque
+    une valeur absente, ici la ligne entière disparaît silencieusement pour
+    un houblon sans aucune métadonnée d'identité plutôt que d'afficher une
+    ligne de tirets peu utile)."""
+    badges = []
+    if h.get("is_experimental") == 1:
+        badges.append(("Experimental", "orange", ":material/science:"))
+    if h.get("is_organic") == 1:
+        badges.append(("Organic", "green", ":material/eco:"))
+    if h.get("is_blend") == 1:
+        badges.append(("Blend", "gray", ":material/call_merge:"))
+    if badges:
+        with st.container(horizontal=True):
+            for label, color, icon in badges:
+                st.badge(label, color=color, icon=icon)
+
+    parts = []
+    if h.get("cultivar"):
+        parts.append(f"Cultivar: {h['cultivar']}")
+    if h.get("breeder"):
+        parts.append(f"Breeder: {h['breeder']}")
+    if h.get("release_year"):
+        parts.append(f"Released: {h['release_year']}")
+    if parts:
+        st.caption(" · ".join(parts))
+    if h.get("pedigree"):
+        st.caption(f"Pedigree: {h['pedigree']}")
 
 
 def _render_key_stats(hcomp: dict) -> None:
@@ -2312,6 +2358,11 @@ def _browse(con):
         purpose, inferred = matching.resolve_purpose(h.get("purpose"), hcomp)
         _purpose_badge(purpose, inferred)
         st.caption(f"Region: {h['region'] or 'unknown'}")
+        # T106 : identité (cultivar/breeder/release_year/pedigree, badges
+        # experimental/organic/blend) -- "juste sous le nom du houblon, avant
+        # les key stats" (ticket), placée après purpose/region qui ont une
+        # exigence utilisateur antérieure et plus forte d'être EN PREMIER.
+        _render_hop_identity(h)
         # Alpha/beta acids, co-humulone, total oil : demande utilisateur explicite
         # (2026-08-19), "il manque un élément principal : les infos les plus
         # importantes de yakima" -- voir `_render_key_stats`.

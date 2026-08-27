@@ -48,7 +48,7 @@ def _build_toy_db(path):
     for v, desc in (("hopa", ["citrus", "woody"]), ("hopb", ["floral"]), ("hopc", ["resinous"]),
                     ("twina", []), ("twinb", [])):
         name, region = custom_name_region.get(v, (v.title(), "test"))
-        con.execute("INSERT INTO hops VALUES (?,?,?,?,?)",
+        con.execute("INSERT INTO hops (variety, name, region, sources, purpose) VALUES (?,?,?,?,?)",
                     (v, name, region, "toy", purpose[v]))
         for d in desc:
             con.execute("INSERT INTO hop_descriptors VALUES (?,?,?)", (v, d, "toy"))
@@ -112,6 +112,15 @@ def _build_toy_db(path):
     ]
     con.executemany(
         f"INSERT INTO beer_styles VALUES ({','.join(':' + c for c in style_cols)})", style_rows)
+    # T106 : métadonnées d'identité -- hopa porte tout (cultivar/breeder/
+    # release_year/pedigree + is_experimental=1), hopb seulement is_organic=1,
+    # hopc rien du tout (teste l'omission silencieuse de la ligne entière,
+    # pas de "—", voir app._render_hop_identity).
+    con.execute(
+        "UPDATE hops SET cultivar=?, breeder=?, release_year=?, pedigree=?, is_experimental=1 "
+        "WHERE variety='hopa'",
+        ("HBC 999", "Toy Breeding Co.", 2020, "Cross between Toya and Toyb."))
+    con.execute("UPDATE hops SET is_organic=1 WHERE variety='hopb'")
     con.commit()
     con.close()
 
@@ -578,6 +587,44 @@ def test_browse_shows_purpose_badge_as_top_info(toy_cwd):
     at.selectbox[0].set_value("hopa").run()
     assert not at.exception
     assert any("-badge[" in m.value and "Aromatic" in m.value for m in at.markdown)
+
+def test_browse_shows_hop_identity_metadata_and_badges(toy_cwd):
+    # T106 : cultivar/breeder/release_year/pedigree en ligne de texte,
+    # badge "Experimental" (is_experimental=1, voir _build_toy_db).
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("browse").run()
+    at.selectbox[0].set_value("hopa").run()
+    assert not at.exception
+    assert any("-badge[" in m.value and "Experimental" in m.value for m in at.markdown)
+    assert any("HBC 999" in c.value and "Toy Breeding Co." in c.value and "2020" in c.value
+              for c in at.caption)
+    assert any("Cross between Toya and Toyb." in c.value for c in at.caption)
+
+def test_browse_hop_identity_badge_matches_boolean_flag(toy_cwd):
+    # hopb : is_organic=1 seulement -- badge "Organic", jamais "Experimental"/"Blend".
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("browse").run()
+    at.selectbox[0].set_value("hopb").run()
+    assert not at.exception
+    assert any("-badge[" in m.value and "Organic" in m.value for m in at.markdown)
+    assert not any("-badge[" in m.value and "Experimental" in m.value for m in at.markdown)
+
+def test_browse_hop_identity_omits_line_entirely_when_absent(toy_cwd):
+    # hopc : aucune métadonnée d'identité -- pas de ligne "—" fabriquée,
+    # la ligne cultivar/breeder/année disparaît silencieusement (demande
+    # explicite du ticket T106, contrairement au reste de la GUI).
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("browse").run()
+    at.selectbox[0].set_value("hopc").run()
+    assert not at.exception
+    assert not any("Cultivar:" in c.value or "Breeder:" in c.value or "Pedigree:" in c.value
+                  for c in at.caption)
+    assert not any("-badge[" in m.value and
+                  ("Experimental" in m.value or "Organic" in m.value or "Blend" in m.value)
+                  for m in at.markdown)
 
 def test_browse_mode_lists_all_hops_without_a_search_box(toy_cwd):
     # Champ de recherche texte libre retiré (2026-08-24, retour utilisateur
