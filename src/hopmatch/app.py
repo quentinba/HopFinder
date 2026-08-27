@@ -193,6 +193,11 @@ _TOOL_SUMMARY_BY_MODE = {t["mode"]: t for t in _TOOL_SUMMARIES}
 # un `git log` en direct exigerait aussi que `.git` soit présent dans le
 # conteneur déployé, ce qui n'est pas garanti.
 _RECENT_UPDATES = [
+    ("2026-08-27", "Browse a hop now shows a fourth association block: "
+                   "editorial beer-style suggestions from Yakima and "
+                   "BeerMaverick (e.g. \"American Pale Ale (18B)\"), grouped "
+                   "by source and clearly marked as an editorial suggestion, "
+                   "not a measured recipe frequency."),
     ("2026-08-27", "New \"Beer styles\" tool: browse any BJCP 2021 style "
                    "(110 of them) by category then name, see its official "
                    "vital statistics (ABV/IBU/OG/FG/color) as a range plus "
@@ -2514,6 +2519,27 @@ def _hop_associations(con, hops: dict, selected: str) -> None:
             hops[s["variety"]]["name"] if s["variety"] in hops else s["name"] for s in subs))
     else:
         st.caption("No BeerMaverick data for this variety.")
+
+    # T83 (2026-08-27, priorité utilisateur explicite "super important") :
+    # QUATRIÈME relation, grouped par source comme les descripteurs
+    # (`_descriptors_grouped_by_source`) -- Yakima et BeerMaverick ne sont
+    # JAMAIS fusionnés (même règle que les 3 relations ci-dessus). Réserve
+    # systématique : suggestion éditoriale d'un producteur/agrégateur, PAS
+    # une fréquence mesurée en recettes réelles (ça, c'est l'épique B à
+    # venir, `style_hop_usage`/beer-analytics — à ne pas confondre).
+    styles = matching.hop_beer_styles(con, selected)
+    st.write("**Beer styles (editorial suggestion — Yakima/BeerMaverick, "
+             "not a measured recipe frequency)**")
+    if styles:
+        _SOURCE_LABELS = {"yakima": "Yakima", "beermaverick": "BeerMaverick"}
+        by_source: dict[str, list[str]] = {}
+        for s in styles:
+            label = f"{s['label']} ({s['style_id']})" if s["style_id"] else s["label"]
+            by_source.setdefault(_SOURCE_LABELS.get(s["source"], s["source"]), []).append(label)
+        st.markdown("  \n".join(f"**{src}:** " + ", ".join(labels)
+                                for src, labels in by_source.items()))
+    else:
+        st.caption("No editorial style suggestion for this variety.")
 
 
 _MAX_HEATMAP_HOPS = 12

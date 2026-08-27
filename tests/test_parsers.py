@@ -530,6 +530,25 @@ def test_parse_beermaverick_purpose():
 def test_parse_beermaverick_purpose_absent_returns_none():
     assert parsers.parse_beermaverick_purpose("<p>rien ici</p>") is None
 
+def test_parse_beermaverick_styles():
+    # T83 : gabarit trimmé d'une vraie page beermaverick.com/hop/citra/
+    # (vérifié en direct, 2026-08-27). "Pale Ales" au PLURIEL (pas "Pale
+    # Ale") -- une vraie variation d'écriture de BeerMaverick, gardée telle
+    # quelle (jamais normalisée par le parseur, voir sa docstring).
+    html = """
+    <h2>
+    Beer Styles <span class="borderme">using Citra Hops</span></span>
+    </h2>
+    <p>Some popular beer styles that make use of the Citra hop include
+    <b>American Pale Ale</b>, <b> IPA</b>, <b> Double IPA</b> & <b> Pale Ales</b>.</p>
+    """
+    assert parsers.parse_beermaverick_styles(html) == [
+        "American Pale Ale", "IPA", "Double IPA", "Pale Ales",
+    ]
+
+def test_parse_beermaverick_styles_absent_returns_empty():
+    assert parsers.parse_beermaverick_styles("<p>rien ici</p>") == []
+
 def test_pubchem_name_fallbacks():
     # échantillons réels : CAS non résolus par PubChem, noms Flavornet en cause
     assert parsers.pubchem_name_fallbacks("δ-cadinol") == ["δ-cadinol", "delta-cadinol"]
