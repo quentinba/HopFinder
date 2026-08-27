@@ -12,7 +12,13 @@ MAPPING CHIMIQUE COMPLET & VERIFIÉ (BARPLOT + COMPOSÉS HOPFINDER)
   - Arbre Janish    : HYDROCARBONS > Monoterpenes > myrcene
   - Unité Barplot   : ml/100g
   - Profil Sensa    : Résineux, vert, piney, poivré/herbacé, agrumes bruts.
-  - Note Brassicole : Extrêmement volatil. Évaporation rapide au boil ; apport majeur en Dry Hopping à froid.
+  - Note Brassicole : Extrêmement volatil : ~50% de perte en 10 min d'ébullition active, quasiment
+                      plus rien après un boil complet de 60 min (Scott Janish, The New IPA, chiffres
+                      relayés par l'utilisateur le 2026-08-27) -- MÊME ordre de perte que le linalol
+                      (voir plus bas), malgré des classes chimiques différentes (hydrocarbure vs
+                      alcool oxygéné) ; PAS étendu au β-pinène (même sous-classe que le myrcène mais
+                      donnée non établie pour lui). Apport majeur en Dry Hopping à froid ou en
+                      whirlpool (addition post-ébullition active, exposition moindre).
   - Sources         : The New IPA (Janish) ; OSU Hop Lab (Shellhammer).
 
 • Humulene (α-humulene)
@@ -57,7 +63,15 @@ MAPPING CHIMIQUE COMPLET & VERIFIÉ (BARPLOT + COMPOSÉS HOPFINDER)
   - Arbre Janish    : OXYGEN CONTAINING > Monoterpenes Alcohols > linalool
   - Unité Barplot   : ml/100g
   - Profil Sensa    : Floral (lavande/bergamote), agrumes denses, myrtille.
-  - Note Brassicole : Excellent marqueur d'intensité aromatique. Soluble et très résistant à l'ébullition/fermentation ("survivable").
+  - Note Brassicole : [CORRIGÉ le 2026-08-27 -- l'entrée précédente affirmait à tort une résistance
+                      générale à l'ébullition, signalé par l'utilisateur.] Excellent marqueur
+                      d'intensité aromatique, mais N'EST PAS résistant à l'ébullition : Scott Janish
+                      (The New IPA) documente le MÊME ordre de perte que le myrcène (~50% à 10 min,
+                      quasi totale à 60 min). Ce qui le rend "survivable" (recherche Yakima Chief) est
+                      plus étroit qu'une résistance générale à la chaleur : ajouté au whirlpool/
+                      knockout (après l'ébullition active, exposition moindre), une part significative
+                      passe dans le fermenteur -- d'où la recommandation d'addition tardive plutôt
+                      qu'en début d'ébullition.
   - Sources         : The New IPA (Janish) ; Journal of Inst. of Brewing.
 
 • Geraniol (Géraniol)
@@ -65,8 +79,17 @@ MAPPING CHIMIQUE COMPLET & VERIFIÉ (BARPLOT + COMPOSÉS HOPFINDER)
   - Arbre Janish    : OXYGEN CONTAINING > Monoterpenes Alcohols > geraniol
   - Unité Barplot   : ml/100g
   - Profil Sensa    : Floral, rose, géranium, fruits doux.
-  - Note Brassicole : Molécule clé de la biotransformation : convertie par la levure pendant la fermentation en β-citronellol (arôme citron vert/agrumes).
-  - Sources         : Takoi et al. (2010, 2014) ; YCH Survivables Research.
+  - Note Brassicole : [AJOUTÉ le 2026-08-27, relayé par l'utilisateur depuis Scott Janish, The New
+                      IPA.] Contrairement au linalol (même sous-classe chimique, "Monoterpene
+                      alcohols"), le géraniol a un point d'ébullition plus élevé et résiste mieux à
+                      l'ébullition du moût : sa concentration diminue progressivement sur un boil
+                      complet mais reste mesurable à 60 min -- comportement de résistance thermique
+                      proche de celui de l'humulène/caryophyllène/farnésène (hydrocarbures
+                      sesquiterpéniques, mécanisme chimique différent -- oxydation vs simple
+                      persistance -- mais résistance relative comparable). Molécule clé de la
+                      biotransformation par ailleurs : convertie par la levure pendant la
+                      fermentation en β-citronellol (arôme citron vert/agrumes).
+  - Sources         : Takoi et al. (2010, 2014) ; YCH Survivables Research ; The New IPA (Janish).
 
 [!] ATTENTION HOMONYMIE — "2-MIB" désigne DEUX molécules sans rapport
     (corrigé le 2026-08-27, l'entrée d'origine confondait les deux) :
