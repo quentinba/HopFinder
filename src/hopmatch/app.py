@@ -201,7 +201,8 @@ _RECENT_UPDATES = [
                    "commercial examples. Two independent unit toggles at "
                    "the top let you pick EBC or SRM for color and °Plato "
                    "or SG for density, so any combination works (e.g. SRM "
-                   "with °Plato)."),
+                   "with °Plato). Each range bar also shows its low/high "
+                   "value written right at its two ends."),
     ("2026-08-27", "Compare Hops' detailed composition chart now shows each "
                    "compound's chemical category (Hydrocarbons/Oxygen "
                    "containing/Sulfur compounds, and the finer Monoterpenes/"
@@ -747,12 +748,20 @@ div[class*="st-key-panel_"], details[class*="st-key-panel_"] {
    remplissage soit une teinte sage neutre (ABV/IBU/OG/FG), soit la couleur
    SRM réelle calculée en Python (`_srm_color`, posée en inline `style=`
    par appel -- ce n'est PAS une mesure fixe comme le reste de la palette
-   Organic, voir sa docstring). */
+   Organic, voir sa docstring). `.hf-range-wrap` (retour utilisateur en
+   direct, même jour : les bornes min/max doivent aussi apparaître ÉCRITES
+   au-dessus de chaque extrémité de la portion colorée, pas seulement dans
+   `st.metric` à gauche) réserve la place au-dessus de la piste pour ces 2
+   étiquettes -- `padding-top` plutôt qu'une hauteur fixe, la piste garde sa
+   position naturelle en dessous. */
+.hf-range-wrap {
+    position: relative;
+    padding-top: 18px;
+}
 .hf-range-track {
     position: relative;
     height: 6px;
     border-radius: 3px;
-    margin-top: 6px;
     background-color: light-dark(#dcd3c4, #474238);
 }
 .hf-range-fill {
@@ -761,6 +770,28 @@ div[class*="st-key-panel_"], details[class*="st-key-panel_"] {
     bottom: 0;
     border-radius: 3px;
 }
+/* Étiquette de borne -- ancrée à l'extrémité correspondante de la piste
+   (`left: N%`). Chaque étiquette grandit VERS L'EXTÉRIEUR du segment coloré
+   -- `translateX(-100%)` (le texte finit pile à l'ancre, donc s'étend vers
+   la GAUCHE) pour la borne min, `translateX(0)` (le texte commence pile à
+   l'ancre, s'étend vers la DROITE) pour la borne max (2026-08-27, retour
+   utilisateur en direct : une fourchette étroite faisait chevaucher les
+   deux étiquettes quand chacune grandissait vers l'INTÉRIEUR l'une vers
+   l'autre -- "right adjust the lower end and left adjust the higher range
+   value" ; les grandir vers l'extérieur au contraire les écarte TOUJOURS,
+   quelle que soit l'étroitesse du segment, sans jamais les faire se
+   chevaucher). `translateX(-50%)` (centré) écarté : ferait déborder
+   l'étiquette côté extérieur sur les valeurs proches de 0%/100% du
+   domaine. */
+.hf-range-label {
+    position: absolute;
+    top: 0;
+    font-size: 0.75rem;
+    color: light-dark(#56633f, #aebf92);
+    white-space: nowrap;
+}
+.hf-range-label-min { transform: translateX(-100%); }
+.hf-range-label-max { transform: translateX(0); }
 /* T82 -- voir le commentaire sur `hf_vital_stats` dans `app._styles` :
    police de `st.metric` réduite UNIQUEMENT dans ce conteneur (5 fourchettes
    min-max côte à côte tronquaient à la taille par défaut), jamais les
@@ -4643,7 +4674,7 @@ def _srm_color(srm: float | None) -> str:
 
 
 def _range_bar_html(vmin: float, vmax: float, domain: tuple[float, float],
-                    color: str | None = None) -> str:
+                    min_text: str, max_text: str, color: str | None = None) -> str:
     """Barre `[vmin, vmax]` positionnée dans `domain` (borne fixe par
     critère -- voir `_VITAL_STAT_SPECS` -- PAS auto-zoomée sur ce seul
     style : une fourchette étroite au milieu d'un critère large doit se
@@ -4651,7 +4682,14 @@ def _range_bar_html(vmin: float, vmax: float, domain: tuple[float, float],
     teinte sage neutre par défaut (`.hf-range-fill` en CSS), ou la couleur
     SRM réelle calculée par l'appelant pour ce seul critère (T82,
     `_srm_color`). Largeur plancher (`max(..., 1.0)`) : une fourchette nulle
-    ou très étroite (ex. IBU 0-0) resterait invisible sinon."""
+    ou très étroite (ex. IBU 0-0) resterait invisible sinon.
+
+    `min_text`/`max_text` (2026-08-27, retour utilisateur en direct : les
+    bornes doivent aussi être écrites au-dessus de chaque extrémité de la
+    portion colorée, pas seulement dans `st.metric` à gauche) -- déjà
+    formatées par l'appelant (même `fmt` que la valeur `st.metric`, jamais
+    reformatées ici séparément, pour ne jamais afficher deux précisions
+    différentes pour la même valeur)."""
     dmin, dmax = domain
     span = dmax - dmin
     left = max(0.0, min(100.0, (vmin - dmin) / span * 100))
@@ -4662,7 +4700,12 @@ def _range_bar_html(vmin: float, vmax: float, domain: tuple[float, float],
         style += f" background-color:{color};"
     else:
         style += " background-color: light-dark(#7f9455, #aebf92);"
-    return f'<div class="hf-range-track"><div class="hf-range-fill" style="{style}"></div></div>'
+    return (
+        '<div class="hf-range-wrap">'
+        f'<span class="hf-range-label hf-range-label-min" style="left:{left:.2f}%;">{min_text}</span>'
+        f'<span class="hf-range-label hf-range-label-max" style="left:{right:.2f}%;">{max_text}</span>'
+        f'<div class="hf-range-track"><div class="hf-range-fill" style="{style}"></div></div>'
+        '</div>')
 
 
 # (label, colonne min, colonne max, formateur, domaine fixe d'affichage)
@@ -4746,7 +4789,7 @@ def _vital_stat_row(row, use_ebc: bool, use_plato: bool) -> None:
             st.metric(label, f"{fmt(vmin)}–{fmt(vmax)}" if vmin is not None else "—")
         with bar_col:
             if vmin is not None and vmax is not None:
-                st.html(_range_bar_html(vmin, vmax, domain,
+                st.html(_range_bar_html(vmin, vmax, domain, fmt(vmin), fmt(vmax),
                                         color=_srm_color(srm_mid) if srm_mid is not None else None))
     if not has_vitals:
         st.caption(

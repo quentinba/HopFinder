@@ -461,6 +461,17 @@ Elles sont écrites pour qu'aucune décision implicite ne reste à deviner.
   - **Bug upstream trouvé sur X2 pendant la construction de cette page**
     (`og_min`/`fg_min` = 1055/1008 au lieu de 1.055/1.008) : voir
     l'addendum sous T81 — corrigé dans le parseur, pas ici.
+  - **Ajout supplémentaire, demande utilisateur explicite** : les bornes
+    min/max écrites au-dessus de chaque extrémité de la barre de range
+    (pas seulement dans `st.metric` à gauche). Bug trouvé en vérification
+    live : les deux étiquettes grandissant chacune VERS L'INTÉRIEUR (min
+    vers la droite, max vers la gauche) se chevauchaient sur toute
+    fourchette étroite par rapport à son domaine (ABV 2.8–4.2 % sur un
+    domaine 0–15 %, entre autres) — corrigé en les faisant grandir VERS
+    L'EXTÉRIEUR à la place (`translateX(-100%)` sur la borne min,
+    `translateX(0)` sur la max) : elles s'écartent alors toujours l'une de
+    l'autre, quelle que soit l'étroitesse du segment, sans jamais se
+    chevaucher.
 
   **Dépend de T81.** Nouvelle entrée dans `app.MODE_LABELS` :
   `"styles": "Beer styles"`.
