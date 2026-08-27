@@ -1,5 +1,6 @@
 import copy
 import json
+import os
 from pathlib import Path
 
 import pandas as pd
@@ -554,3 +555,23 @@ def test_ingest_beer_styles_creates_table_without_wiping_existing_data(tmp_path,
     con.close()
     assert hops == ["citra"]  # pas vidé par un init_db caché
     assert n_styles == 3
+
+
+def test_beer_style_aliases_yaml_values_exist_in_real_bjcp_styles():
+    # T84 : garde-fou de non-régression pour data/mappings/beer_style_
+    # aliases.yaml -- toute valeur non-null doit être un style_id RÉEL de
+    # beer_styles (jamais un id inventé/mal recopié à la main). Même
+    # principe que test_ingredient_descriptors_keys_and_terms_match_real_
+    # vocabulary : vérifié contre la base réelle (aromahops.db) si
+    # présente, aucun appel réseau.
+    mapping = ingest._load_yaml_mapping("beer_style_aliases.yaml")
+    assert mapping, "le fichier ne doit jamais être vide"
+    db_path = os.path.join(os.path.dirname(__file__), "..", "aromahops.db")
+    if not os.path.exists(db_path):
+        return
+    con = connect(db_path)
+    real_style_ids = {r[0] for r in con.execute("SELECT DISTINCT style_id FROM beer_styles")}
+    con.close()
+    for label, style_id in mapping.items():
+        if style_id is not None:
+            assert style_id in real_style_ids, (label, style_id)

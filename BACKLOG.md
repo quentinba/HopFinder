@@ -537,7 +537,26 @@ Elles sont écrites pour qu'aucune décision implicite ne reste à deviner.
   **Vérification réelle** : après `crawl-yakima`,
   `SELECT count(DISTINCT variety) FROM hop_beer_styles` ≈ **144**.
 
-- [ ] **T84 — Réconciliation `style_label` → `style_id` BJCP**
+- [x] **T84 — Réconciliation `style_label` → `style_id` BJCP**
+
+  **Compte rendu (2026-08-27)** : les 47 étiquettes réelles ont été
+  récupérées en direct depuis l'API Algolia Yakima (144/153 houblons, exact
+  match avec les chiffres du ticket) — 15 candidats proposés (9 haute
+  confiance par correspondance exacte de nom BJCP, 6 confiance moyenne),
+  **revus et confirmés par l'utilisateur avant écriture** (pas d'auto-génération
+  silencieuse, conforme à la règle du ticket). Une correction trouvée à
+  l'exemple du ticket lui-même : `"NEIPA": "21B"` (Specialty IPA) était
+  l'exemple donné, mais les données BJCP 2021 réellement ingérées (T81)
+  montrent que 21C est "Hazy IPA" — BJCP a renommé New England IPA en Hazy
+  IPA sous 21C, 21B reste le catch-all générique "Specialty IPA". Utilisé
+  `21C`, pas l'exemple du ticket. 32 étiquettes restent `null` (aucune
+  correspondance BJCP défendable) — dont les 4 explicitement citées par
+  T83 (`All Styles`, `Ale`, `Amber`, `Imperial Ale`).
+  Usage #2 (chaînes de style allemandes, T91) pas encore ajouté au fichier
+  — T91 (ingestion MMuM) n'a pas encore tourné, rien à réconcilier pour
+  l'instant ; même fichier à compléter quand T91/T92 arriveront.
+  Garde-fou testé contre la vraie table `beer_styles` (110 styles) :
+  `test_beer_style_aliases_yaml_values_exist_in_real_bjcp_styles`.
 
   **Fichier** : `data/mappings/beer_style_aliases.yaml`, même forme que
   `barthhaas_aroma_wheel_categories.yaml`. Structure :
