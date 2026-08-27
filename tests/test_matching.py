@@ -715,9 +715,9 @@ def _build_intensity_db(tmp_path):
     de leur propre petite base plutôt que du fixture `db` partagé du module."""
     con = connect(str(tmp_path / "intensity.db"))
     init_db(con)
-    con.execute("INSERT INTO hops VALUES (?,?,?,?,?)", ("high", "High", "test", "toy", None))
-    con.execute("INSERT INTO hops VALUES (?,?,?,?,?)", ("low", "Low", "test", "toy", None))
-    con.execute("INSERT INTO hops VALUES (?,?,?,?,?)", ("nodata", "NoData", "test", "toy", None))
+    con.execute("INSERT INTO hops (variety, name, region, sources, purpose) VALUES (?,?,?,?,?)", ("high", "High", "test", "toy", None))
+    con.execute("INSERT INTO hops (variety, name, region, sources, purpose) VALUES (?,?,?,?,?)", ("low", "Low", "test", "toy", None))
+    con.execute("INSERT INTO hops (variety, name, region, sources, purpose) VALUES (?,?,?,?,?)", ("nodata", "NoData", "test", "toy", None))
     for v in ("high", "low", "nodata"):
         con.execute("INSERT INTO hop_descriptors VALUES (?,?,?)", (v, "citrus", "toy"))
     con.executemany("INSERT INTO hop_aroma_intensity VALUES (?,?,?,?)", [
@@ -782,7 +782,7 @@ def test_by_descriptor_text_descriptor_is_the_only_categorical_filter(tmp_path):
     # selected". Désormais : `wheel_descriptors` ne filtre JAMAIS quand un
     # descripteur texte est fourni, seul `selected` (texte) filtre.
     con = _build_intensity_db(tmp_path)  # high/low/nodata portent tous "citrus"
-    con.execute("INSERT INTO hops VALUES (?,?,?,?,?)", ("papaya-hop", "PapayaHop", "test", "toy", None))
+    con.execute("INSERT INTO hops (variety, name, region, sources, purpose) VALUES (?,?,?,?,?)", ("papaya-hop", "PapayaHop", "test", "toy", None))
     con.execute("INSERT INTO hop_descriptors VALUES (?,?,?)", ("papaya-hop", "papaya", "toy"))
     con.commit()
     r = matching.by_descriptor(con, ["papaya"], wheel_descriptors=["citrus", "tropical", "floral"])["ranked"]

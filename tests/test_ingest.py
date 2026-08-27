@@ -74,7 +74,7 @@ def test_fix_barthhaas_trademark_slug_missing_h1_leaves_slug_unchanged():
 def test_resolve_hop_variety_matches_by_variety_or_name(tmp_path):
     con = connect(str(tmp_path / "t.db"))
     init_db(con)
-    con.execute("INSERT INTO hops VALUES (?,?,?,?,?)",
+    con.execute("INSERT INTO hops (variety, name, region, sources, purpose) VALUES (?,?,?,?,?)",
                ("mosaic-brand", "Mosaic® Brand", "United States", "yakima", None))
     con.commit()
     index = ingest._build_hop_name_index(con)
@@ -540,7 +540,7 @@ def test_ingest_beer_styles_creates_table_without_wiping_existing_data(tmp_path,
     db_path = tmp_path / "test.db"
     con = connect(str(db_path))
     init_db(con)
-    con.execute("INSERT INTO hops VALUES ('citra', 'Citra', 'United States', 'yakima', NULL)")
+    con.execute("INSERT INTO hops (variety, name, region, sources, purpose) VALUES ('citra', 'Citra', 'United States', 'yakima', NULL)")
     con.execute("DROP TABLE beer_styles")
     con.commit(); con.close()
 
@@ -621,7 +621,7 @@ def test_write_hop_beer_styles_creates_table_without_wiping_existing_data(tmp_pa
     # hops/hop_composition/etc.).
     con = connect(str(tmp_path / "t.db"))
     init_db(con)
-    con.execute("INSERT INTO hops VALUES ('citra', 'Citra', 'United States', 'yakima', NULL)")
+    con.execute("INSERT INTO hops (variety, name, region, sources, purpose) VALUES ('citra', 'Citra', 'United States', 'yakima', NULL)")
     con.execute("DROP TABLE hop_beer_styles")
     con.commit(); con.close()
 
@@ -633,3 +633,85 @@ def test_write_hop_beer_styles_creates_table_without_wiping_existing_data(tmp_pa
     hops = [r[0] for r in con.execute("SELECT variety FROM hops")]
     con.close()
     assert hops == ["citra"]
+
+
+# --------------------------------------------------------------------------- #
+# T106 -- métadonnées d'identité (cultivar/breeder/release_year/pedigree/
+# is_experimental/is_organic/is_blend)
+# --------------------------------------------------------------------------- #
+
+def test_ensure_columns_creates_hops_identity_columns_without_wiping_existing_data(tmp_path):
+    # même piège que ensure_table (T81), mais pour des COLONNES ajoutées à
+    # une table qui existe déjà -- une base réelle construite avant T106 n'a
+    # pas encore cultivar/breeder/etc.
+    from hopmatch.schema import ensure_columns, HOP_IDENTITY_COLUMNS
+    con = connect(str(tmp_path / "t.db"))
+    con.execute("CREATE TABLE hops (variety TEXT PRIMARY KEY, name TEXT, region TEXT, sources TEXT, purpose TEXT)")
+    con.execute("INSERT INTO hops (variety, name, region, sources, purpose) VALUES ('citra', 'Citra', 'United States', 'yakima', NULL)")
+    con.commit()
+
+    ensure_columns(con, "hops", HOP_IDENTITY_COLUMNS)
+    con.commit()
+    cols = {r["name"] for r in con.execute("PRAGMA table_info(hops)")}
+    assert cols >= {"cultivar", "breeder", "release_year", "pedigree",
+                    "is_experimental", "is_organic", "is_blend"}
+    row = con.execute("SELECT variety, name, cultivar FROM hops WHERE variety='citra'").fetchone()
+    con.close()
+    assert row["name"] == "Citra"
+    assert row["cultivar"] is None
+
+    # idempotent : un second appel ne doit pas lever (colonnes déjà présentes)
+    con = connect(str(tmp_path / "t.db"))
+    ensure_columns(con, "hops", HOP_IDENTITY_COLUMNS)
+    con.close()
+
+
+def test_bool_to_sqlite_never_defaults_missing_to_zero():
+    # jamais 0 par défaut pour une donnée absente -- affirmerait à tort
+    # "non expérimental"/"non bio"/"pas un blend".
+    assert ingest._bool_to_sqlite(True) == 1
+    assert ingest._bool_to_sqlite(False) == 0
+    assert ingest._bool_to_sqlite(None) is None
+
+
+def test_cultivar_base_name_strips_brand_suffix_but_not_real_hyphen():
+    assert ingest._cultivar_base_name("Kohatu - NZ Hops") == "Kohatu"
+    assert ingest._cultivar_base_name("Motueka - MacHops") == "Motueka"
+    assert ingest._cultivar_base_name("Pacifica (Marque Déposée) - MacHops") == "Pacifica"
+    # trait d'union sans espace autour -> partie du nom réel, jamais coupé
+    assert ingest._cultivar_base_name("Wai-iti - NZ Hops") == "Wai-iti"
+    assert ingest._cultivar_base_name("Amarillo") == "Amarillo"
+
+
+def test_write_hop_identity_applies_to_sibling_variety_rows_sharing_cultivar(tmp_path):
+    # bug réel trouvé en vérifiant T106 en direct : deux crops distincts du
+    # même cultivar (ex. Amarillo US vs Amarillo Germany) partagent le même
+    # `name` mais sont deux lignes `hops` séparées -- seule UNE des deux est
+    # résolue depuis la page BeerMaverick source (l'autre doit recevoir la
+    # même généalogie, pas rester NULL par accident d'ordre de crawl).
+    from hopmatch.schema import ensure_columns, HOP_IDENTITY_COLUMNS
+    con = connect(str(tmp_path / "t.db"))
+    con.execute("CREATE TABLE hops (variety TEXT PRIMARY KEY, name TEXT, region TEXT, sources TEXT, purpose TEXT)")
+    ensure_columns(con, "hops", HOP_IDENTITY_COLUMNS)
+    con.execute("INSERT INTO hops (variety, name, region, sources) VALUES "
+               "('amarillo', 'Amarillo', 'United States', 'barthhaas,yakima')")
+    con.execute("INSERT INTO hops (variety, name, region, sources) VALUES "
+               "('amarillo-brand-ama04', 'Amarillo', 'Germany', 'yakima')")
+    con.execute("INSERT INTO hops (variety, name, region, sources) VALUES "
+               "('citra', 'Citra', 'United States', 'yakima')")
+    con.commit()
+
+    mapping = {"Amarillo": {"breeder": "Virgil Gamache Farms", "pedigree": "Discovered 1990"}}
+    n = ingest._write_hop_identity(con, mapping)
+    con.commit()
+    rows = {r["variety"]: dict(r) for r in con.execute("SELECT * FROM hops")}
+    con.close()
+
+    assert n == 2
+    assert rows["amarillo"]["breeder"] == "Virgil Gamache Farms"
+    assert rows["amarillo-brand-ama04"]["breeder"] == "Virgil Gamache Farms"
+    assert rows["amarillo"]["pedigree"] == "Discovered 1990"
+    # release_year absent du mapping (jamais deviné) -> NULL, pas 0/fabriqué
+    assert rows["amarillo"]["release_year"] is None
+    # variété sans entrée dans le mapping -> colonnes inchangées (NULL)
+    assert rows["citra"]["breeder"] is None

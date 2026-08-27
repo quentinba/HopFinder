@@ -26,7 +26,7 @@ def db_path():
                     [("molx", "x", None, None), ("moly", "y", None, None)])
     purpose = {"hopa": "aromatic", "hopb": "bittering"}
     for v, desc in (("hopa", ["citrus", "woody"]), ("hopb", ["floral"])):
-        con.execute("INSERT INTO hops VALUES (?,?,?,?,?)",
+        con.execute("INSERT INTO hops (variety, name, region, sources, purpose) VALUES (?,?,?,?,?)",
                     (v, v.title(), "test", "toy", purpose[v]))
         for d in desc:
             con.execute("INSERT INTO hop_descriptors VALUES (?,?,?)", (v, d, "toy"))

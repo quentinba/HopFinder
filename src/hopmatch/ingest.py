@@ -30,8 +30,8 @@ import re
 import sqlite3
 
 from . import parsers, reference
-from .schema import (init_db, validate_and_repair, DROP_COMPOUNDS, ensure_table,
-                     BEER_STYLES_SCHEMA, HOP_BEER_STYLES_SCHEMA)
+from .schema import (init_db, validate_and_repair, DROP_COMPOUNDS, ensure_table, ensure_columns,
+                     BEER_STYLES_SCHEMA, HOP_BEER_STYLES_SCHEMA, HOP_IDENTITY_COLUMNS)
 
 MAPPINGS_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "data", "mappings")
 
@@ -92,7 +92,9 @@ def _ingest_variety(con, variety, name, region, comp, descriptors, source, repai
     else:
         # purpose=NULL à la création : seul ingest_beermaverick le renseigne
         # (via UPDATE, après coup) -- aucune autre source ne l'a.
-        con.execute("INSERT INTO hops VALUES (?,?,?,?,?)", (variety, name, region, source, None))
+        con.execute(
+            "INSERT INTO hops (variety, name, region, sources, purpose) VALUES (?,?,?,?,?)",
+            (variety, name, region, source, None))
 
     for compound, (vmin, vmax, unit) in comp.items():
         con.execute("INSERT OR REPLACE INTO hop_composition VALUES (?,?,?,?,?,?,?,?)",
@@ -617,6 +619,13 @@ def _write_hop_beer_styles(con: sqlite3.Connection, variety: str, labels: list[s
 # --------------------------------------------------------------------------- #
 # Crawl Yakima Chief (réseau réel) — via Algolia, pas de HTML/checkpoint
 # --------------------------------------------------------------------------- #
+def _bool_to_sqlite(value) -> int | None:
+    """bool Python -> 0/1 SQLite, `None` inchangé (T106) -- jamais de `0` par
+    défaut pour une donnée absente, qui affirmerait à tort « non
+    expérimental »/« non bio »/« pas un blend »."""
+    return None if value is None else int(bool(value))
+
+
 def crawl_yakima(out_db: str, limit: int | None = None, timeout: float = 30.0) -> None:
     """
     Yakima Chief (yakimachief.com/hop-varieties). Le site a un vrai rempart
@@ -658,6 +667,7 @@ def crawl_yakima(out_db: str, limit: int | None = None, timeout: float = 30.0) -
         init_db(con); seed_reference(con); con.commit()
     else:
         ensure_table(con, "hop_beer_styles", HOP_BEER_STYLES_SCHEMA)  # base existante : ne PAS la vider
+        ensure_columns(con, "hops", HOP_IDENTITY_COLUMNS)  # T106 : ajoute cultivar/breeder/... sans vider hops
     style_aliases = _load_yaml_mapping("beer_style_aliases.yaml")
 
     resp = requests.post(ALGOLIA_URL, params=ALGOLIA_PARAMS, json=BODY,
@@ -716,7 +726,20 @@ def crawl_yakima(out_db: str, limit: int | None = None, timeout: float = 30.0) -
         conf = _ingest_variety(con, variety, name, region, comp, descriptors, "yakima",
                                aroma_intensity=aroma_intensity)
         stats[conf] += 1
-        beer_types = (hit.get("imported_fields") or {}).get("beer_types") or []
+        # T106 : métadonnées d'identité (imported_fields.cultivar/experimental/
+        # organic/blend) -- SEULE Yakima les porte (vérifié en direct : absentes
+        # de imported_fields BarthHaas). Booléens Python -> 0/1 SQLite ; `cultivar`
+        # absent (None) pour les variétés désignées seulement par un code HBC/YCH
+        # (vérifié en direct, 4/153) -> NULL, jamais fabriqué.
+        imported = hit.get("imported_fields") or {}
+        con.execute(
+            "UPDATE hops SET cultivar=?, is_experimental=?, is_organic=?, is_blend=? WHERE variety=?",
+            (imported.get("cultivar"),
+             _bool_to_sqlite(imported.get("experimental")),
+             _bool_to_sqlite(imported.get("organic")),
+             _bool_to_sqlite(imported.get("blend")),
+             variety))
+        beer_types = imported.get("beer_types") or []
         if beer_types:
             _write_hop_beer_styles(con, variety, beer_types, "yakima", style_aliases)
         if hit.get("uid"):
@@ -739,6 +762,49 @@ def crawl_yakima(out_db: str, limit: int | None = None, timeout: float = 30.0) -
 # BeerMaverick (réseau réel, T25 backlog) — pairing/substitution
 # --------------------------------------------------------------------------- #
 _HOP_NAME_STOPWORDS_RE = re.compile(r"\b(brand|hops?|nz|us|ma)\b")
+
+
+_CULTIVAR_BASE_NAME_RE = re.compile(r" - | \(")
+
+
+def _cultivar_base_name(name: str) -> str:
+    """Nom de cultivar sans suffixe de marque/licencié (T106) -- ex. « Kohatu -
+    NZ Hops » -> « Kohatu », « Pacifica (Marque Déposée) - MacHops » ->
+    « Pacifica ». `hops` porte plusieurs lignes distinctes pour un même
+    cultivar quand il est vendu sous des crops/marques différents (ex.
+    « Amarillo » (US, barthhaas+yakima) ET « Amarillo » (Germany, yakima
+    seul) partagent le même `name` ; « Motueka - NZ Hops » et « Motueka -
+    MacHops » ne diffèrent que par le licencié Yakima) -- même généalogie,
+    donc breeder/release_year/pedigree (`data/mappings/hop_breeder_
+    pedigree.yaml`, T106) doivent s'appliquer aux DEUX lignes, pas seulement
+    à celle que `_resolve_hop_variety` a fait correspondre à la page
+    BeerMaverick source. Séparateur strict (` - `/` (`, espace obligatoire) --
+    ne coupe jamais un nom réellement composé d'un trait d'union sans espace
+    (ex. « Wai-iti », vérifié en direct : aucun faux positif sur les 203
+    variétés réelles de la base)."""
+    return _CULTIVAR_BASE_NAME_RE.split(name, maxsplit=1)[0].strip()
+
+
+def _write_hop_identity(con, breeder_pedigree: dict) -> int:
+    """T106 : applique `breeder_pedigree` ({cultivar de base: {breeder,
+    release_year, pedigree}}, curation manuelle -- voir data/mappings/hop_
+    breeder_pedigree.yaml, prose BeerMaverick trop hétérogène pour un
+    parseur fiable) à TOUTES les lignes `hops` existantes, par CULTIVAR DE
+    BASE (`_cultivar_base_name`) -- pas seulement aux variétés qu'un crawl a
+    individuellement résolues depuis une page BeerMaverick : une variété-
+    sœur (même cultivar, crop/licencié différent, ex. Motueka NZ Hops/
+    MacHops) partage la même généalogie et doit recevoir la même donnée.
+    Retourne le nombre de variétés mises à jour."""
+    n = 0
+    for row in con.execute("SELECT variety, name FROM hops"):
+        entry = breeder_pedigree.get(_cultivar_base_name(row["name"]))
+        if not entry:
+            continue
+        con.execute(
+            "UPDATE hops SET breeder=?, release_year=?, pedigree=? WHERE variety=?",
+            (entry.get("breeder"), entry.get("release_year"), entry.get("pedigree"), row["variety"]))
+        n += 1
+    return n
 
 
 def _normalize_hop_key(s: str) -> str:
@@ -909,6 +975,7 @@ def ingest_beermaverick(out_db: str, limit: int | None = None, sleep: float = 1.
         init_db(con); seed_reference(con); con.commit()
     else:
         ensure_table(con, "hop_beer_styles", HOP_BEER_STYLES_SCHEMA)  # base existante : ne PAS la vider
+        ensure_columns(con, "hops", HOP_IDENTITY_COLUMNS)  # T106 : ajoute cultivar/breeder/... sans vider hops
     style_aliases = _load_yaml_mapping("beer_style_aliases.yaml")
 
     sitemap = requests.get(f"{BASE}/beerm-sitemap.xml", timeout=timeout,
@@ -970,7 +1037,11 @@ def ingest_beermaverick(out_db: str, limit: int | None = None, sleep: float = 1.
         if i % 10 == 0:
             con.commit()
         time.sleep(sleep)
+
+    n_identity = _write_hop_identity(con, _load_yaml_mapping("hop_breeder_pedigree.yaml"))
+
     con.commit(); con.close()
+    print(f"  identité (breeder/release_year/pedigree) : {n_identity} variétés")
     print(f"  {covered} variétés couvertes ({skipped} pages sans équivalent local), "
          f"{n_pairings} pairings, {n_subs} substitutions, {n_tags} descripteurs, "
          f"{n_purpose} purpose (aromatic/bittering/both), {n_styles} style labels.")

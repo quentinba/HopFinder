@@ -8,8 +8,18 @@ SCHEMA = """
 -- parsers.parse_beermaverick_purpose) ; ni BarthHaas ni Yakima n'ont ce champ.
 -- NULL = variété non couverte par BeerMaverick (jamais déduit de l'alpha acide
 -- ou d'un autre proxy -- ce serait fabriquer une donnée, voir CLAUDE.md).
+-- Métadonnées d'identité (T106) : cultivar/breeder/release_year/pedigree en
+-- texte libre (sourcées Yakima pour cultivar, curation manuelle pour
+-- breeder/release_year/pedigree -- voir data/mappings/hop_breeder_
+-- pedigree.yaml, prose BeerMaverick trop hétérogène pour un parseur fiable).
+-- is_experimental/is_organic/is_blend : booléens Yakima (imported_fields.
+-- experimental/organic/blend) en 0/1, NULL si la variété n'est pas couverte
+-- par Yakima -- jamais 0 par défaut (affirmerait "non expérimental" sans
+-- preuve).
 CREATE TABLE hops (
-    variety TEXT PRIMARY KEY, name TEXT, region TEXT, sources TEXT, purpose TEXT
+    variety TEXT PRIMARY KEY, name TEXT, region TEXT, sources TEXT, purpose TEXT,
+    cultivar TEXT, breeder TEXT, release_year INTEGER, pedigree TEXT,
+    is_experimental INTEGER, is_organic INTEGER, is_blend INTEGER
 );
 CREATE TABLE hop_composition (
     variety TEXT, compound TEXT, vmin REAL, vmax REAL, unit TEXT, source TEXT,
@@ -171,6 +181,33 @@ def ensure_table(con: sqlite3.Connection, table_name: str, create_sql: str) -> N
         "SELECT name FROM sqlite_master WHERE name=?", (table_name,)
     ).fetchone():
         con.executescript(create_sql)
+
+
+# Colonnes T106 en dict {nom: type SQL} -- même liste que le `CREATE TABLE
+# hops` ci-dessus, PARTAGÉE avec `ensure_columns` (voir `ingest.crawl_yakima`)
+# pour qu'un rebuild complet (init_db) et une migration sur base existante
+# produisent exactement le même schéma, jamais une définition dupliquée qui
+# pourrait diverger.
+HOP_IDENTITY_COLUMNS = {
+    "cultivar": "TEXT", "breeder": "TEXT", "release_year": "INTEGER", "pedigree": "TEXT",
+    "is_experimental": "INTEGER", "is_organic": "INTEGER", "is_blend": "INTEGER",
+}
+
+
+def ensure_columns(con: sqlite3.Connection, table_name: str, columns: dict[str, str]) -> None:
+    """Ajoute à `table_name` les colonnes de `columns` ({nom: type SQL}) qui
+    n'existent pas encore, via `ALTER TABLE ... ADD COLUMN` -- pendant
+    `SANS toucher aux lignes existantes`, contrairement à `init_db` (DROP +
+    recrée TOUT). Même besoin que `ensure_table` (T81) mais pour des COLONNES
+    ajoutées à une table qui existe déjà (T106 : `hops` sur une base réelle
+    déjà peuplée). `ALTER TABLE ADD COLUMN` est pleinement supporté par
+    SQLite pour des colonnes simples sans contrainte NOT NULL/DEFAULT non
+    constant -- le ticket T106 dit « ALTER impossible » au sens de « ne pas
+    compter sur `init_db` pour ça », pas une limite réelle de SQLite."""
+    existing = {row["name"] for row in con.execute(f"PRAGMA table_info({table_name})")}
+    for name, sql_type in columns.items():
+        if name not in existing:
+            con.execute(f"ALTER TABLE {table_name} ADD COLUMN {name} {sql_type}")
 
 
 def _num(x):

@@ -549,6 +549,28 @@ def test_parse_beermaverick_styles():
 def test_parse_beermaverick_styles_absent_returns_empty():
     assert parsers.parse_beermaverick_styles("<p>rien ici</p>") == []
 
+def test_parse_beermaverick_origin():
+    # T106 : gabarit trimmé d'une vraie page beermaverick.com/hop/citra/
+    # (vérifié en direct, 2026-08-27), y compris les <br /> internes au <p>.
+    html = """
+    <h2>
+    Origin <span class="borderme">and Geneology of the Citra Hop</span>
+    </h2>
+    <p>Citra was developed by the Hop Breeding Company of Yakima, WA and
+    released to the public in 2008. <br />
+    <br />
+    Gene Probasco originally created the plant back in 1990.</p>
+    """
+    text = parsers.parse_beermaverick_origin(html)
+    assert text.startswith(
+        "Citra was developed by the Hop Breeding Company of Yakima, WA and "
+        "released to the public in 2008."
+    )
+    assert "Gene Probasco originally created the plant back in 1990." in text
+
+def test_parse_beermaverick_origin_absent_returns_none():
+    assert parsers.parse_beermaverick_origin("<p>rien ici</p>") is None
+
 def test_pubchem_name_fallbacks():
     # échantillons réels : CAS non résolus par PubChem, noms Flavornet en cause
     assert parsers.pubchem_name_fallbacks("δ-cadinol") == ["δ-cadinol", "delta-cadinol"]

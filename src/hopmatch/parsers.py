@@ -681,6 +681,33 @@ def parse_beermaverick_styles(html: str) -> list[str]:
     return _BM_STYLE_BOLD_RE.findall(m.group(1))
 
 
+_BM_ORIGIN_RE = re.compile(r"<h2>\s*Origin.*?</h2>\s*<p>(.*?)</p>", re.S)
+
+
+def parse_beermaverick_origin(html: str) -> str | None:
+    """
+    Extrait le paragraphe « Origin and Geneology of the {Hop} Hop » (sic —
+    coquille "Geneology" réelle du site, pas la nôtre) d'une page
+    beermaverick.com/hop/{slug}/ — T106, vérifié en direct sur 5 pages
+    réelles (Amarillo, Citra, Ekuanot, Mosaic, Simcoe) : titre stable, mais
+    le CONTENU est de la prose libre, phrasée différemment à chaque houblon
+    (« developed by X and released in Y », « created by X, developed by Y,
+    released through Z in Y », année parfois absente ou attachée à un brevet
+    plutôt qu'à la sortie...). Volontairement PAS de tentative d'extraction
+    structurée ici (breeder/release_year/pedigree) : un regex sur un texte
+    aussi hétérogène devinerait plus qu'il n'extrairait. Renvoie le
+    paragraphe brut (balises retirées, `<br>` -> espace), à curer à la main
+    dans `data/mappings/hop_breeder_pedigree.yaml` comme les alias T79/T84.
+    Section absente sur certaines pages -> None."""
+    m = _BM_ORIGIN_RE.search(html)
+    if not m:
+        return None
+    text = re.sub(r"<br\s*/?>", " ", m.group(1))
+    text = _STRIP_TAGS_RE.sub("", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text or None
+
+
 # T81 (2026-08-27) : 3 styles provisoires (X1, X2, X4) du JSON BJCP 2021 ont
 # des clés espagnoles/portugaises qui ont fuité à la place de leurs
 # équivalents anglais (vérifié en direct sur les 3 styles réels). Mapping

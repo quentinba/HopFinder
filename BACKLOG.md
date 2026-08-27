@@ -1288,28 +1288,64 @@ Elles sont écrites pour qu'aucune décision implicite ne reste à deviner.
 
 ## 8. Épique G — Petites reprises (rapides, indépendantes)
 
-- [ ] **T106 — Métadonnées d'identité du houblon**
+- [x] **T106 — Métadonnées d'identité du houblon**
 
-  **Tout est déjà dans des payloads que nous fetchons et jetons.**
-  Champs Algolia Yakima disponibles sur 153/153 variétés :
-  `imported_fields.cultivar` (Citra → `"HBC 394"`), `variety_id`,
-  `experimental` (bool), `organic` (bool), `blend` (bool), `country_code`.
-  Côté BeerMaverick (HTML déjà fetché par `ingest_beermaverick`) : parentage,
-  année de sortie, sélectionneur — **à vérifier dans le HTML avant de
-  promettre**, le ticket ne dit pas qu'ils y sont, il dit d'aller regarder.
+  **Compte rendu (2026-08-27)** : vérification faite AVANT d'écrire quoi que
+  ce soit, comme demandé par le ticket. Côté Yakima (Algolia), confirmé en
+  direct sur les 153 hits réels : `imported_fields.cultivar`/`experimental`/
+  `organic`/`blend` présents exactement comme décrit (booléens Python à
+  convertir en 0/1, `cultivar` absent pour 4 variétés désignées seulement par
+  un code HBC/YCH). Côté BeerMaverick, PAS de champ structuré : une section
+  « Origin and Geneology of the {Hop} Hop » existe (parsée par
+  `parsers.parse_beermaverick_origin`) mais en PROSE LIBRE, phrasée
+  différemment à chaque houblon (vérifié sur 5 pages réelles : Citra
+  « developed by X and released in Y », Simcoe « created by X, developed by
+  Y, released through Z in Y » — 3 acteurs différents —, Amarillo sans année
+  de sortie directement rattachée). Un parseur regex aurait deviné plus qu'il
+  n'aurait extrait → **question posée à l'utilisateur**, qui a choisi la
+  curation manuelle plutôt que le NULL partout ou le regex best-effort.
 
-  **Colonnes à ajouter à `hops`** (`ALTER` impossible : `init_db` recrée
-  tout — modifier le `CREATE TABLE hops` dans `schema.py`) :
-  `cultivar TEXT, breeder TEXT, release_year INTEGER, pedigree TEXT,
-  is_experimental INTEGER, is_organic INTEGER, is_blend INTEGER`.
-  Booléens SQLite en `0`/`1`, `NULL` si l'information n'existe pas —
-  **jamais `0` par défaut**, qui affirmerait « ce n'est pas expérimental »
-  alors que personne ne l'a dit.
+  **breeder/release_year/pedigree** : les 142 paragraphes BeerMaverick
+  résolus ont été lus et transcrits à la main dans
+  `data/mappings/hop_breeder_pedigree.yaml` (même esprit que `beer_style_
+  aliases.yaml`/T79 — jamais dérivé automatiquement), clé = **nom de cultivar
+  de base** (`ingest._cultivar_base_name`, suffixe de marque/licencié
+  `" - NZ Hops"`/`" - MacHops"`/`" (Marque Déposée)"` retiré). Champ absent du
+  texte source → omis, jamais deviné.
 
-  **GUI** : dans `browse`, juste sous le nom du houblon, avant les key stats.
-  Badges pour `experimental`/`organic`/`blend` (uniquement quand `1`),
-  ligne de texte pour cultivar/breeder/année/pedigree. Champs absents :
-  ne rien afficher, pas de `—`.
+  ⚠ **Bug réel trouvé en vérifiant** : `hops` porte plusieurs lignes pour un
+  même cultivar quand il est vendu sous des crops/licenciés différents (ex.
+  `amarillo` US barthhaas+yakima vs `amarillo-brand-ama04` Germany yakima
+  seul, même généalogie ; `motueka-brand-nz-hops` vs `motueka-brand-machops`,
+  même cultivar sous deux marques NZ). `_resolve_hop_variety` ne réconcilie
+  qu'UNE des deux lignes avec la page BeerMaverick source → sans correctif,
+  l'autre ligne serait restée NULL par pur accident d'ordre de crawl.
+  `ingest._write_hop_identity` applique donc le mapping par nom de cultivar
+  de base à **toutes** les lignes `hops` partageant ce nom, pas seulement à
+  la variété individuellement résolue — vérifié en direct : 152 variétés
+  mises à jour (> 142 pages BeerMaverick, grâce à cette propagation).
+
+  **Schéma** : `cultivar TEXT, breeder TEXT, release_year INTEGER,
+  pedigree TEXT, is_experimental INTEGER, is_organic INTEGER,
+  is_blend INTEGER` ajoutées à `hops` — CREATE TABLE canonique mis à jour
+  dans `schema.py` (rebuild complet) **et** `schema.ensure_columns` (nouveau,
+  même esprit que `ensure_table`/T81 mais pour des COLONNES : `ALTER TABLE
+  ... ADD COLUMN` sur une base déjà peuplée, sans DROP). Le « ALTER
+  impossible » du ticket visait `init_db` (qui recrée tout), pas une
+  limite réelle de SQLite — ALTER ADD COLUMN fonctionne pleinement pour des
+  colonnes simples sans contrainte. Booléens Yakima en 0/1 via
+  `ingest._bool_to_sqlite`, jamais `0` par défaut sur une donnée absente.
+
+  **GUI** (`app._render_hop_identity`, `browse`) : badges `Experimental`
+  (orange)/`Organic` (sage)/`Blend` (gris) uniquement quand `1`, ligne de
+  texte cultivar/breeder/année (`" · "` entre champs présents, ligne omise
+  si les trois sont absents — pas de `—`), ligne pedigree séparée. Placé
+  après purpose/region (exigence utilisateur antérieure et plus forte
+  d'être EN PREMIER) mais avant `_render_key_stats`, conforme à la lettre
+  du ticket. Vérifié en direct (Chrome, thèmes clair ET sombre) sur Admiral
+  (cultivar+breeder+année+pedigree complets), Pekko (badge Organic +
+  cultivar seul, pas de breeder), Zythos (badge Blend, breeder « Hopunion »)
+  et Luna (aucune métadonnée → bloc entier silencieusement absent).
 
 - [ ] **T107 — Description éditoriale du houblon**
 
