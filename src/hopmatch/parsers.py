@@ -705,7 +705,18 @@ def _bjcp_vital_stat_bounds(style: dict, field: str) -> tuple[float | None, floa
     base -- normal, jamais un trou de données à combler par 0). Lève une
     erreur explicite si l'unité observée diffère de `_BJCP_VITAL_STAT_UNITS`
     (ex. un jour "plato"/"ebc") plutôt que d'écrire une valeur dans la
-    mauvaise unité en silence."""
+    mauvaise unité en silence.
+
+    T82 (2026-08-27, trouvé en construisant la page GUI) : le style
+    provisoire X2 ("IPA Argenta") porte `original_gravity`/`final_gravity`
+    en `1055`/`1065`/`1008`/`1015` -- unité `"sg"` correcte, mais valeur
+    décalée d'un facteur 1000 (bug de saisie côté `beerjson/bjcp-json`
+    lui-même, la virgule décimale de la densité a été omise -- une vraie
+    densité spécifique ne dépasse jamais ~1,2). Décision utilisateur :
+    normaliser (÷1000) toute valeur `og`/`fg` **strictement supérieure à
+    10** -- seuil délibérément haut pour ne jamais toucher `abv`/`ibu`/`srm`
+    (qui dépassent légitimement 10, ex. IBU 100, ABV 14%) ni une vraie
+    densité (toujours < 2)."""
     obj = style.get(field)
     if not obj:
         return None, None
@@ -722,7 +733,10 @@ def _bjcp_vital_stat_bounds(style: dict, field: str) -> tuple[float | None, floa
                 f"BJCP {style.get('style_id')!r} : unité inattendue pour "
                 f"{field!r}.{bound} ({unit!r}, attendu {expected_unit!r}) -- "
                 f"format BeerJSON changé ? à vérifier avant d'ingérer.")
-        bounds.append(b.get("value"))
+        value = b.get("value")
+        if expected_unit == "sg" and value is not None and value > 10:
+            value = value / 1000
+        bounds.append(value)
     return tuple(bounds)
 
 
