@@ -343,6 +343,14 @@ Elles sont écrites pour qu'aucune décision implicite ne reste à deviner.
   Vérifié sur données réelles : `SELECT count(*) FROM beer_styles` → 110,
   `WHERE og_min IS NULL` → 17, `hops` intact (189, inchangé) après ingestion,
   `--year 2015` échoue explicitement avant tout appel réseau.
+  **Addendum (T82, même jour)** : le style provisoire X2 porte
+  `original_gravity`/`final_gravity` en `1055`/`1065`/`1008`/`1015` — unité
+  `"sg"` correcte mais valeur décalée d'un facteur 1000 (bug de saisie côté
+  `beerjson/bjcp-json` lui-même). Décision utilisateur : `_bjcp_vital_stat_
+  bounds` normalise (÷1000) toute valeur `og`/`fg` strictement > 10 — seuil
+  volontairement haut pour ne jamais toucher `abv`/`ibu`/`srm` (dépassent
+  légitimement 10). Réingéré, vérifié : `og_max`/`fg_max` réels plafonnent
+  maintenant à 1.13/1.04 sur toute la base (plus d'outlier à 1055).
 
   **Source** : `https://raw.githubusercontent.com/beerjson/bjcp-json/main/styles/bjcp_styleguide-2021.json`
   (525 Ko, BeerJSON 2.01). **Téléchargé à l'ingestion, jamais committé**

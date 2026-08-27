@@ -464,6 +464,32 @@ def test_parse_beerjson_styles_raises_on_unexpected_unit():
         parsers.parse_beerjson_styles(payload)
 
 
+def test_parse_beerjson_styles_normalizes_gravity_off_by_1000_bug():
+    # T82 : style réel X2 ("IPA Argenta") porte og/fg en 1055/1065/1008/1015
+    # (unité "sg" correcte, virgule décimale omise côté bjcp-json) -- décision
+    # utilisateur : normaliser (/1000) toute valeur sg > 10.
+    payload = _bjcp_fixture_payload()
+    style = next(s for s in payload["beerjson"]["styles"] if s["style_id"] == "21A")
+    style = copy.deepcopy(style)
+    style["style_id"] = "X2"
+    style["original_gravity"] = {"minimum": {"unit": "sg", "value": 1055},
+                                 "maximum": {"unit": "sg", "value": 1065}}
+    style["final_gravity"] = {"minimum": {"unit": "sg", "value": 1008},
+                              "maximum": {"unit": "sg", "value": 1015}}
+    payload = {"beerjson": {"version": payload["beerjson"]["version"], "styles": [style]}}
+    rows = parsers.parse_beerjson_styles(payload)
+    s = rows[0]
+    assert s["og_min"] == 1.055 and s["og_max"] == 1.065
+    assert s["fg_min"] == 1.008 and s["fg_max"] == 1.015
+
+
+def test_parse_beerjson_styles_leaves_plausible_gravity_values_untouched():
+    # garde-fou : une vraie densité (toujours < 2) ne doit jamais être divisée.
+    rows = {r["style_id"]: r for r in parsers.parse_beerjson_styles(_bjcp_fixture_payload())}
+    s = rows["21A"]
+    assert s["og_min"] == 1.056  # pas 0.001056
+
+
 def test_parse_beerjson_styles_maps_leaked_spanish_keys_to_english_fields():
     # X1 : style provisoire aux clés espagnoles qui ont fuité (sabor,
     # historia, ingredientes, impresion_general, aspecto, sensacion_en_boca,
