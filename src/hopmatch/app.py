@@ -2488,14 +2488,24 @@ def _similar_hops_section(con, hops: dict, comp: dict, selected: str) -> None:
 
 
 def _hop_associations(con, hops: dict, selected: str) -> None:
-    """Associations houblon<->houblon (T25 backlog) : trois relations
-    différentes, chacune affichée avec sa propre source — ne jamais les
-    présenter comme interchangeables (similarité YCH != co-usage recette
-    BeerMaverick != choix éditorial BeerMaverick)."""
+    """Associations houblon<->houblon (T25 backlog, +1 avec T83) : QUATRE
+    relations différentes, chacune affichée avec sa propre source — ne
+    jamais les présenter comme interchangeables (similarité YCH != co-usage
+    recette BeerMaverick != choix éditorial BeerMaverick substitutions !=
+    suggestion de style éditoriale Yakima/BeerMaverick). Toutes les listes
+    (hors le tableau "Frequent recipe pairings", qui porte une fréquence
+    numérique) en chips `_descriptor_chips` (2026-08-27, retour utilisateur
+    en direct : cohérence visuelle avec le bloc Descriptors juste au-dessus,
+    jamais de texte brut à côté de pilules colorées sur la même carte)."""
     similar = matching.hop_similar_varieties(con, selected)
     st.write("**Similar varieties (Yakima)**")
     if similar:
-        st.write(", ".join(hops[v]["name"] for v in similar if v in hops))
+        # `_descriptor_chips` (2026-08-27, retour utilisateur en direct :
+        # "sometimes you are using plain text but should use small tags such
+        # as in Descriptors") -- même pilule sage que les descripteurs,
+        # cohérence visuelle sur toute la carte "Database similarity and
+        # substitution" plutôt qu'un mélange texte brut/chips.
+        st.markdown(_descriptor_chips([hops[v]["name"] for v in similar if v in hops]))
     else:
         st.caption("No Yakima suggestion for this variety.")
 
@@ -2515,8 +2525,8 @@ def _hop_associations(con, hops: dict, selected: str) -> None:
     st.write("**Suggested substitutions (BeerMaverick — editorial choice "
              "of experienced brewers, not a measurement)**")
     if subs:
-        st.write(", ".join(
-            hops[s["variety"]]["name"] if s["variety"] in hops else s["name"] for s in subs))
+        st.markdown(_descriptor_chips([
+            hops[s["variety"]]["name"] if s["variety"] in hops else s["name"] for s in subs]))
     else:
         st.caption("No BeerMaverick data for this variety.")
 
@@ -2536,7 +2546,7 @@ def _hop_associations(con, hops: dict, selected: str) -> None:
         for s in styles:
             label = f"{s['label']} ({s['style_id']})" if s["style_id"] else s["label"]
             by_source.setdefault(_SOURCE_LABELS.get(s["source"], s["source"]), []).append(label)
-        st.markdown("  \n".join(f"**{src}:** " + ", ".join(labels)
+        st.markdown("  \n".join(f"**{src}:** " + _descriptor_chips(labels)
                                 for src, labels in by_source.items()))
     else:
         st.caption("No editorial style suggestion for this variety.")
