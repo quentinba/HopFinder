@@ -31,7 +31,8 @@ import sqlite3
 
 from . import parsers, reference
 from .schema import (init_db, validate_and_repair, DROP_COMPOUNDS, ensure_table, ensure_columns,
-                     BEER_STYLES_SCHEMA, HOP_BEER_STYLES_SCHEMA, HOP_IDENTITY_COLUMNS)
+                     BEER_STYLES_SCHEMA, HOP_BEER_STYLES_SCHEMA, HOP_IDENTITY_COLUMNS,
+                     HOP_DESCRIPTION_COLUMNS)
 
 MAPPINGS_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "data", "mappings")
 
@@ -668,6 +669,7 @@ def crawl_yakima(out_db: str, limit: int | None = None, timeout: float = 30.0) -
     else:
         ensure_table(con, "hop_beer_styles", HOP_BEER_STYLES_SCHEMA)  # base existante : ne PAS la vider
         ensure_columns(con, "hops", HOP_IDENTITY_COLUMNS)  # T106 : ajoute cultivar/breeder/... sans vider hops
+        ensure_columns(con, "hops", HOP_DESCRIPTION_COLUMNS)  # T107 : ajoute description/description_source
     style_aliases = _load_yaml_mapping("beer_style_aliases.yaml")
 
     resp = requests.post(ALGOLIA_URL, params=ALGOLIA_PARAMS, json=BODY,
@@ -739,6 +741,15 @@ def crawl_yakima(out_db: str, limit: int | None = None, timeout: float = 30.0) -
              _bool_to_sqlite(imported.get("organic")),
              _bool_to_sqlite(imported.get("blend")),
              variety))
+        # T107 : description éditoriale (imported_fields.description, HTML réel
+        # -- vraies balises <p>/<br>/<em>/<a>, vérifié en direct sur 153/153
+        # variétés) -- nettoyée en markdown par parsers.clean_yakima_description,
+        # jamais le HTML brut stocké/affiché. Texte marketing d'un vendeur,
+        # jamais présenté comme neutre (attribution GUI explicite, voir _browse).
+        description = parsers.clean_yakima_description(imported.get("description"))
+        if description is not None:
+            con.execute("UPDATE hops SET description=?, description_source=? WHERE variety=?",
+                       (description, "yakima", variety))
         beer_types = imported.get("beer_types") or []
         if beer_types:
             _write_hop_beer_styles(con, variety, beer_types, "yakima", style_aliases)

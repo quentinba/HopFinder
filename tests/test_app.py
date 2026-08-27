@@ -121,6 +121,11 @@ def _build_toy_db(path):
         "WHERE variety='hopa'",
         ("HBC 999", "Toy Breeding Co.", 2020, "Cross between Toya and Toyb."))
     con.execute("UPDATE hops SET is_organic=1 WHERE variety='hopb'")
+    # T107 : description éditoriale -- hopa seulement (hopb/hopc restent
+    # NULL, teste l'absence d'expander).
+    con.execute(
+        "UPDATE hops SET description=?, description_source='yakima' WHERE variety='hopa'",
+        ("Toy hop known for its citrus profile.\n\nGreat in Toy IPAs.",))
     con.commit()
     con.close()
 
@@ -625,6 +630,33 @@ def test_browse_hop_identity_omits_line_entirely_when_absent(toy_cwd):
     assert not any("-badge[" in m.value and
                   ("Experimental" in m.value or "Organic" in m.value or "Blend" in m.value)
                   for m in at.markdown)
+    assert not any(e.label == "Producer description" for e in at.expander)
+
+def test_browse_shows_producer_description_in_collapsed_expander(toy_cwd):
+    # T107 : hopa porte une description -- expander "Producer description",
+    # attribution explicite (Yakima Chief Hops), texte nettoyé affiché.
+    # (page a aussi un expander "How does this work?" à part -- non testé ici.)
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("browse").run()
+    at.selectbox[0].set_value("hopa").run()
+    assert not at.exception
+    matches = [e for e in at.expander if e.label == "Producer description"]
+    assert len(matches) == 1
+    desc_expander = matches[0]
+    assert any("Yakima Chief Hops" in c.value and "marketing text" in c.value
+              for c in desc_expander.caption)
+    assert any("citrus profile" in m.value for m in desc_expander.markdown)
+
+def test_browse_hides_description_expander_when_absent(toy_cwd):
+    # hopb : is_organic=1 mais aucune description -- pas d'expander "Producer
+    # description" (le "How does this work?" générique reste présent).
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("browse").run()
+    at.selectbox[0].set_value("hopb").run()
+    assert not at.exception
+    assert not any(e.label == "Producer description" for e in at.expander)
 
 def test_browse_mode_lists_all_hops_without_a_search_box(toy_cwd):
     # Champ de recherche texte libre retiré (2026-08-24, retour utilisateur

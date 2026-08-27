@@ -715,3 +715,26 @@ def test_write_hop_identity_applies_to_sibling_variety_rows_sharing_cultivar(tmp
     assert rows["amarillo"]["release_year"] is None
     # variété sans entrée dans le mapping -> colonnes inchangées (NULL)
     assert rows["citra"]["breeder"] is None
+
+
+# --------------------------------------------------------------------------- #
+# T107 -- description éditoriale (hops.description/description_source)
+# --------------------------------------------------------------------------- #
+
+def test_ensure_columns_creates_hops_description_columns_without_wiping_existing_data(tmp_path):
+    # même piège que T106 (ensure_table/ensure_columns) : une base réelle
+    # construite avant T107 n'a pas encore description/description_source.
+    from hopmatch.schema import ensure_columns, HOP_DESCRIPTION_COLUMNS
+    con = connect(str(tmp_path / "t.db"))
+    con.execute("CREATE TABLE hops (variety TEXT PRIMARY KEY, name TEXT, region TEXT, sources TEXT, purpose TEXT)")
+    con.execute("INSERT INTO hops (variety, name, region, sources, purpose) VALUES ('citra', 'Citra', 'United States', 'yakima', NULL)")
+    con.commit()
+
+    ensure_columns(con, "hops", HOP_DESCRIPTION_COLUMNS)
+    con.commit()
+    cols = {r["name"] for r in con.execute("PRAGMA table_info(hops)")}
+    assert cols >= {"description", "description_source"}
+    row = con.execute("SELECT name, description FROM hops WHERE variety='citra'").fetchone()
+    con.close()
+    assert row["name"] == "Citra"
+    assert row["description"] is None

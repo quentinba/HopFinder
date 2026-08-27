@@ -9,6 +9,7 @@ de labels et quelques quirks diffèrent.
   Yakima    → β-pinène, sélinène
 """
 from __future__ import annotations
+import html as _html
 import re
 
 # label normalisé -> (compound, unit)
@@ -489,6 +490,43 @@ def strip_bare_hops_suffix(name: str | None) -> str | None:
         return name
     cleaned = _BARE_HOPS_SUFFIX_RE.sub("", name)
     return re.sub(r"\s+", " ", cleaned).strip()
+
+
+_YAKIMA_DESC_LINK_RE = re.compile(r'<a\b[^>]*\bhref="([^"]*)"[^>]*>(.*?)</a>', re.S | re.I)
+_YAKIMA_DESC_EM_RE = re.compile(r"<em\b[^>]*>(.*?)</em>", re.S | re.I)
+_YAKIMA_DESC_BREAK_RE = re.compile(r"</?p\b[^>]*>|<br\s*/?>", re.I)
+_YAKIMA_DESC_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def clean_yakima_description(raw_html: str | None) -> str | None:
+    """Nettoie `imported_fields.description` (Yakima Algolia, T107) : vraies
+    balises HTML (vérifié en direct sur les 153/153 variétés) --
+    `<p>`/`<br>` (les deux utilisés comme séparateur de paragraphe selon la
+    fiche, ex. Kohatu/Waimea/Wakatu séparent leur lien de fiche produit par
+    `<br><br>` À L'INTÉRIEUR d'un même `<p>`, jamais par un `<p>` propre),
+    `<em>` (une seule mention réelle trouvée : un disclaimer de marque
+    déposée, ex. Dolcita) et `<a href=...>` (liens vers de vraies fiches
+    produit PDF yakimachief.com, pas du spam tiers). Convertit EN MARKDOWN
+    (jamais de HTML brut injecté dans la GUI, `st.markdown` sans
+    `unsafe_allow_html`) : `<p>`/`<br>` -> saut de paragraphe, `<em>` ->
+    `*texte*`, `<a>` -> `[texte](url)`. Toute balise résiduelle non prévue
+    est retirée défensivement (jamais de tag brut qui fuiterait tel quel).
+    Entités HTML (`&#039;`...) décodées. `None`/vide -> `None`, jamais de
+    chaîne fabriquée."""
+    if not raw_html:
+        return None
+    text = _html.unescape(raw_html)
+    text = _YAKIMA_DESC_LINK_RE.sub(
+        lambda m: f"[{_YAKIMA_DESC_TAG_RE.sub('', m.group(2)).strip()}]({m.group(1)})", text)
+    text = _YAKIMA_DESC_EM_RE.sub(
+        lambda m: f"*{_YAKIMA_DESC_TAG_RE.sub('', m.group(1)).strip()}*", text)
+    paragraphs = []
+    for part in _YAKIMA_DESC_BREAK_RE.split(text):
+        part = _YAKIMA_DESC_TAG_RE.sub("", part)
+        part = re.sub(r"\s+", " ", part).strip()
+        if part:
+            paragraphs.append(part)
+    return "\n\n".join(paragraphs) if paragraphs else None
 
 
 def parse_yakima_hit(hit: dict) -> tuple[str, str, str, dict, list[str], dict[str, float]]:

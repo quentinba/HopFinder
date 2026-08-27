@@ -1347,22 +1347,34 @@ Elles sont écrites pour qu'aucune décision implicite ne reste à deviner.
   cultivar seul, pas de breeder), Zythos (badge Blend, breeder « Hopunion »)
   et Luna (aucune métadonnée → bloc entier silencieusement absent).
 
-- [ ] **T107 — Description éditoriale du houblon**
+- [x] **T107 — Description éditoriale du houblon**
 
-  **Source** : `imported_fields.description` (Algolia Yakima), présent sur
-  **153/153 variétés**, ~2 paragraphes de HTML (`<p>…</p><p>…</p>`).
+  **Compte rendu (2026-08-27)** : vérifié en direct sur le lot complet
+  (153/153 variétés, exact comme annoncé) — le HTML est plus riche que
+  "juste des `<p>`" : `<br>` sert AUSSI de séparateur de paragraphe à
+  l'intérieur d'un même `<p>` (ex. Kohatu/Waimea/Wakatu séparent leur lien
+  de fiche produit par `<br><br>`, pas par un `<p>` propre), `<em>` apparaît
+  une fois (disclaimer de marque déposée, Dolcita) et `<a href=...>` pointe
+  vers de vraies fiches produit PDF `yakimachief.com` (pas du spam tiers) sur
+  8 variétés. `parsers.clean_yakima_description` traite `<p>`/`<br>` comme
+  séparateurs de paragraphe ÉQUIVALENTS (jamais de texte recollé), convertit
+  `<em>` en `*italique*` et `<a>` en lien markdown `[texte](url)` (jamais de
+  HTML brut, conforme à la règle du ticket, mais un lien produit légitime de
+  la même source déjà utilisée n'a pas de raison d'être perdu). Entités HTML
+  (`&#039;`...) décodées. 150/152 variétés réellement peuplées sur la base
+  réelle après un `crawl-yakima` (2 sans description exploitable -- jamais
+  fabriqué).
 
-  **Colonne** : `hops.description TEXT` + `hops.description_source TEXT`.
+  **Colonnes** : `hops.description TEXT` + `hops.description_source TEXT`
+  (`schema.HOP_DESCRIPTION_COLUMNS`, migrées via `ensure_columns`, même
+  mécanisme que T106).
 
-  ⚠ **Nettoyer le HTML** avant stockage : le champ contient de vraies balises.
-  Extraire le texte (les `<p>` deviennent des sauts de paragraphe), ne jamais
-  injecter le HTML brut dans la GUI.
-
-  **GUI** : `st.expander` replié dans `browse`, sous les métadonnées de T106.
-  ⚠ **Attribution explicite obligatoire** : « Producer description (Yakima
-  Chief Hops) » — c'est du **texte marketing d'un vendeur**, jamais présenté
-  comme une caractérisation neutre. Même esprit que la réserve affichée sur
-  les pairings BeerMaverick.
+  **GUI** (`app._render_hop_description`) : `_panel_expander` REPLIÉ dans
+  `browse`, sous les métadonnées de T106 et avant les key stats. Attribution
+  explicite « Producer description (Yakima Chief Hops) — marketing text from
+  the hop's producer, not a neutral characterization. » Absent -> pas
+  d'expander vide. Vérifié en direct (Chrome, dark theme) sur Citra (deux
+  paragraphes propres) et Kohatu (lien produit cliquable rendu en markdown).
 
 - [ ] **T108 — Tri/filtre par popularité**
 
