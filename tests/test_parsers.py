@@ -232,6 +232,32 @@ def test_strip_yakima_brand_suffix_leaves_names_without_brand_untouched():
     assert parsers._strip_yakima_brand_suffix("Admiral") == "Admiral"
     assert parsers._strip_yakima_brand_suffix(None) is None
 
+def test_strip_bare_hops_suffix_removes_standalone_marketing_word():
+    # T123 (2026-08-27) : "Hops" est l'habillage marketing du <h1> BarthHaas
+    # pour 7 variétés (Dolcita, Huell Classic, Luna, Ariana, Eclipse,
+    # El Dorado, Krush), jamais une partie du nom de la variété.
+    assert parsers.strip_bare_hops_suffix("Luna Hops") == "Luna"
+    assert parsers.strip_bare_hops_suffix("Dolcita Hops") == "Dolcita"
+    assert parsers.strip_bare_hops_suffix("Huell Classic Hops") == "Huell Classic"
+
+def test_strip_bare_hops_suffix_keeps_hyphen_qualified_suppliers():
+    # "- NZ Hops" (fournisseur NZ Hops Ltd, T51) est un vrai qualificatif --
+    # jamais retiré, même si le nom se termine bien par "Hops".
+    assert (parsers.strip_bare_hops_suffix("Kohatu - NZ Hops")
+           == "Kohatu - NZ Hops")
+    assert (parsers.strip_bare_hops_suffix("Nelson Sauvin - NZ Hops")
+           == "Nelson Sauvin - NZ Hops")
+    # tiret interne SANS espaces autour (cultivar réel) n'est pas la séquence
+    # qualificative " - " -- doit quand même déclencher la garde ici car la
+    # vraie séquence " - NZ Hops" est bien présente par ailleurs.
+    assert (parsers.strip_bare_hops_suffix("Wai-iti - NZ Hops")
+           == "Wai-iti - NZ Hops")
+
+def test_strip_bare_hops_suffix_leaves_names_without_suffix_untouched():
+    assert parsers.strip_bare_hops_suffix("Admiral") == "Admiral"
+    assert parsers.strip_bare_hops_suffix("Citra") == "Citra"
+    assert parsers.strip_bare_hops_suffix(None) is None
+
 def test_parse_yakima_hit_strips_brand_suffix_from_display_name():
     hit = {
         "url": "/variety/mosaic-brand",

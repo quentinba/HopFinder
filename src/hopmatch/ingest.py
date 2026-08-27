@@ -315,7 +315,12 @@ def crawl_barthhaas(out_db: str, sleep: float = 1.5, limit: int | None = None) -
                 # T59 (2026-08-19, demande utilisateur) : ®/™/© retirés du nom
                 # affiché (`parsers.strip_trademark_symbols`), pas seulement du
                 # slug de réconciliation -- voir sa docstring pour le détail.
-                name = parsers.strip_trademark_symbols(h1_title) or slug.replace("-", " ").title()
+                # T123 (2026-08-27) : suffixe "Hops" nu (habillage marketing
+                # de leur <h1>, ex. "Luna Hops") retiré via `parsers.
+                # strip_bare_hops_suffix` -- voir sa docstring pour la garde
+                # contre les vrais qualificatifs à tiret ("- NZ Hops").
+                name = (parsers.strip_trademark_symbols(parsers.strip_bare_hops_suffix(h1_title))
+                       or slug.replace("-", " ").title())
                 region = parsers.parse_region(text)
                 # Doublon cross-source par nom+région (2026-08-19, voir
                 # _find_variety_by_name_region) : seulement si la clé directe

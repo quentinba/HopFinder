@@ -195,7 +195,10 @@ _RECENT_UPDATES = [
                    "icon is now the plain orange hop mark with no "
                    "background, matching the sidebar logo. The \"Oxygen "
                    "cont.\" category label is now spelled out in full as "
-                   "\"Oxygen containing comp.\"."),
+                   "\"Oxygen containing comp.\". A stray \"Hops\" was "
+                   "removed from 7 BarthHaas hop names (e.g. \"Luna Hops\" "
+                   "→ \"Luna\") — the \"- NZ Hops\" supplier qualifier on "
+                   "11 New Zealand varieties is untouched."),
     ("2026-08-26", "The hop-engraving background image is now visible, but "
                    "discreetly, in both light and dark mode (it was "
                    "nearly invisible at first, then too prominent once "
