@@ -92,6 +92,7 @@ MODE_LABELS = {
     "by-descriptor": "From descriptors",
     "browse": "Browse a hop",
     "compare": "Compare hops",
+    "styles": "Beer styles",
 }
 
 # Page d'accueil (front page) : résumé des outils, avec accès direct à chacun.
@@ -157,6 +158,18 @@ _TOOL_SUMMARIES = [
             "oil compounds — each colored consistently per hop."
         ),
     },
+    {
+        "mode": "styles",
+        "icon": ":material/local_bar:",
+        "tagline": "BJCP style reference",
+        "description": (
+            "Pick a BJCP 2021 style directly: the official vital statistics "
+            "range (ABV, IBU, OG, FG, SRM) and the full descriptive text "
+            "(aroma, appearance, flavor, mouthfeel, history...). An "
+            "editorial style guideline (BJCP), not a measurement of real "
+            "recipes."
+        ),
+    },
 ]
 
 # T-D12 (2026-08-23, spec Claude Design) : lookup mode -> résumé, pour le
@@ -180,6 +193,15 @@ _TOOL_SUMMARY_BY_MODE = {t["mode"]: t for t in _TOOL_SUMMARIES}
 # un `git log` en direct exigerait aussi que `.git` soit présent dans le
 # conteneur déployé, ce qui n'est pas garanti.
 _RECENT_UPDATES = [
+    ("2026-08-27", "New \"Beer styles\" tool: browse any BJCP 2021 style "
+                   "(110 of them) by category then name, see its official "
+                   "vital statistics (ABV/IBU/OG/FG/color) as a range plus "
+                   "a visual bar, the full descriptive text (aroma, "
+                   "appearance, flavor, mouthfeel, history...), and its "
+                   "commercial examples. Two independent unit toggles at "
+                   "the top let you pick EBC or SRM for color and °Plato "
+                   "or SG for density, so any combination works (e.g. SRM "
+                   "with °Plato)."),
     ("2026-08-27", "Compare Hops' detailed composition chart now shows each "
                    "compound's chemical category (Hydrocarbons/Oxygen "
                    "containing/Sulfur compounds, and the finer Monoterpenes/"
@@ -718,6 +740,33 @@ div[class*="st-key-panel_"], details[class*="st-key-panel_"] {
     font-family: 'Caprasimo', Figtree, sans-serif;
     color: light-dark(#201e1d, #f9f4ed);
     line-height: 1;
+}
+/* T82 (2026-08-27) : barre de range sous chaque `st.metric` de vital
+   statistic BJCP (`_range_bar_html`) -- piste neutre (mêmes tokens que
+   `borderColor`, cohérent avec les séparateurs déjà utilisés ailleurs),
+   remplissage soit une teinte sage neutre (ABV/IBU/OG/FG), soit la couleur
+   SRM réelle calculée en Python (`_srm_color`, posée en inline `style=`
+   par appel -- ce n'est PAS une mesure fixe comme le reste de la palette
+   Organic, voir sa docstring). */
+.hf-range-track {
+    position: relative;
+    height: 6px;
+    border-radius: 3px;
+    margin-top: 6px;
+    background-color: light-dark(#dcd3c4, #474238);
+}
+.hf-range-fill {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    border-radius: 3px;
+}
+/* T82 -- voir le commentaire sur `hf_vital_stats` dans `app._styles` :
+   police de `st.metric` réduite UNIQUEMENT dans ce conteneur (5 fourchettes
+   min-max côte à côte tronquaient à la taille par défaut), jamais les
+   autres `st.metric` de l'app. */
+div[class*="st-key-hf_vital_stats"] [data-testid="stMetricValue"] {
+    font-size: 1.5rem;
 }
 </style>
 """
@@ -4544,6 +4593,284 @@ def _compare(con):
                       + " — their % of oil composition can't be converted to an absolute amount.")
 
 
+# --------------------------------------------------------------------------- #
+# Mode GUI "Beer styles" (T82, épique A)
+# --------------------------------------------------------------------------- #
+def _category_sort_key(item: tuple[str, str]) -> tuple:
+    """Clé de tri catégorie BJCP : NUMÉRIQUE sur `category_id` ("2" avant
+    "10", pas l'inverse -- demande explicite du ticket). Cas non prévu par
+    le ticket, trouvé en construisant cette page : 4 styles provisoires
+    (Argentine/Brazilian/Italian/New Zealand Styles) partagent tous le
+    MÊME `category_id` littéral `"X"` (pas numérique) -- groupés APRÈS
+    toutes les catégories numériques, triés entre eux par nom (seul moyen
+    de les distinguer, `category_id` seul ne suffit pas ici)."""
+    category_id, category = item
+    try:
+        return (0, int(category_id), "")
+    except (TypeError, ValueError):
+        return (1, 0, category or "")
+
+
+# Rampe de couleur SRM (paille -> ambre -> brun -> quasi-noir) : une mesure
+# de couleur réelle, légitimement INDÉPENDANTE de `_COMPARE_PALETTE`/tokens
+# Organic (qui codent une identité houblon/catégorie chimique, pas une
+# grandeur physique -- ticket T82 explicite). Bornes de la base réelle :
+# srm_max plafonne à 40 sur les 110 styles 2021 ; dernier point d'ancrage
+# posé à 50 pour garder une marge sans jamais clamper une vraie donnée.
+_SRM_COLOR_STOPS = [
+    (0.0, "#f3e5ab"), (8.0, "#f0a500"), (20.0, "#b85c00"),
+    (35.0, "#5c3317"), (50.0, "#140a05"),
+]
+
+
+def _srm_color(srm: float | None) -> str:
+    """Couleur hex approximative pour une valeur SRM -- interpolation
+    linéaire RGB entre les points d'ancrage de `_SRM_COLOR_STOPS`. `None`
+    (jamais recalculé sur `NULL`, l'appelant ne passe ici que si `srm_min`/
+    `srm_max` sont tous les deux non-NULL) -> gris neutre, ne devrait pas
+    s'afficher en pratique."""
+    if srm is None:
+        return "#a19786"
+    srm = max(_SRM_COLOR_STOPS[0][0], min(srm, _SRM_COLOR_STOPS[-1][0]))
+    for (lo_v, lo_c), (hi_v, hi_c) in zip(_SRM_COLOR_STOPS, _SRM_COLOR_STOPS[1:]):
+        if lo_v <= srm <= hi_v:
+            t = (srm - lo_v) / (hi_v - lo_v) if hi_v > lo_v else 0.0
+            lo_rgb = tuple(int(lo_c[i:i + 2], 16) for i in (1, 3, 5))
+            hi_rgb = tuple(int(hi_c[i:i + 2], 16) for i in (1, 3, 5))
+            rgb = tuple(round(lo_rgb[i] + (hi_rgb[i] - lo_rgb[i]) * t) for i in range(3))
+            return "#{:02x}{:02x}{:02x}".format(*rgb)
+    return _SRM_COLOR_STOPS[-1][1]  # au-delà du dernier point d'ancrage (clampé ci-dessus)
+
+
+def _range_bar_html(vmin: float, vmax: float, domain: tuple[float, float],
+                    color: str | None = None) -> str:
+    """Barre `[vmin, vmax]` positionnée dans `domain` (borne fixe par
+    critère -- voir `_VITAL_STAT_SPECS` -- PAS auto-zoomée sur ce seul
+    style : une fourchette étroite au milieu d'un critère large doit se
+    lire comme "modérée", pas comme "occupe toute la barre"). `color` :
+    teinte sage neutre par défaut (`.hf-range-fill` en CSS), ou la couleur
+    SRM réelle calculée par l'appelant pour ce seul critère (T82,
+    `_srm_color`). Largeur plancher (`max(..., 1.0)`) : une fourchette nulle
+    ou très étroite (ex. IBU 0-0) resterait invisible sinon."""
+    dmin, dmax = domain
+    span = dmax - dmin
+    left = max(0.0, min(100.0, (vmin - dmin) / span * 100))
+    right = max(0.0, min(100.0, (vmax - dmin) / span * 100))
+    width = max(right - left, 1.0)
+    style = f"left:{left:.2f}%; width:{width:.2f}%;"
+    if color:
+        style += f" background-color:{color};"
+    else:
+        style += " background-color: light-dark(#7f9455, #aebf92);"
+    return f'<div class="hf-range-track"><div class="hf-range-fill" style="{style}"></div></div>'
+
+
+# (label, colonne min, colonne max, formateur, domaine fixe d'affichage)
+# Domaines choisis pour couvrir confortablement les 110 styles 2021 réels
+# (abv_max jusqu'à 14, ibu_max jusqu'à 100, og_max jusqu'à 1.13, fg_max
+# jusqu'à 1.04, srm_max jusqu'à 40 -- voir BACKLOG.md T81/T82) avec une
+# marge, sans jamais clamper une vraie donnée à l'affichage.
+_VITAL_STAT_SPECS = [
+    ("ABV", "abv_min", "abv_max", lambda v: f"{v:.1f}%", (0.0, 15.0)),
+    ("IBU", "ibu_min", "ibu_max", lambda v: f"{v:.0f}", (0.0, 105.0)),
+    ("OG", "og_min", "og_max", lambda v: f"{v:.3f}", (1.000, 1.140)),
+    ("FG", "fg_min", "fg_max", lambda v: f"{v:.3f}", (0.995, 1.045)),
+    ("SRM", "srm_min", "srm_max", lambda v: f"{v:.1f}", (0.0, 42.0)),
+]
+
+# EBC = SRM x ce facteur -- formule déjà établie dans ce projet pour la
+# conversion inverse (CLAUDE.md/BACKLOG.md T91, ingestion MMuM : "Farbe en
+# EBC -> SRM : SRM = EBC / 1.97"), pas une valeur inventée pour ce ticket.
+_EBC_PER_SRM = 1.97
+
+
+def _sg_to_plato(sg: float) -> float:
+    """Densité spécifique -> degrés Plato -- polynôme cubique standard ASBC
+    (formule établie de l'industrie brassicole, pas une approximation
+    improvisée pour ce ticket ; vérifié : SG 1.050 -> ~12.4°P, cohérent avec
+    les tables de référence usuelles). Appliqué à OG ET FG (2026-08-27,
+    demande utilisateur explicite : "toggle density in optical density
+    versus plato... Plato make sense to use in some cases") -- pour FG,
+    c'est l'« extrait apparent » conventionnel de tout logiciel de brassage
+    (BeerSmith, Brewer's Friend...), pas une seconde mesure : la présence
+    d'alcool fausse la relation densité<->sucre réelle, mais c'est la
+    convention établie partout, pas une invention de ce ticket."""
+    return -616.868 + 1111.14 * sg - 630.272 * sg ** 2 + 135.997 * sg ** 3
+
+
+def _vital_stat_row(row, use_ebc: bool, use_plato: bool) -> None:
+    """5 `st.metric` (ABV/IBU/OG/FG/SRM, ou EBC/Plato selon les toggles) +
+    barre de range, UNE LIGNE PAR CRITÈRE (2026-08-27, retour utilisateur en
+    direct : 5 colonnes côte à côte tronquaient les fourchettes, ex.
+    "2.8%…" -- "explore the different elements into multiple lines").
+    `st.columns([2, 3])` par ligne (label+valeur | barre) plutôt que 5
+    `st.metric` pleine largeur empilés (aurait été disproportionné) --
+    vérifié en direct que 2/5 de la largeur suffit à la plus longue
+    fourchette réelle ("1.028–1.038").
+
+    `use_ebc`/`use_plato` (2026-08-27, deux toggles SÉPARÉS -- demande
+    utilisateur explicite : "separate the EBC/SRM et Plato/SG. Il peut
+    arriver de vouloir utiliser EBC et Plato en meme temps", ex. EBC+SG ou
+    SRM+Plato) : SRM->EBC (`_EBC_PER_SRM`) et SG->Plato (`_sg_to_plato`)
+    indépendants l'un de l'autre -- les deux seuls critères qui diffèrent
+    RÉELLEMENT entre systèmes (ABV/IBU sont identiques partout). La couleur
+    de la barre SRM (`_srm_color`) reste calculée sur la VRAIE valeur SRM
+    (source de vérité en base) quel que soit l'affichage choisi -- convertir
+    n'est qu'un habillage d'unité, jamais une seconde mesure.
+
+    Les 17/110 styles réels sans AUCUNE vital stat (héritent du style de
+    base choisi par le brasseur -- vérifié : toujours les 5 NULL ensemble,
+    jamais partiellement, voir BACKLOG.md T82) affichent "—" et UNE SEULE
+    `st.caption` partagée sous la ligne, jamais une barre vide (qui
+    laisserait croire à zéro)."""
+    has_vitals = row["abv_min"] is not None
+    for label, min_key, max_key, fmt, domain in _VITAL_STAT_SPECS:
+        vmin, vmax = row[min_key], row[max_key]
+        srm_mid = (vmin + vmax) / 2 if (label == "SRM" and vmin is not None
+                                        and vmax is not None) else None
+        if label == "SRM" and use_ebc:
+            label, fmt = "EBC", (lambda v: f"{v:.0f}")
+            domain = (domain[0] * _EBC_PER_SRM, domain[1] * _EBC_PER_SRM)
+            if vmin is not None:
+                vmin, vmax = vmin * _EBC_PER_SRM, vmax * _EBC_PER_SRM
+        elif label in ("OG", "FG"):
+            if use_plato:
+                label, fmt = f"{label} (°P)", (lambda v: f"{v:.1f}")
+                domain = (_sg_to_plato(domain[0]), _sg_to_plato(domain[1]))
+                if vmin is not None:
+                    vmin, vmax = _sg_to_plato(vmin), _sg_to_plato(vmax)
+            else:
+                label = f"{label} (SG)"
+        label_col, bar_col = st.columns([2, 3], vertical_alignment="center")
+        with label_col:
+            st.metric(label, f"{fmt(vmin)}–{fmt(vmax)}" if vmin is not None else "—")
+        with bar_col:
+            if vmin is not None and vmax is not None:
+                st.html(_range_bar_html(vmin, vmax, domain,
+                                        color=_srm_color(srm_mid) if srm_mid is not None else None))
+    if not has_vitals:
+        st.caption(
+            "This style has no vital statistics of its own — it inherits them "
+            "from the base style the brewer chose to build on (e.g. a fruit "
+            "beer entered on top of an American Wheat Beer follows that base "
+            "style's range).")
+
+
+def _style_text_expander(label: str, text: str | None) -> None:
+    """Un `st.expander` replié par bloc de texte descriptif -- rien si le
+    champ est absent (styles X1/X2 notamment : `examples` totalement
+    absent, `style_comparison` absent aussi -- jamais un expander vide)."""
+    if not text:
+        return
+    with _panel_expander(label):
+        st.write(text)
+
+
+def _styles(con) -> None:
+    """Mode GUI "Beer styles" (T82) : consulter un style BJCP 2021
+    directement -- vital statistics officielles + texte descriptif complet
+    (`beer_styles`, T81). Référence éditoriale, PAS une mesure de recettes
+    réelles (voir l'épique B à venir, `style_recipe_stats`/beer-analytics).
+
+    Navigation en cascade catégorie -> style (ticket explicite), catégorie
+    triée numériquement sur `category_id` -- voir `_category_sort_key`."""
+    # Deux toggles SÉPARÉS (2026-08-27, demande utilisateur explicite : "For
+    # the units I would like you to separate the EBC/SRM et Plato/SG. Il
+    # peut arriver de vouloir utiliser EBC et Plato en meme temps" -- un
+    # brasseur peut légitimement vouloir EBC+SG ou SRM+Plato, pas seulement
+    # les deux paires "assorties") -- PAS un seul toggle Metric/Imperial
+    # bundlé (essayé d'abord, ticket a changé d'avis en cours de route).
+    # ABV/IBU sont identiques dans les deux systèmes, donc pas concernés.
+    # EBC et °Plato par défaut (demande explicite : "By default I would
+    # like you to use EBC not SRM").
+    color_cols = st.columns(2)
+    with color_cols[0]:
+        use_ebc = st.segmented_control(
+            "Color", ["EBC", "SRM"], default="EBC", key="styles_color_units", required=True,
+            help="EBC (European Brewery Convention) vs SRM (Standard Reference "
+                 "Method, US-centric) — same measurement, different scale.") == "EBC"
+    with color_cols[1]:
+        use_plato = st.segmented_control(
+            "Density", ["°Plato", "SG"], default="°Plato", key="styles_density_units",
+            required=True,
+            help="°Plato (used almost everywhere outside the US) vs specific "
+                 "gravity (SG, US-centric) for OG/FG.") == "°Plato"
+
+    categories = sorted(
+        {(r["category_id"], r["category"]) for r in
+         con.execute("SELECT DISTINCT category_id, category FROM beer_styles")},
+        key=_category_sort_key)
+    if not categories:
+        st.write("No style in the database yet — run `hopmatch ingest-styles` first.")
+        return
+
+    category_id, category = st.selectbox(
+        "Category", categories, format_func=lambda c: f"{c[0]} - {c[1]}", key="styles_category")
+
+    style_rows = con.execute(
+        "SELECT style_id, name FROM beer_styles WHERE category_id=? AND category=? "
+        "ORDER BY style_id", (category_id, category)).fetchall()
+    style_id, style_name = st.selectbox(
+        "Style", [(r["style_id"], r["name"]) for r in style_rows],
+        format_func=lambda s: f"{s[0]} - {s[1]}", key="styles_style")
+
+    row = con.execute(
+        "SELECT * FROM beer_styles WHERE style_id=? AND category_id=? AND category=?",
+        (style_id, category_id, category)).fetchone()
+    if row is None:
+        st.write("Style not found.")
+        return
+
+    with _panel():
+        st.subheader(f"{row['style_id']} - {row['name']}")
+        tags = [t.strip() for t in (row["tags"] or "").split(",") if t.strip()]
+        if tags:
+            # sage neutre ("green", jamais terracotta -- réservé à
+            # l'interaction ailleurs dans la GUI, voir `_confidence_strip`).
+            # `_descriptor_chips` (2026-08-27, retour utilisateur en direct :
+            # un `st.badge` par tag, un par ligne, "takes too much space")
+            # -- UNE chaîne markdown avec toutes les pills, rendue en un
+            # seul `st.markdown`, qui s'enroule naturellement sur la largeur
+            # disponible au lieu d'empiler une ligne par tag.
+            st.markdown(_descriptor_chips(tags))
+
+    with _panel():
+        st.write("**Vital statistics**")
+        # `hf_vital_stats` (2026-08-27, trouvé en vérifiant en direct dans le
+        # navigateur -- voir `_TYPOGRAPHY_STYLE`) : une fourchette min-max
+        # ("1.028–1.038") est plus longue que les valeurs simples que
+        # `st.metric` affiche ailleurs dans la GUI (déjà un piège connu ici,
+        # voir `_render_key_stats`). Conteneur dédié pour cibler UNIQUEMENT
+        # ce bloc en CSS (jamais les autres `st.metric` de l'app, ex.
+        # `_render_key_stats`) si la police par défaut redevient trop large
+        # -- ligne-par-critère (`_vital_stat_row`) laisse déjà bien plus de
+        # place que l'ancien layout à 5 colonnes côte à côte.
+        with st.container(key="hf_vital_stats"):
+            _vital_stat_row(row, use_ebc, use_plato)
+
+    with _panel():
+        if row["overall_impression"]:
+            st.write(row["overall_impression"])
+        else:
+            st.caption("No overall impression recorded for this style.")
+        _style_text_expander("Aroma", row["aroma"])
+        _style_text_expander("Appearance", row["appearance"])
+        _style_text_expander("Flavor", row["flavor"])
+        _style_text_expander("Mouthfeel", row["mouthfeel"])
+        _style_text_expander("Comments", row["comments"])
+        _style_text_expander("History", row["history"])
+        _style_text_expander("Ingredients", row["ingredients"])
+        _style_text_expander("Style comparison", row["style_comparison"])
+
+    examples = [e.strip() for e in (row["examples"] or "").split(",") if e.strip()]
+    if examples:
+        with _panel():
+            st.write("**Commercial examples**")
+            # `_source_chips` (gris neutre, même mécanisme d'enroulement que
+            # `_descriptor_chips` ci-dessus -- voir son commentaire).
+            st.markdown(_source_chips(examples))
+
+
 def main():
     # Nom d'affichage GUI = "HopFinder" (demande utilisateur 2026-08-19,
     # renommage d'affichage seulement -- le paquet/CLI restent "hopmatch",
@@ -4622,9 +4949,9 @@ def main():
     # Browse a hop") -- la lecture reste groupée sans dupliquer le widget.
     _MODE_GROUP_PREFIX = {"amplify": "HopFinder — ", "contrast": "HopFinder — ",
                           "by-descriptor": "HopFinder — ", "browse": "Explore — ",
-                          "compare": "Explore — "}
+                          "compare": "Explore — ", "styles": "Explore — "}
     mode = st.sidebar.radio(
-        "Mode", ["home", "amplify", "contrast", "by-descriptor", "browse", "compare"],
+        "Mode", ["home", "amplify", "contrast", "by-descriptor", "browse", "compare", "styles"],
         format_func=lambda m: _MODE_GROUP_PREFIX.get(m, "") + MODE_LABELS[m], key="mode")
 
     with st.sidebar.popover("Database", icon=":material/database:", width="stretch"):
@@ -4681,6 +5008,9 @@ def main():
         return
     if mode == "compare":
         _compare(con)
+        return
+    if mode == "styles":
+        _styles(con)
         return
     # "amplify" : seul mode restant après les dispatches explicites
     # ci-dessus -- la sélection de note vit désormais DANS `_amplify` (page

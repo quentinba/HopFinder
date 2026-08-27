@@ -81,6 +81,37 @@ def _build_toy_db(path):
         # cache mtime-based (voir _db_version) sur un insert après coup.
         ("lownote", "molx", 0.1, "toy"), ("lownote", "bigorphan", 10.0, "toy"),
     ])
+    # T82 : deux styles jouets pour tester le mode "Beer styles" -- category_id
+    # "2" et "10" (pas "1"/"2") pour vérifier le tri NUMÉRIQUE ("2" avant "10",
+    # jamais l'inverse lexicographique) ; "10A" sans AUCUNE vital stat pour
+    # tester la branche "—" + caption partagée (voir app._vital_stat_row).
+    style_cols = ("style_id", "guideline_year", "category_id", "category", "name", "type",
+                 "tags", "og_min", "og_max", "fg_min", "fg_max", "abv_min", "abv_max",
+                 "ibu_min", "ibu_max", "srm_min", "srm_max", "overall_impression", "aroma",
+                 "appearance", "flavor", "mouthfeel", "comments", "history", "ingredients",
+                 "style_comparison", "examples", "category_description", "source")
+    style_rows = [
+        {"style_id": "2A", "guideline_year": 2021, "category_id": "2", "category": "Test Lager",
+         "name": "Test Lager Style", "type": "beer", "tags": "crisp, pale",
+         "og_min": 1.044, "og_max": 1.056, "fg_min": 1.008, "fg_max": 1.013,
+         "abv_min": 4.5, "abv_max": 6.0, "ibu_min": 18.0, "ibu_max": 30.0,
+         "srm_min": 3.0, "srm_max": 6.0,
+         "overall_impression": "A clean, crisp toy lager.", "aroma": "Light malt aroma.",
+         "appearance": None, "flavor": "Clean, balanced.", "mouthfeel": None,
+         "comments": None, "history": None, "ingredients": None, "style_comparison": None,
+         "examples": "Example One, Example Two", "category_description": None, "source": "bjcp-json"},
+        {"style_id": "10A", "guideline_year": 2021, "category_id": "10", "category": "Test Wheat",
+         "name": "Test Wheat Style", "type": "beer", "tags": None,
+         "og_min": None, "og_max": None, "fg_min": None, "fg_max": None,
+         "abv_min": None, "abv_max": None, "ibu_min": None, "ibu_max": None,
+         "srm_min": None, "srm_max": None,
+         "overall_impression": "Inherits from its base style.", "aroma": None,
+         "appearance": None, "flavor": None, "mouthfeel": None,
+         "comments": None, "history": None, "ingredients": None, "style_comparison": None,
+         "examples": None, "category_description": None, "source": "bjcp-json"},
+    ]
+    con.executemany(
+        f"INSERT INTO beer_styles VALUES ({','.join(':' + c for c in style_cols)})", style_rows)
     con.commit()
     con.close()
 
@@ -179,7 +210,7 @@ def test_app_loads_with_no_exception_default_home_mode(toy_cwd):
     # (h1, un seul par page, exigence de la spec).
     assert at.title[0].value == "Home"
     assert at.sidebar.radio[0].value == "home"
-    assert len(at.button) == 5
+    assert len(at.button) == 6  # T82 : "Beer styles" ajouté aux 5 outils existants
 
 def test_home_open_button_switches_to_target_mode(toy_cwd):
     at = _app()
@@ -715,3 +746,82 @@ def test_by_descriptor_expander_shows_inferred_purpose_and_key_stats(toy_cwd):
     assert any("-badge[" in m.value and "Inferred: Bittering" in m.value for m in at.markdown)
     metrics = {m.label: m.value for m in at.metric}
     assert metrics["Alpha acids"] == "14.5%"
+
+def test_styles_mode_sorts_categories_numerically_not_lexicographically(toy_cwd):
+    # category_id "2" doit précéder "10" (tri numérique explicite du ticket
+    # T82) -- un tri lexicographique naïf mettrait "10" avant "2".
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("styles").run()
+    assert not at.exception
+    options = at.selectbox[0].options  # options = display strings ("id - name"), pas les tuples bruts
+    assert options.index("2 - Test Lager") < options.index("10 - Test Wheat")
+
+def test_styles_mode_renders_vital_stats_tags_and_examples_for_complete_style(toy_cwd):
+    # Metric (EBC/°Plato) est la valeur par défaut du toggle (demande
+    # utilisateur explicite : "By default I would like you to use EBC not
+    # SRM") -- OG/FG/SRM s'affichent donc converties, ABV/IBU inchangés.
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("styles").run()
+    at.selectbox(key="styles_category").set_value(("2", "Test Lager")).run()
+    at.selectbox(key="styles_style").set_value(("2A", "Test Lager Style")).run()
+    assert not at.exception
+    metrics = {m.label: m.value for m in at.metric}
+    assert metrics["ABV"] == "4.5%–6.0%"
+    assert metrics["IBU"] == "18–30"
+    assert metrics["OG (°P)"] == "11.0–13.8"
+    assert metrics["FG (°P)"] == "2.1–3.3"
+    assert metrics["EBC"] == "6–12"  # 3.0/6.0 SRM x 1.97, arrondi à l'entier
+    assert any("-badge[crisp]" in m.value for m in at.markdown)
+    assert any("-badge[Example One]" in m.value for m in at.markdown)
+    # "Aroma"/"Flavor" présents dans la fixture -> expanders rendus ;
+    # "Appearance"/"Mouthfeel" (None) -> jamais un expander vide.
+    expander_labels = {e.label for e in at.expander}
+    assert "Aroma" in expander_labels and "Flavor" in expander_labels
+    assert "Appearance" not in expander_labels and "Mouthfeel" not in expander_labels
+
+def test_styles_mode_color_and_density_toggles_switch_independently(toy_cwd):
+    # Deux toggles SÉPARÉS (2026-08-27, demande utilisateur explicite :
+    # "separate the EBC/SRM et Plato/SG. Il peut arriver de vouloir
+    # utiliser EBC et Plato en meme temps") -- vérifie qu'on peut bien
+    # obtenir une combinaison "mixte" (SRM + °Plato), pas seulement les
+    # deux paires assorties Metric/Imperial.
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("styles").run()
+    at.selectbox(key="styles_category").set_value(("2", "Test Lager")).run()
+    at.selectbox(key="styles_style").set_value(("2A", "Test Lager Style")).run()
+    at.segmented_control(key="styles_color_units").set_value("SRM").run()
+    assert not at.exception
+    metrics = {m.label: m.value for m in at.metric}
+    assert metrics["SRM"] == "3.0–6.0"
+    assert metrics["OG (°P)"] == "11.0–13.8"  # densité restée en Plato (défaut)
+    assert metrics["FG (°P)"] == "2.1–3.3"
+
+def test_styles_mode_density_toggle_shows_sg(toy_cwd):
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("styles").run()
+    at.selectbox(key="styles_category").set_value(("2", "Test Lager")).run()
+    at.selectbox(key="styles_style").set_value(("2A", "Test Lager Style")).run()
+    at.segmented_control(key="styles_density_units").set_value("SG").run()
+    assert not at.exception
+    metrics = {m.label: m.value for m in at.metric}
+    assert metrics["OG (SG)"] == "1.044–1.056"
+    assert metrics["FG (SG)"] == "1.008–1.013"
+    assert metrics["EBC"] == "6–12"  # couleur restée en EBC (défaut)
+
+def test_styles_mode_shows_dash_and_shared_caption_when_no_vital_stats(toy_cwd):
+    # "10A" : les 17 styles réels sans vital stats (specialty/fruit/...)
+    # doivent afficher "—", jamais une barre vide qui ferait croire à zéro.
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("styles").run()
+    at.selectbox(key="styles_category").set_value(("10", "Test Wheat")).run()
+    at.selectbox(key="styles_style").set_value(("10A", "Test Wheat Style")).run()
+    assert not at.exception
+    metrics = {m.label: m.value for m in at.metric}
+    assert all(metrics[label] == "—"
+              for label in ("ABV", "IBU", "OG (°P)", "FG (°P)", "EBC"))
+    assert any("inherits" in c.value.lower() for c in at.caption)

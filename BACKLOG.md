@@ -425,7 +425,42 @@ Elles sont écrites pour qu'aucune décision implicite ne reste à deviner.
   `SELECT count(*) FROM beer_styles` → **110** ;
   `SELECT count(*) FROM beer_styles WHERE og_min IS NULL` → **17**.
 
-- [ ] **T82 — Mode GUI « Beer styles »**
+- [x] **T82 — Mode GUI « Beer styles »**
+
+  **Compte rendu (2026-08-27)** : implémenté avec plusieurs ajustements
+  trouvés/demandés en vérification live, au-delà du texte initial du
+  ticket :
+  - **Cas non prévu par le ticket** : 4 styles provisoires partagent le
+    MÊME `category_id` littéral `"X"` (Argentine/Brazilian/Italian/New
+    Zealand Styles) — `app._category_sort_key` les groupe après toutes les
+    catégories numériques, triés entre eux par nom (seul moyen de les
+    distinguer).
+  - **Bug de troncature trouvé en vérification live** : 5 `st.metric` côte
+    à côte tronquaient les fourchettes ("2.8%…") — corrigé en passant à
+    UNE LIGNE PAR CRITÈRE (`st.columns([2, 3])`, label+valeur | barre) sur
+    retour utilisateur explicite ("explore the different elements into
+    multiple lines").
+  - **Ajout hors ticket, demande utilisateur explicite** : deux toggles
+    d'unités INDÉPENDANTS en haut de page — Color (EBC/SRM) et Density
+    (°Plato/SG) — un premier essai bundlé en un seul toggle Metric/Imperial
+    a été refait en deux toggles séparés sur retour utilisateur ("Il peut
+    arriver de vouloir utiliser EBC et Plato en meme temps"). EBC = SRM ×
+    1,97 (facteur déjà établi dans ce projet, BACKLOG.md T91/MMuM — pas
+    inventé pour ce ticket). SG→Plato : polynôme cubique standard ASBC
+    (`app._sg_to_plato`), vérifié numériquement contre des points de
+    référence connus (SG 1,050 → 12,4°P etc., voir compte rendu de session)
+    avant d'être livré — provenance : connaissance générale du domaine
+    brassicole, pas un fichier de ce dépôt, d'où la vérification
+    supplémentaire demandée et faite. La couleur de la barre SRM reste
+    TOUJOURS calculée sur la vraie valeur SRM en base, jamais reconvertie.
+  - **Séparateur `—` remplacé par `-`** dans les noms affichés (catégorie/
+    style/en-tête), et les tags/exemples (un `st.badge` par ligne à
+    l'origine) regroupés via `_descriptor_chips`/`_source_chips` (un seul
+    `st.markdown`, s'enroule naturellement) — deux retours utilisateur en
+    vérification live.
+  - **Bug upstream trouvé sur X2 pendant la construction de cette page**
+    (`og_min`/`fg_min` = 1055/1008 au lieu de 1.055/1.008) : voir
+    l'addendum sous T81 — corrigé dans le parseur, pas ici.
 
   **Dépend de T81.** Nouvelle entrée dans `app.MODE_LABELS` :
   `"styles": "Beer styles"`.
