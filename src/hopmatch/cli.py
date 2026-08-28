@@ -167,6 +167,12 @@ def main(argv=None):
     hu.add_argument("--sleep", type=float, default=1.0)
     hu.add_argument("--limit", type=int)
 
+    hp = sub.add_parser("ingest-style-hop-pairings",
+                        help="paires de houblons réellement co-utilisées par style (beer-analytics.com)")
+    hp.add_argument("--db", default=DEFAULT_DB)
+    hp.add_argument("--sleep", type=float, default=1.0)
+    hp.add_argument("--limit", type=int)
+
     am = sub.add_parser("amplify", help="cas d'usage : amplify")
     am.add_argument("note")
     am.add_argument("--db", default=DEFAULT_DB)
@@ -247,6 +253,8 @@ def main(argv=None):
         ingest.ingest_beer_analytics(a.db, limit=a.limit, sleep=a.sleep); return 0
     if a.cmd == "ingest-style-hop-usage":
         ingest.ingest_style_hop_usage(a.db, limit=a.limit, sleep=a.sleep); return 0
+    if a.cmd == "ingest-style-hop-pairings":
+        ingest.ingest_style_hop_pairings(a.db, limit=a.limit, sleep=a.sleep); return 0
 
     con = connect(a.db)
     try:

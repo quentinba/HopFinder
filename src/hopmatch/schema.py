@@ -199,6 +199,27 @@ CREATE TABLE style_hop_usage (
 """
 SCHEMA += STYLE_HOP_USAGE_SCHEMA
 
+# Paires de houblons réellement co-utilisées pour un style (T87, épique B) --
+# beer-analytics.com, `hop-pairings.json` (une seule URL, PAS de filtre
+# any/aroma/bittering/dry-hop côté HTML -- vérifié en direct, section sans
+# `data-chart-navigation`, contrairement à `popular-hops*.json`/T86). Trace
+# `box` par houblon partenaire : `share_*` = distribution de la part de
+# charge houblon (`amount_percent`) de CE partenaire dans les recettes qui
+# combinent les deux -- pas une fréquence de recette. ⚠ CE SONT DES PAIRES
+# UNIQUEMENT (`calculate_hop_pairings` côté beer-analytics = JOIN
+# `rh1.kind_id != rh2.kind_id`, seuil 20 recettes) -- ne jamais dériver un
+# triplet de trois paires, ce serait une invention (T93 est le seul chemin
+# vers des triplets). `style_id`/`variety` résolus comme T85/T86.
+STYLE_HOP_PAIRINGS_SCHEMA = """
+CREATE TABLE style_hop_pairings (
+    style_slug TEXT, style_id TEXT, hop_name TEXT, variety TEXT,
+    share_q1 REAL, share_median REAL, share_q3 REAL, share_mean REAL,
+    source TEXT, fetched_at TEXT,
+    PRIMARY KEY (style_slug, hop_name)
+);
+"""
+SCHEMA += STYLE_HOP_PAIRINGS_SCHEMA
+
 # alpha_acid/beta_acid retirés de ce filtre (2026-08-19, demande utilisateur) :
 # non-aromatiques (jamais utilisés dans le scoring moléculaire, qui n'itère
 # que sur les molécules de la NOTE -- aucune note FooDB ne référence jamais
@@ -226,7 +247,8 @@ def init_db(con: sqlite3.Connection) -> None:
         "DROP TABLE IF EXISTS beer_styles;"
         "DROP TABLE IF EXISTS hop_beer_styles;"
         "DROP TABLE IF EXISTS style_recipe_stats;"
-        "DROP TABLE IF EXISTS style_hop_usage;")
+        "DROP TABLE IF EXISTS style_hop_usage;"
+        "DROP TABLE IF EXISTS style_hop_pairings;")
     con.executescript(SCHEMA)
 
 
