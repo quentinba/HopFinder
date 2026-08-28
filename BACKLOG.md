@@ -631,43 +631,53 @@ Elles sont écrites pour qu'aucune décision implicite ne reste à deviner.
   template contre quelques centaines de data). `style_recipe_stats` créée
   (+ `ensure_table`, + `DROP` dans `init_db`), CLI `ingest-beer-analytics`.
 
-  ⚠ **Crawl complet interrompu délibérément, pas un bug.** Le site a
-  brutalement ralenti après ~500 requêtes/1h30 (rythme initial ~13
-  requêtes/min tombé à ~0,1/min, connexion TCP `ESTABLISHED` mais
-  quasi-immobile plusieurs dizaines de minutes) — comportement typique
-  d'un rate-limiting informel côté serveur même à notre rythme poli d'1
-  req/s. Décision : **arrêter plutôt que forcer** (cohérent avec l'esprit
-  de T89, « prévenir avant de lire régulièrement » — grinder à travers un
-  ralentissement délibéré serait le contraire de « une seule passe,
-  respectueuse »). **89/159 pages de style réellement ingérées** dans la
-  base réelle (`aromahops.db`), 4768 bins écrits, cache disque conservé
-  (réutilisable tel quel : reprendre plus tard ne re-fetch QUE les ~70
-  pages manquantes, le reste rejoue depuis le cache en quelques secondes).
-  Les tickets suivants (T86-T89) réutilisent l'infrastructure, pas un
-  compte figé de styles — aucun blocage réel.
+  ⚠ **Crawl complet interrompu une première fois, PAS un bug.** Premier
+  essai (2026-08-27) : le site a brutalement ralenti après ~500 requêtes/
+  1h30 (rythme initial ~13 requêtes/min tombé à ~0,1/min, connexion TCP
+  `ESTABLISHED` mais quasi-immobile plusieurs dizaines de minutes) —
+  comportement typique d'un rate-limiting informel côté serveur même à
+  notre rythme poli d'1 req/s. Décision : **arrêter plutôt que forcer**
+  (cohérent avec l'esprit de T89, « prévenir avant de lire régulièrement »
+  — grinder à travers un ralentissement délibéré serait le contraire de
+  « une seule passe, respectueuse »). 89/159 pages ingérées à ce stade
+  (159 = un COMPTAGE ERRONÉ à l'époque, incluant les pages CATÉGORIE à un
+  seul segment, ex. `/styles/standard-american-beer/`, jamais de vraies
+  pages de style — corrigé le lendemain, voir plus bas).
+
+  **Repris et terminé proprement le lendemain (2026-08-28), sur demande
+  explicite de l'utilisateur** (« try again I want as much data as
+  possible ») : le rythme normal était revenu (aucun ralentissement),
+  **123/123 pages de style réellement ingérées, zéro erreur** — le cache
+  disque a évité de re-fetcher les 89 déjà obtenues (rejouées en quelques
+  secondes), seules les ~34 manquantes ont demandé un vrai fetch réseau.
+  **6577 bins écrits au total** dans la base réelle (`aromahops.db`).
+  123 est le VRAI total (pas 159, voir ci-dessus — corrigé dans le
+  commentaire d'en-tête de `beer_style_aliases.yaml`).
 
   **Résolution `style_id`** (`data/mappings/beer_style_aliases.yaml`, T84,
   nouvel usage) : vocabulaire beer-analytics bien plus proche des noms
-  BJCP littéraux que celui de Yakima (68/89 noms en correspondance EXACTE
+  BJCP littéraux que celui de Yakima (98/123 noms en correspondance EXACTE
   et NON ambiguë, contre les libellés larges/ambigus de Yakima qui restent
-  `null`). 80/89 styles résolus au total sur la base réelle. Découverte en
-  cours de route : 7 variantes de « Specialty IPA » (Belgian/Black/Brown/
-  Brut/Red/Rye/White IPA, 184 à 6179 recettes chacune sur le seul chart
-  abv-histogram — volume réel non négligeable, vérifié en direct) que BJCP
-  ne couvre que par un seul style_id générique (21B) sans vital stats
-  propres à chaque variante. **Décision utilisateur (2026-08-27), après
-  discussion** : ne PAS fabriquer de nouvelles lignes `beer_styles` pour
-  ces variantes (aurait inventé un style_id/des vital stats BJCP qui
-  n'existent pas officiellement) — mappées à `21B` dans le fichier d'alias
-  (chaque variante garde sa propre ligne `style_recipe_stats`, clé
-  `style_slug` pas `style_id`, donc jamais fondue avec les autres) ;
-  rendre ces noms *cherchables individuellement* dans `browse` est le
-  sujet du nouveau **T130** (recherche par alias), pas de ce ticket. 9
-  noms beer-analytics n'ont AUCUN équivalent dans nos 110 styles BJCP 2021
-  ingérés (Kellerbier, Kentucky Common, Lichtenhainer, London Brown Ale,
-  Piwo Grodziskie, Pre-Prohibition Lager/Porter, Roggenbier, Sahti) —
-  `null`, vérifié en direct contre les 110 noms réels, pas une ambiguïté à
-  trancher.
+  `null`). **112/123 styles résolus au total** sur la base réelle finale.
+  Découverte en cours de route : 7 variantes de « Specialty IPA »
+  (Belgian/Black/Brown/Brut/Red/Rye/White IPA, 184 à 6179 recettes chacune
+  sur le seul chart abv-histogram — volume réel non négligeable, vérifié
+  en direct) que BJCP ne couvre que par un seul style_id générique (21B)
+  sans vital stats propres à chaque variante. **Décision utilisateur
+  (2026-08-27), après discussion** : ne PAS fabriquer de nouvelles lignes
+  `beer_styles` pour ces variantes (aurait inventé un style_id/des vital
+  stats BJCP qui n'existent pas officiellement) — mappées à `21B` dans le
+  fichier d'alias (chaque variante garde sa propre ligne
+  `style_recipe_stats`, clé `style_slug` pas `style_id`, donc jamais
+  fondue avec les autres) ; rendre ces noms *cherchables individuellement*
+  dans `browse` est le sujet du nouveau **T130** (recherche par alias),
+  pas de ce ticket. 11 noms beer-analytics n'ont AUCUN équivalent dans nos
+  110 styles BJCP 2021 ingérés (Kellerbier, Kentucky Common, Lichtenhainer,
+  London Brown Ale, Piwo Grodziskie, Pre-Prohibition Lager/Porter,
+  Roggenbier, Sahti, Specialty Wood-Aged Beer, Wood-Aged Beer — cette
+  dernière paire découverte le 28, aucune catégorie "Wood Beer" présente
+  dans notre jeu BJCP 2021 ingéré) — `null`, vérifié en direct contre les
+  110 noms réels, pas une ambiguïté à trancher.
 
   **Aucun changement GUI** — ticket infrastructure pure, pas d'entrée dans
   `_RECENT_UPDATES` (règle CLAUDE.md : uniquement pour du changement
