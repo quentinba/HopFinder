@@ -875,3 +875,61 @@ def parse_beerjson_styles(payload: dict) -> list[dict]:
                   srm_min=srm_min, srm_max=srm_max)
         out.append(row)
     return out
+
+
+# --------------------------------------------------------------------------- #
+# beer-analytics.com (T85, épique B) -- statistiques de recettes publiées
+# --------------------------------------------------------------------------- #
+_BA_CHART_RE = re.compile(r'data-chart="([^"]+)"')
+_BA_H1_RE = re.compile(r"<h1[^>]*>([^<]+)</h1>")
+_PANDAS_INTERVAL_RE = re.compile(r"^\(\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*\]$")
+
+
+def discover_beer_analytics_charts(html: str) -> dict[str, str]:
+    """{nom_chart: chemin_complet} depuis les attributs `data-chart="..."`
+    d'une page de style beer-analytics.com -- JAMAIS construits à la main :
+    le segment de catégorie dans l'URL diffère du slug de page affiché
+    (vérifié en direct, ex. page `/styles/india-pale-ale/american-ipa/` mais
+    charts sous `/styles/ipa/american-ipa/charts/...`, le ticket T85 le
+    documentait déjà, confirmé par un fetch réel). `nom_chart` = nom de
+    fichier sans `.json` (ex. `abv-histogram`)."""
+    out: dict[str, str] = {}
+    for path in _BA_CHART_RE.findall(html):
+        name = path.rsplit("/", 1)[-1]
+        if name.endswith(".json"):
+            name = name[: -len(".json")]
+        out[name] = path
+    return out
+
+
+def parse_beer_analytics_style_name(html: str) -> str | None:
+    """Nom affiché d'une page de style beer-analytics.com (`<h1>`) -- utilisé
+    pour la réconciliation vers un `style_id` BJCP via `data/mappings/
+    beer_style_aliases.yaml` (T84/T85, même fichier, nouvel usage). Vérifié
+    en direct : "American IPA" pour `/styles/ipa/american-ipa/`, forme
+    proche du nom BJCP mais PAS garantie identique -- d'où la réconciliation
+    par alias plutôt qu'un match direct sur `beer_styles.name`."""
+    m = _BA_H1_RE.search(html)
+    return m.group(1).strip() if m else None
+
+
+def plotly_traces(payload: dict) -> list[dict]:
+    """`payload["data"]` uniquement -- un chart JSON beer-analytics est un
+    objet Plotly complet, `payload["layout"]["template"]` fait à lui seul
+    ~90% du poids de la réponse et ne contient AUCUNE donnée (vérifié en
+    direct : abv-histogram/American IPA, ~8100 caractères de template Plotly
+    contre quelques centaines de caractères de data) -- ne jamais le parser
+    ni le stocker."""
+    return payload.get("data") or []
+
+
+def parse_pandas_interval(s: str) -> tuple[float, float]:
+    """Parse une chaîne d'intervalle pandas `"(5.0, 5.3]"` -- format RÉEL des
+    bins d'histogramme beer-analytics (vérifié en direct sur les 5 charts
+    abv/ibu/og/fg/color-srm de American IPA). Échoue BRUYAMMENT (`ValueError`)
+    si le format change -- jamais de repli silencieux qui inventerait un
+    bin faux (règle explicite du ticket T85)."""
+    m = _PANDAS_INTERVAL_RE.match(s.strip())
+    if not m:
+        raise ValueError(f"Format d'intervalle pandas beer-analytics inattendu : {s!r}")
+    return float(m.group(1)), float(m.group(2))

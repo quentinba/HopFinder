@@ -738,3 +738,128 @@ def test_ensure_columns_creates_hops_description_columns_without_wiping_existing
     con.close()
     assert row["name"] == "Citra"
     assert row["description"] is None
+
+
+# --------------------------------------------------------------------------- #
+# T85 -- beer-analytics.com (style_recipe_stats)
+# --------------------------------------------------------------------------- #
+
+_BA_SITEMAP_FIXTURE = (
+    "<?xml version=\"1.0\"?><urlset><url><loc>"
+    "https://www.beer-analytics.com/styles/india-pale-ale/american-ipa/"
+    "</loc></url></urlset>")
+
+_BA_STYLE_PAGE_FIXTURE = (
+    "<html><body><h1>American IPA</h1>"
+    '<div data-chart="/styles/ipa/american-ipa/charts/abv-histogram.json"></div>'
+    '<div data-chart="/styles/ipa/american-ipa/charts/ibu-histogram.json"></div>'
+    "</body></html>")
+
+# gabarit réduit (ticket T85 : "un seul trace, 3 bins") -- forme réelle
+# vérifiée en direct sur abv-histogram/American IPA (2026-08-27).
+_BA_ABV_CHART_FIXTURE = json.dumps({
+    "data": [{"x": ["(5.0, 5.3]", "(5.3, 5.6]", "(5.6, 5.9]"], "y": [10, 20, 5], "type": "bar"}],
+    "layout": {"template": "unused, jamais parsé"},
+})
+_BA_IBU_CHART_FIXTURE = json.dumps({
+    "data": [{"x": ["(30.0, 40.0]"], "y": [7], "type": "bar"}],
+    "layout": {},
+})
+
+_BA_FIXTURES = {
+    "/sitemap.xml": _BA_SITEMAP_FIXTURE,
+    # page fetchée à l'URL du SITEMAP (catégorie longue "india-pale-ale"),
+    # alors que les data-chart qu'elle contient pointent vers la catégorie
+    # COURTE "ipa" -- exactement l'écart documenté par le ticket T85.
+    "/styles/india-pale-ale/american-ipa/": _BA_STYLE_PAGE_FIXTURE,
+    "/styles/ipa/american-ipa/charts/abv-histogram.json": _BA_ABV_CHART_FIXTURE,
+    "/styles/ipa/american-ipa/charts/ibu-histogram.json": _BA_IBU_CHART_FIXTURE,
+}
+
+
+def test_ingest_beer_analytics_writes_bins_and_resolves_style_id(tmp_path, monkeypatch):
+    # aucun appel réseau : _beer_analytics_fetch et _load_yaml_mapping mockés.
+    monkeypatch.setattr(ingest, "_beer_analytics_fetch", lambda path, **kw: _BA_FIXTURES[path])
+    monkeypatch.setattr(ingest, "_load_yaml_mapping", lambda filename: {"American IPA": "21B"})
+
+    db_path = str(tmp_path / "t.db")
+    ingest.ingest_beer_analytics(db_path)
+
+    con = connect(db_path)
+    rows = [dict(r) for r in con.execute(
+        "SELECT style_id, style_slug, metric, bin_low, bin_high, count, source "
+        "FROM style_recipe_stats ORDER BY metric, bin_low")]
+    con.close()
+    assert rows == [
+        {"style_id": "21B", "style_slug": "american-ipa", "metric": "abv",
+         "bin_low": 5.0, "bin_high": 5.3, "count": 10, "source": "beer-analytics"},
+        {"style_id": "21B", "style_slug": "american-ipa", "metric": "abv",
+         "bin_low": 5.3, "bin_high": 5.6, "count": 20, "source": "beer-analytics"},
+        {"style_id": "21B", "style_slug": "american-ipa", "metric": "abv",
+         "bin_low": 5.6, "bin_high": 5.9, "count": 5, "source": "beer-analytics"},
+        {"style_id": "21B", "style_slug": "american-ipa", "metric": "ibu",
+         "bin_low": 30.0, "bin_high": 40.0, "count": 7, "source": "beer-analytics"},
+    ]
+
+def test_ingest_beer_analytics_leaves_style_id_null_when_unresolved(tmp_path, monkeypatch):
+    # aucun alias connu -> style_id NULL, jamais deviné par similarité.
+    monkeypatch.setattr(ingest, "_beer_analytics_fetch", lambda path, **kw: _BA_FIXTURES[path])
+    monkeypatch.setattr(ingest, "_load_yaml_mapping", lambda filename: {})
+
+    db_path = str(tmp_path / "t.db")
+    ingest.ingest_beer_analytics(db_path)
+
+    con = connect(db_path)
+    style_ids = {r[0] for r in con.execute("SELECT DISTINCT style_id FROM style_recipe_stats")}
+    con.close()
+    assert style_ids == {None}
+
+def test_ingest_beer_analytics_creates_table_without_wiping_existing_data(tmp_path, monkeypatch):
+    # même piège que T81/T83/T106/T107 : style_recipe_stats doit pouvoir être
+    # créée sur une base déjà peuplée sans passer par init_db.
+    con = connect(str(tmp_path / "t.db"))
+    init_db(con)
+    con.execute("INSERT INTO hops (variety, name, region, sources, purpose) "
+               "VALUES ('citra', 'Citra', 'United States', 'yakima', NULL)")
+    con.execute("DROP TABLE style_recipe_stats")
+    con.commit(); con.close()
+
+    monkeypatch.setattr(ingest, "_beer_analytics_fetch", lambda path, **kw: _BA_FIXTURES[path])
+    monkeypatch.setattr(ingest, "_load_yaml_mapping", lambda filename: {"American IPA": "21B"})
+    ingest.ingest_beer_analytics(str(tmp_path / "t.db"))
+
+    con = connect(str(tmp_path / "t.db"))
+    hops = [r[0] for r in con.execute("SELECT variety FROM hops")]
+    n_bins = con.execute("SELECT COUNT(*) FROM style_recipe_stats").fetchone()[0]
+    con.close()
+    assert hops == ["citra"]
+    assert n_bins == 4
+
+def test_beer_analytics_cache_filename_flattens_path():
+    assert ingest._beer_analytics_cache_filename(
+        "/styles/ipa/american-ipa/charts/abv-histogram.json"
+    ) == "styles_ipa_american-ipa_charts_abv-histogram.json"
+    assert ingest._beer_analytics_cache_filename(
+        "/styles/ipa/american-ipa/"
+    ) == "styles_ipa_american-ipa.html"
+
+def test_beer_analytics_fetch_uses_disk_cache_and_skips_network_on_hit(tmp_path, monkeypatch):
+    # `requests`/`time` sont importés LOCALEMENT dans _beer_analytics_fetch
+    # (même style que le reste du module) -- patcher le module `requests`
+    # global fonctionne quand même (même objet partagé via sys.modules).
+    import requests as _requests
+    calls = []
+    class FakeResponse:
+        text = "cached content"
+        def raise_for_status(self): pass
+    def fake_get(url, timeout, headers):
+        calls.append(url)
+        return FakeResponse()
+    monkeypatch.setattr(_requests, "get", fake_get)
+
+    cache_dir = str(tmp_path / "cache")
+    text1 = ingest._beer_analytics_fetch("/styles/ipa/american-ipa/", cache_dir=cache_dir, sleep=0)
+    text2 = ingest._beer_analytics_fetch("/styles/ipa/american-ipa/", cache_dir=cache_dir, sleep=0)
+    assert text1 == "cached content"
+    assert text2 == "cached content"
+    assert len(calls) == 1  # deuxième appel = hit de cache, aucun 2e GET réseau

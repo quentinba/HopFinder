@@ -153,6 +153,13 @@ def main(argv=None):
                     help="millésime BJCP -- 2015 n'existe pas dans ce dépôt et échoue "
                          "explicitement (voir BACKLOG.md T81)")
 
+    ba = sub.add_parser("ingest-beer-analytics",
+                        help="statistiques de recettes par style (beer-analytics.com) : "
+                             "distributions ABV/IBU/OG/FG/SRM observées, agrégateur — pas une mesure de labo")
+    ba.add_argument("--db", default=DEFAULT_DB)
+    ba.add_argument("--sleep", type=float, default=1.0)
+    ba.add_argument("--limit", type=int)
+
     am = sub.add_parser("amplify", help="cas d'usage : amplify")
     am.add_argument("note")
     am.add_argument("--db", default=DEFAULT_DB)
@@ -229,6 +236,8 @@ def main(argv=None):
         ingest.ingest_beermaverick(a.db, limit=a.limit, sleep=a.sleep); return 0
     if a.cmd == "ingest-styles":
         ingest.ingest_beer_styles(a.db, year=a.year); return 0
+    if a.cmd == "ingest-beer-analytics":
+        ingest.ingest_beer_analytics(a.db, limit=a.limit, sleep=a.sleep); return 0
 
     con = connect(a.db)
     try:

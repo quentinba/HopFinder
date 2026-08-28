@@ -32,7 +32,7 @@ import sqlite3
 from . import parsers, reference
 from .schema import (init_db, validate_and_repair, DROP_COMPOUNDS, ensure_table, ensure_columns,
                      BEER_STYLES_SCHEMA, HOP_BEER_STYLES_SCHEMA, HOP_IDENTITY_COLUMNS,
-                     HOP_DESCRIPTION_COLUMNS)
+                     HOP_DESCRIPTION_COLUMNS, STYLE_RECIPE_STATS_SCHEMA)
 
 MAPPINGS_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "data", "mappings")
 
@@ -1531,3 +1531,170 @@ def ingest_beer_styles(out_db: str, year: int = 2021,
     print(f"BJCP {year} : {len(rows)} styles ingérés dans {out_db!r} "
          f"({n_no_vitals} sans vital stats, héritent du style de base).")
     con.close()
+
+
+# --------------------------------------------------------------------------- #
+# beer-analytics.com (T85, épique B) -- statistiques de recettes publiées
+# --------------------------------------------------------------------------- #
+BEER_ANALYTICS_BASE = "https://www.beer-analytics.com"
+BEER_ANALYTICS_CACHE_DIR = "data/cache/beer_analytics"
+
+# chart -> metric stockée dans style_recipe_stats.metric
+BEER_ANALYTICS_HISTOGRAM_CHARTS = {
+    "abv-histogram": "abv",
+    "ibu-histogram": "ibu",
+    "original-gravity-histogram": "og",
+    "final-gravity-histogram": "fg",
+    "color-srm-histogram": "srm",
+}
+
+# page de style : deux segments après /styles/ (catégorie + style), jamais la
+# page catégorie seule (un seul segment, ex. /styles/ipa/) ni l'index
+# /styles/ -- vérifié en direct sur le sitemap réel (159 URLs de style).
+_BA_STYLE_PAGE_RE = re.compile(
+    r"https://www\.beer-analytics\.com(/styles/[a-z0-9-]+/[a-z0-9-]+/)")
+
+
+def _beer_analytics_cache_filename(path: str) -> str:
+    """Chemin `path` (ex. `/styles/ipa/american-ipa/charts/abv-histogram.
+    json`) aplati en nom de fichier cache -- `/` -> `_`, extension `.json`
+    conservée si déjà présente (charts), sinon `.html` par défaut (pages de
+    style, dont on a besoin du HTML complet pour `data-chart`)."""
+    flat = path.strip("/").replace("/", "_")
+    return flat if flat.endswith(".json") else flat + ".html"
+
+
+def _beer_analytics_fetch(path: str, cache_dir: str = BEER_ANALYTICS_CACHE_DIR,
+                          timeout: float = 30.0, sleep: float = 1.0) -> str:
+    """GET cache-first sur `BEER_ANALYTICS_BASE + path` (T85/T89 : cache
+    disque OBLIGATOIRE, une seule passe réelle, `User-Agent` identifiable).
+    Aucun délai sur un hit de cache -- seul un fetch réseau réel attend
+    `sleep` secondes. Écrit le cache via fichier temporaire + `os.replace`
+    (même garde que `download_bjcp_styles`) : un téléchargement interrompu ne
+    doit jamais laisser un fichier partiel passer pour un cache valide.
+    Utilisée aussi bien pour les pages HTML de style (découverte des charts)
+    que pour les charts JSON eux-mêmes (voir `_beer_analytics_get`) -- même
+    mécanisme de cache pour les deux, le ticket ne distinguait que les
+    charts mais rien ne justifie de refetcher les pages HTML à chaque run."""
+    import tempfile
+    import time
+
+    import requests
+
+    os.makedirs(cache_dir, exist_ok=True)
+    cache_path = os.path.join(cache_dir, _beer_analytics_cache_filename(path))
+    if os.path.exists(cache_path):
+        with open(cache_path, encoding="utf-8") as f:
+            return f.read()
+
+    resp = requests.get(BEER_ANALYTICS_BASE + path, timeout=timeout,
+                        headers={"User-Agent": "hopmatch/0.1 (research)"})
+    resp.raise_for_status()
+    text = resp.text
+    fd, tmp_path = tempfile.mkstemp(dir=cache_dir)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(tmp_path, cache_path)
+    except BaseException:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        raise
+    time.sleep(sleep)
+    return text
+
+
+def _beer_analytics_get(path: str, **kwargs) -> dict:
+    """`_beer_analytics_fetch` + `json.loads` -- pour les endpoints charts
+    (toujours JSON), voir `parsers.plotly_traces`/`parse_pandas_interval`
+    pour l'exploitation du payload."""
+    import json
+    return json.loads(_beer_analytics_fetch(path, **kwargs))
+
+
+def ingest_beer_analytics(out_db: str, limit: int | None = None, sleep: float = 1.0,
+                          timeout: float = 30.0) -> None:
+    """
+    beer-analytics.com (T85, fondation de l'épique B) : distributions RÉELLES
+    (ABV/IBU/OG/FG/SRM) observées dans des recettes homebrew publiées, par
+    style -- table `style_recipe_stats`. Agrégateur de recettes, PAS du BJCP
+    (`beer_styles`) ni une mesure de labo -- réserve à afficher partout où
+    cette donnée apparaît (T89).
+
+    URLs de charts jamais construites à la main (`parsers.discover_beer_
+    analytics_charts`, voir sa docstring) : parsées depuis le HTML de chaque
+    page de style (`data-chart="..."`), le segment de catégorie de l'URL
+    diffère du slug de page affiché.
+
+    `style_id` résolu via `data/mappings/beer_style_aliases.yaml` (T84, même
+    fichier, nouvel usage sur le nom de style anglais `<h1>` -- voir
+    `parsers.parse_beer_analytics_style_name`) -- `NULL` si absent du fichier
+    ou non résolu, jamais deviné par similarité de texte.
+
+    Histogrammes PRÉ-BINNÉS avec outliers déjà retirés côté beer-analytics --
+    `style_recipe_stats` stocke les bins bruts (`bin_low`/`bin_high`/`count`),
+    jamais un percentile dérivé (impossible à calculer honnêtement depuis des
+    bins agrégés, voir CLAUDE.md/BACKLOG.md T85).
+    """
+    from .schema import connect
+    con = connect(out_db)
+    if not con.execute("SELECT name FROM sqlite_master WHERE name='hops'").fetchone():
+        init_db(con); seed_reference(con); con.commit()
+    else:
+        ensure_table(con, "style_recipe_stats", STYLE_RECIPE_STATS_SCHEMA)  # base existante : ne PAS la vider
+    style_aliases = _load_yaml_mapping("beer_style_aliases.yaml")
+
+    sitemap = _beer_analytics_fetch("/sitemap.xml", timeout=timeout, sleep=sleep)
+    style_paths = sorted(set(_BA_STYLE_PAGE_RE.findall(sitemap)))
+    if limit:
+        style_paths = style_paths[:limit]
+    print(f"beer-analytics : {len(style_paths)} pages de style (sitemap)")
+
+    from datetime import datetime, timezone
+    fetched_at = datetime.now(timezone.utc).isoformat()
+
+    n_resolved = n_unresolved = n_bins = 0
+    unresolved_names: set[str] = set()
+    for i, style_path in enumerate(style_paths, 1):
+        try:
+            html = _beer_analytics_fetch(style_path, timeout=timeout, sleep=sleep)
+        except Exception as e:  # noqa
+            print(f"  !! {style_path}: {e}"); continue
+        charts = parsers.discover_beer_analytics_charts(html)
+        style_name = parsers.parse_beer_analytics_style_name(html)
+        style_id = style_aliases.get(style_name) if style_name else None
+        if style_id:
+            n_resolved += 1
+        else:
+            n_unresolved += 1
+            if style_name:
+                unresolved_names.add(style_name)
+        style_slug = style_path.strip("/").rsplit("/", 1)[-1]
+
+        for chart_name, metric in BEER_ANALYTICS_HISTOGRAM_CHARTS.items():
+            chart_path = charts.get(chart_name)
+            if not chart_path:
+                continue
+            try:
+                payload = _beer_analytics_get(chart_path, timeout=timeout, sleep=sleep)
+            except Exception as e:  # noqa
+                print(f"  !! {chart_path}: {e}"); continue
+            traces = parsers.plotly_traces(payload)
+            if not traces:
+                continue
+            trace = traces[0]
+            for x, y in zip(trace["x"], trace["y"]):
+                bin_low, bin_high = parsers.parse_pandas_interval(x)
+                con.execute(
+                    "INSERT OR REPLACE INTO style_recipe_stats VALUES (?,?,?,?,?,?,?,?)",
+                    (style_id, style_slug, metric, bin_low, bin_high, int(y),
+                     "beer-analytics", fetched_at))
+                n_bins += 1
+        if i % 10 == 0:
+            con.commit()
+    con.commit(); con.close()
+    print(f"  {n_resolved} style_id résolus, {n_unresolved} non résolus, {n_bins} bins écrits")
+    if unresolved_names:
+        preview = ", ".join(sorted(unresolved_names)[:10])
+        print(f"  noms de style non résolus (aperçu) : {preview}"
+             + (f" (+{len(unresolved_names) - 10} autres)" if len(unresolved_names) > 10 else ""))

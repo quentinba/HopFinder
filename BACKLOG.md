@@ -618,7 +618,62 @@ Elles sont écrites pour qu'aucune décision implicite ne reste à deviner.
 
 ## 3. Épique B — Statistiques de recettes (beer-analytics)
 
-- [ ] **T85 — Client `ingest_beer_analytics` + distributions par style**
+- [x] **T85 — Client `ingest_beer_analytics` + distributions par style**
+
+  **Compte rendu (2026-08-27/28)** : infrastructure et table livrées et
+  testées (fixtures, aucun appel réseau requis par les tests) exactement
+  comme spécifié — `ingest._beer_analytics_fetch`/`_beer_analytics_get`
+  (cache disque `data/cache/beer_analytics/`, écriture atomique fichier
+  temporaire + `os.replace`, comme `download_bjcp_styles`/T81), `parsers.
+  discover_beer_analytics_charts`/`plotly_traces`/`parse_pandas_interval`
+  (vérifiés en direct sur 5 charts réels : `x` = intervalles pandas, `y` =
+  effectifs, `layout` ignoré, ~90% du poids confirmé — 8107 caractères de
+  template contre quelques centaines de data). `style_recipe_stats` créée
+  (+ `ensure_table`, + `DROP` dans `init_db`), CLI `ingest-beer-analytics`.
+
+  ⚠ **Crawl complet interrompu délibérément, pas un bug.** Le site a
+  brutalement ralenti après ~500 requêtes/1h30 (rythme initial ~13
+  requêtes/min tombé à ~0,1/min, connexion TCP `ESTABLISHED` mais
+  quasi-immobile plusieurs dizaines de minutes) — comportement typique
+  d'un rate-limiting informel côté serveur même à notre rythme poli d'1
+  req/s. Décision : **arrêter plutôt que forcer** (cohérent avec l'esprit
+  de T89, « prévenir avant de lire régulièrement » — grinder à travers un
+  ralentissement délibéré serait le contraire de « une seule passe,
+  respectueuse »). **89/159 pages de style réellement ingérées** dans la
+  base réelle (`aromahops.db`), 4768 bins écrits, cache disque conservé
+  (réutilisable tel quel : reprendre plus tard ne re-fetch QUE les ~70
+  pages manquantes, le reste rejoue depuis le cache en quelques secondes).
+  Les tickets suivants (T86-T89) réutilisent l'infrastructure, pas un
+  compte figé de styles — aucun blocage réel.
+
+  **Résolution `style_id`** (`data/mappings/beer_style_aliases.yaml`, T84,
+  nouvel usage) : vocabulaire beer-analytics bien plus proche des noms
+  BJCP littéraux que celui de Yakima (68/89 noms en correspondance EXACTE
+  et NON ambiguë, contre les libellés larges/ambigus de Yakima qui restent
+  `null`). 80/89 styles résolus au total sur la base réelle. Découverte en
+  cours de route : 7 variantes de « Specialty IPA » (Belgian/Black/Brown/
+  Brut/Red/Rye/White IPA, 184 à 6179 recettes chacune sur le seul chart
+  abv-histogram — volume réel non négligeable, vérifié en direct) que BJCP
+  ne couvre que par un seul style_id générique (21B) sans vital stats
+  propres à chaque variante. **Décision utilisateur (2026-08-27), après
+  discussion** : ne PAS fabriquer de nouvelles lignes `beer_styles` pour
+  ces variantes (aurait inventé un style_id/des vital stats BJCP qui
+  n'existent pas officiellement) — mappées à `21B` dans le fichier d'alias
+  (chaque variante garde sa propre ligne `style_recipe_stats`, clé
+  `style_slug` pas `style_id`, donc jamais fondue avec les autres) ;
+  rendre ces noms *cherchables individuellement* dans `browse` est le
+  sujet du nouveau **T130** (recherche par alias), pas de ce ticket. 9
+  noms beer-analytics n'ont AUCUN équivalent dans nos 110 styles BJCP 2021
+  ingérés (Kellerbier, Kentucky Common, Lichtenhainer, London Brown Ale,
+  Piwo Grodziskie, Pre-Prohibition Lager/Porter, Roggenbier, Sahti) —
+  `null`, vérifié en direct contre les 110 noms réels, pas une ambiguïté à
+  trancher.
+
+  **Aucun changement GUI** — ticket infrastructure pure, pas d'entrée dans
+  `_RECENT_UPDATES` (règle CLAUDE.md : uniquement pour du changement
+  visible par l'utilisateur final).
+
+  --- Ticket original ci-dessous, conservé pour référence ---
 
   **Fondation de toute l'épique B.** Écrire d'abord l'infrastructure commune
   (T85), les tickets suivants la réutilisent.
@@ -2021,6 +2076,43 @@ Mais la transparence doit être RÉELLE, pas un simple adverbe :
   `reference.DESCRIPTOR_FAMILIES` existe réellement dans le vocabulaire
   `hop_descriptors` — même principe que
   `test_ingredient_descriptors_keys_and_terms_match_real_vocabulary`.
+
+- [ ] **T130 — Recherche de style BJCP par alias (Beer styles)**
+
+  **Origine** : discussion T85 (2026-08-27). beer-analytics.com a des noms
+  de style plus granulaires que BJCP 2021 sur certaines familles (ex. 7
+  variantes de « Specialty IPA » : Belgian/Black/Brown/Brut/Red/Rye/White
+  IPA — chacune avec un volume réel non négligeable, 184 à 6 179 recettes
+  selon la variante, vérifié en direct sur les charts `abv-histogram`
+  cache). BJCP ne définit qu'**un seul** style_id (21B) avec un seul jeu de
+  vital stats officielles pour tout ce groupe — ajouter « Black IPA » comme
+  une ligne à part dans `beer_styles` fabriquerait une entrée BJCP qui
+  n'existe pas (le style_id serait inventé, et copier les vital stats de
+  21B laisserait croire que BJCP les a définies spécifiquement pour Black
+  IPA). **Refusé pour cette raison** (décision utilisateur explicite,
+  2026-08-27) : `beer_styles` reste un reflet fidèle et exclusif du
+  styleguide BJCP 2021 réel, jamais mélangé à une taxonomie tierce plus
+  fine.
+
+  **Ce que ce ticket fait à la place** : rendre ces noms plus fins
+  **cherchables** dans l'outil `browse` (mode « Beer styles », T82) sans
+  toucher `beer_styles`. Étendre `data/mappings/beer_style_aliases.yaml`
+  (même fichier que T84/T85, nouvel usage) avec ces variantes -> `21B`
+  (et toute variante similaire découverte ailleurs), puis faire en sorte
+  que le sélecteur de style de `browse` accepte de RÉSOUDRE un nom tapé qui
+  matche une clé du fichier d'alias vers l'entrée BJCP correspondante —
+  taper « Black IPA » doit ouvrir la fiche « Specialty IPA (21B) »,
+  honnêtement étiquetée comme telle (jamais une fiche « Black IPA »
+  fabriquée). Les styles beer-analytics **sans aucun équivalent BJCP** dans
+  nos 110 styles ingérés (ex. Kellerbier, Kentucky Common, Lichtenhainer,
+  London Brown Ale, Piwo Grodziskie, Pre-Prohibition Lager/Porter,
+  Roggenbier, Sahti — vérifiés absents en direct, pas une ambiguïté à
+  trancher) restent `null` dans le fichier d'alias : rien à résoudre pour
+  eux tant qu'un ticket séparé ne construit pas une vue qui ne dépend pas
+  de `beer_styles`.
+
+  **Dépend de T85** (le fichier d'alias doit porter les entrées beer-
+  analytics, découvertes au fil de son ingestion).
 
   **Statut** : opportuniste, ne bloque rien et n'est bloqué par rien
   -- à faire quand une session GUI légère est utile entre deux tickets plus

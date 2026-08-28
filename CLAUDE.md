@@ -228,6 +228,37 @@ réserve affichée systématiquement en GUI. HTML statique, `robots.txt` ouvert.
   houblon↔houblon, distincte des deux BeerMaverick — les trois affichées
   séparément, jamais fusionnées.
 
+### beer-analytics.com — statistiques de recettes (épique B, T85+)
+Agrégateur de recettes homebrew publiées, PAS du BJCP ni une mesure de labo.
+`ingest.ingest_beer_analytics` → `style_recipe_stats` (distributions ABV/IBU/
+OG/FG/SRM par style, pré-binnées, outliers déjà retirés côté source — jamais
+un percentile dérivable, GUI future : « observed distribution », jamais
+« P5–P95 »). URLs de charts (`data-chart="…"` dans le HTML de page, JAMAIS
+construites à la main — le segment de catégorie diverge du slug de page
+affiché, ex. page `/styles/india-pale-ale/american-ipa/` mais charts sous
+`/styles/ipa/american-ipa/charts/…`).
+- **Cache disque `data/cache/beer_analytics/` réellement obligatoire, pas
+  cosmétique** : le site a ralenti brutalement (~13 req/min → ~0,1 req/min)
+  après ~500 requêtes/1h30 même à notre rythme poli d'1 req/s — rate-limiting
+  informel probable. Crawl complet arrêté délibérément plutôt que forcé
+  (89/159 styles réellement ingérés, 2026-08-27/28) : reprendre plus tard ne
+  refetch que le manquant, tout le reste rejoue depuis le cache en secondes.
+  Ne pas retenter un crawl complet agressif sans un délai plus long entre
+  requêtes ou sans avoir d'abord envoyé le message de prise de contact prévu
+  (T89, `docs/OUTREACH_beer-analytics.md`).
+- **`style_id` (résolution BJCP) jamais fabriqué en ajoutant une ligne
+  `beer_styles`.** beer-analytics a une granularité de style PARFOIS plus
+  fine que BJCP (ex. 7 variantes de « Specialty IPA » — Black/White/Red IPA
+  etc., chacune avec un volume réel de centaines à milliers de recettes) que
+  BJCP ne couvre que par UN SEUL style_id générique (21B) sans vital stats
+  propres à chaque variante. Ajouter « Black IPA » comme ligne `beer_styles`
+  distincte inventerait un style_id/des vital stats BJCP qui n'existent pas
+  officiellement — refusé (décision utilisateur, 2026-08-27). Ces variantes
+  sont mappées à 21B dans `data/mappings/beer_style_aliases.yaml` (chacune
+  garde sa propre ligne `style_recipe_stats` par `style_slug`, jamais fondue
+  avec les autres) ; les rendre cherchables individuellement dans `browse`
+  est le sujet de T130 (recherche par alias), pas de l'ingestion elle-même.
+
 ### Licence
 Code MIT. FooDB/FlavorDB2 non commerciales. BeerMaverick sans licence de données
 publiée — attribution systématique, lecture seule, esprit non-commercial.

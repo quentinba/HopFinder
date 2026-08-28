@@ -1,6 +1,6 @@
 # Editorial style label -> BJCP 2021 style_id, or null.
 #
-# T84 backlog. Two intended uses, one file (never fused/deduplicated
+# T84 backlog. Three intended uses, one file (never fused/deduplicated
 # differently per use):
 #   1. Yakima Chief's `imported_fields.beer_types` (Algolia, T83) -- 47
 #      distinct labels observed live on 144/153 varieties (2026-08-27),
@@ -10,6 +10,10 @@
 #      (e.g. "India Pale Ale (sonstige)", "Deutsches Pilsner", "Amber
 #      Ale") -- not yet added, MMuM ingestion (T91) hasn't run. Add German
 #      keys to this SAME file when T91/T92 land, reviewed the same way.
+#   3. beer-analytics.com style page names (T85, `<h1>`, English) -- see
+#      the dedicated section near the end of this file. Distinct vocabulary
+#      from Yakima's (much closer to literal BJCP names, but with EXTRA
+#      granularity BJCP doesn't have -- see that section's own header).
 #
 # Every non-null value here was checked BY HAND against BJCP 2021
 # (`beer_styles.style_id`, 110 real styles) -- never fuzzy-matched or
@@ -81,3 +85,126 @@
 "American Style Pilsner": null   # 1  -- no matching BJCP entry
 "Summer Ale": null               # 1  -- not a formal BJCP style name
 "Rye Ale": null                  # 1  -- rye is an ingredient variant across many styles, not its own BJCP style
+
+# =============================================================================
+# beer-analytics.com style page names (T85, 2026-08-27) -- THIRD usage of this
+# file (see file header). Extracted from live <h1> text on 89/159 style pages
+# (partial: the full 159-style crawl was interrupted mid-run by the site
+# slowing down sharply after ~500 requests over ~1h30, consistent with
+# informal rate-limiting even at our polite 1 req/s -- stopped deliberately
+# rather than grinding through, see BACKLOG.md T85 compte-rendu. The
+# remaining ~70 style names will surface as unresolved on a future resumed
+# run -- the disk cache under data/cache/beer_analytics/ already holds
+# everything fetched so far, a resume is cheap). Unlike Yakima's editorial
+# vocabulary (T84 section above, mostly BROAD/ambiguous labels), beer-
+# analytics names are near-literal BJCP 2021 style names -- 68/89 resolved
+# by EXACT, UNAMBIGUOUS match against `beer_styles.name` (single style_id
+# candidate each, unlike Yakima's "IPA"/"Lager"/"Stout" which each span many
+# BJCP ids and stay null above).
+
+# --- Exact BJCP name match (68) ---------------------------------------------
+"Alternative Grain Beer": "31A"
+"Alternative Sugar Beer": "31B"
+"American Amber Ale": "19A"
+"American Brown Ale": "19C"
+"American IPA": "21A"
+"American Porter": "20A"
+"American Stout": "20B"
+"Australian Sparkling Ale": "12B"
+"Belgian Dark Strong Ale": "26D"
+"Belgian Dubbel": "26B"
+"Belgian Pale Ale": "24B"
+"Belgian Single": "26A"
+"Belgian Tripel": "26C"
+"Berliner Weisse": "23A"
+"Best Bitter": "11B"
+"Bière de Garde": "24C"
+"Brett Beer": "28A"
+"British Brown Ale": "13B"
+"British Golden Ale": "12A"
+"California Common": "19B"
+"Czech Amber Lager": "3C"
+"Czech Dark Lager": "3D"
+"Czech Pale Lager": "3A"
+"Czech Premium Pale Lager": "3B"
+"Dark Mild": "13A"
+"Dunkles Bock": "6C"
+"Dunkles Weissbier": "10B"
+"English IPA": "12C"
+"English Porter": "13C"
+"Festbier": "4B"
+"Flanders Red Ale": "23B"
+"Foreign Extra Stout": "16D"
+"Fruit Lambic": "23F"
+"Fruit and Spice Beer": "29B"
+"German Helles Exportbier": "5C"
+"German Leichtbier": "5A"
+"German Pils": "5D"
+"Gose": "23G"
+"Grape Ale": "29D"
+"Hazy IPA": "21C"
+"Imperial Stout": "20C"
+"International Amber Lager": "2B"
+"International Dark Lager": "2C"
+"International Pale Lager": "2A"
+"Irish Extra Stout": "15C"
+"Irish Red Ale": "15A"
+"Irish Stout": "15B"
+"Kölsch": "5B"
+"Lambic": "23D"
+"Mixed-Fermentation Sour Beer": "28B"
+"Munich Dunkel": "8A"
+"Märzen": "6A"
+"Oatmeal Stout": "16B"
+"Ordinary Bitter": "11A"
+"Oud Bruin": "23C"
+"Rauchbier": "6B"
+"Schwarzbier": "8B"
+"Specialty Fruit Beer": "29C"
+"Specialty IPA": "21B"
+"Straight Sour Beer": "28D"
+"Strong Bitter": "11C"
+"Sweet Stout": "16A"
+"Tropical Stout": "16C"
+"Vienna Lager": "7A"
+"Weissbier": "10A"
+"Weizenbock": "10C"
+"Wild Specialty Beer": "28C"
+"Witbier": "24A"
+
+# --- Specialty IPA sub-variants (7) ------------------------------------------
+# BJCP has only ONE style_id (21B) with one official vital-stat range for
+# this whole family -- these 7 are beer-analytics' own finer split, each with
+# real, non-trivial recipe volume (184-6179 recipes on the abv-histogram
+# chart alone, verified live from cache 2026-08-27: Black IPA 6179, Red IPA
+# 2671, Rye IPA 1960, Belgian IPA 1039, White IPA 799, Brown IPA 384, Brut
+# IPA 184). Mapped to 21B here (decision: user, 2026-08-27) so they resolve
+# to a real BJCP entry rather than staying invisible -- explicitly NOT by
+# adding fabricated rows to `beer_styles` (would invent a BJCP style_id/vital
+# stats that don't officially exist for e.g. "Black IPA" alone). Findability
+# by their OWN name (not blended under "Specialty IPA") is T130's job, via
+# alias-aware search in `browse`, not via a separate style_id here.
+"Belgian IPA": "21B"
+"Black IPA": "21B"
+"Brown IPA": "21B"
+"Brut IPA": "21B"
+"Red IPA": "21B"
+"Rye IPA": "21B"
+"White IPA": "21B"
+
+# --- No BJCP 2021 equivalent in our ingested 110 styles (9) ------------------
+# Not an ambiguity to weigh (unlike the Yakima null tier above, where several
+# BJCP ids were EACH defensible) -- these genuinely don't exist under any
+# style_id in `beer_styles` (checked live against all 110 real names,
+# 2026-08-27). Historical/regional styles beer-analytics tracks that BJCP
+# 2021 doesn't cover (or covers only inside free-text History fields we
+# don't index), or newer community terms.
+"Kellerbier": null
+"Kentucky Common": null
+"Lichtenhainer": null
+"London Brown Ale": null
+"Piwo Grodziskie": null
+"Pre-Prohibition Lager": null
+"Pre-Prohibition Porter": null
+"Roggenbier": null
+"Sahti": null
