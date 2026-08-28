@@ -32,7 +32,7 @@ import sqlite3
 from . import parsers, reference
 from .schema import (init_db, validate_and_repair, DROP_COMPOUNDS, ensure_table, ensure_columns,
                      BEER_STYLES_SCHEMA, HOP_BEER_STYLES_SCHEMA, HOP_IDENTITY_COLUMNS,
-                     HOP_DESCRIPTION_COLUMNS, STYLE_RECIPE_STATS_SCHEMA)
+                     HOP_DESCRIPTION_COLUMNS, STYLE_RECIPE_STATS_SCHEMA, STYLE_HOP_USAGE_SCHEMA)
 
 MAPPINGS_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "data", "mappings")
 
@@ -1557,11 +1557,27 @@ _BA_STYLE_PAGE_RE = re.compile(
 
 def _beer_analytics_cache_filename(path: str) -> str:
     """Chemin `path` (ex. `/styles/ipa/american-ipa/charts/abv-histogram.
-    json`) aplati en nom de fichier cache -- `/` -> `_`, extension `.json`
-    conservée si déjà présente (charts), sinon `.html` par défaut (pages de
-    style, dont on a besoin du HTML complet pour `data-chart`)."""
-    flat = path.strip("/").replace("/", "_")
-    return flat if flat.endswith(".json") else flat + ".html"
+    json`, ou avec query string T86 `.../popular-hops.json?filter=aroma`)
+    aplati en nom de fichier cache -- `/` -> `_`, extension du fichier
+    conservée (déterminée sur la partie AVANT `?`, jamais après -- bug réel
+    trouvé en direct : sans ça, `....json?filter=aroma` ne se termine plus
+    par `.json` littéralement, tombait dans le repli `.html` alors que le
+    contenu réel est du JSON). Query string sanitisée en suffixe de nom de
+    fichier (`?`/`=`/`&` -> `_`, séparateur `__`) plutôt qu'ignorée -- deux
+    filtres différents du même chart (`?filter=aroma` vs `?filter=
+    bittering`) doivent avoir des entrées de cache DISTINCTES, jamais
+    partager la même (collision réelle sinon, ces deux URLs renvoient des
+    payloads différents, vérifié en direct T86)."""
+    base, _, query = path.partition("?")
+    last_segment = base.rsplit("/", 1)[-1]
+    if "." in last_segment:
+        stem, ext = base.rsplit(".", 1)
+    else:
+        stem, ext = base, "html"
+    flat = stem.strip("/").replace("/", "_")
+    if query:
+        flat += "__" + re.sub(r"[^a-zA-Z0-9_-]", "_", query)
+    return f"{flat}.{ext}"
 
 
 def _beer_analytics_fetch(path: str, cache_dir: str = BEER_ANALYTICS_CACHE_DIR,
@@ -1698,3 +1714,118 @@ def ingest_beer_analytics(out_db: str, limit: int | None = None, sleep: float = 
         preview = ", ".join(sorted(unresolved_names)[:10])
         print(f"  noms de style non résolus (aperçu) : {preview}"
              + (f" (+{len(unresolved_names) - 10} autres)" if len(unresolved_names) > 10 else ""))
+
+
+# --------------------------------------------------------------------------- #
+# beer-analytics.com (T86) -- quels houblons pour quel style, et combien
+# --------------------------------------------------------------------------- #
+# Onglets réels "Used for" (Any/Bittering/Aroma/Dry-Hop) sur les charts
+# popular-hops*.json -- vérifié en direct par reverse engineering du bundle
+# JS (`/static/app.js`, T86) : PAS un filtrage client (le ticket envisageait
+# les deux issues), ce sont de vraies requêtes GET avec un paramètre
+# `?filter=<valeur>` sur la MÊME URL de chart (`Chart.load({filter: i})` ->
+# `getRequest(this.chartUrl, {filter: i}, ...)` dans le bundle minifié).
+# "any" = onglet "Any" = AUCUN paramètre (pas de filtre littéral "any" côté
+# site). Ordre choisi = ordre de découverte du DOM (voir data-filter="" en
+# premier dans le HTML de American IPA).
+BEER_ANALYTICS_HOP_USAGE_TYPES = ("any", "bittering", "aroma", "dry-hop")
+
+
+def ingest_style_hop_usage(out_db: str, limit: int | None = None, sleep: float = 1.0,
+                           timeout: float = 30.0) -> None:
+    """
+    beer-analytics.com (T86) : quels houblons sont réellement utilisés pour
+    un style, et combien -- table `style_hop_usage`. Réutilise les mêmes
+    pages de style que T85 (`_beer_analytics_fetch` cache-first : aucun
+    refetch réseau pour le HTML déjà en cache) mais ajoute deux charts par
+    style ET par onglet d'usage (`BEER_ANALYTICS_HOP_USAGE_TYPES`, voir sa
+    docstring) : `popular-hops.json` (part de recettes, SÉRIE TEMPORELLE --
+    `parsers.parse_time_series_trace` garde la dernière valeur ET une
+    moyenne 24 mois, deux questions différentes, jamais l'une n'écrase
+    l'autre) et `popular-hops-amount.json` (dosage, boxplot q1/median/q3 via
+    `parsers.parse_box_trace`).
+
+    ⚠ `usage_type` fait partie de la clé primaire de `style_hop_usage`
+    (`schema.STYLE_HOP_USAGE_SCHEMA`) -- absent du `CREATE TABLE` initialement
+    écrit dans le ticket T86 (rédigé avant la vérification ci-dessus), ajouté
+    une fois confirmé que la ventilation par usage est une vraie donnée
+    distincte et pas un filtrage client (voir schema.py pour le détail).
+
+    `style_id`/`variety` résolus comme T85/BeerMaverick (`data/mappings/
+    beer_style_aliases.yaml`, `ingest._resolve_hop_variety`) -- `NULL` si non
+    résolus, jamais deviné. `hop_name` reste TOUJOURS renseigné en texte brut
+    même sans `variety` résolue (rien n'est perdu).
+    """
+    from datetime import datetime, timezone
+    from .schema import connect
+    con = connect(out_db)
+    if not con.execute("SELECT name FROM sqlite_master WHERE name='hops'").fetchone():
+        init_db(con); seed_reference(con); con.commit()
+    else:
+        ensure_table(con, "style_hop_usage", STYLE_HOP_USAGE_SCHEMA)  # base existante : ne PAS la vider
+    style_aliases = _load_yaml_mapping("beer_style_aliases.yaml")
+    index = _build_hop_name_index(con)
+
+    sitemap = _beer_analytics_fetch("/sitemap.xml", timeout=timeout, sleep=sleep)
+    style_paths = sorted(set(_BA_STYLE_PAGE_RE.findall(sitemap)))
+    if limit:
+        style_paths = style_paths[:limit]
+    print(f"beer-analytics (hop usage) : {len(style_paths)} pages de style (sitemap)")
+
+    fetched_at = datetime.now(timezone.utc).isoformat()
+    n_resolved_style = n_unresolved_style = n_rows = n_variety_resolved = n_variety_total = 0
+    for i, style_path in enumerate(style_paths, 1):
+        try:
+            html = _beer_analytics_fetch(style_path, timeout=timeout, sleep=sleep)
+        except Exception as e:  # noqa
+            print(f"  !! {style_path}: {e}"); continue
+        charts = parsers.discover_beer_analytics_charts(html)
+        style_name = parsers.parse_beer_analytics_style_name(html)
+        style_id = style_aliases.get(style_name) if style_name else None
+        if style_id:
+            n_resolved_style += 1
+        else:
+            n_unresolved_style += 1
+        style_slug = style_path.strip("/").rsplit("/", 1)[-1]
+
+        pct_path = charts.get("popular-hops")
+        amount_path = charts.get("popular-hops-amount")
+        if not pct_path and not amount_path:
+            continue
+
+        for usage_type in BEER_ANALYTICS_HOP_USAGE_TYPES:
+            suffix = "" if usage_type == "any" else f"?filter={usage_type}"
+            pct_by_hop: dict[str, tuple] = {}
+            if pct_path:
+                try:
+                    payload = _beer_analytics_get(pct_path + suffix, timeout=timeout, sleep=sleep)
+                    for trace in parsers.plotly_traces(payload):
+                        pct_by_hop[trace["name"]] = parsers.parse_time_series_trace(trace)
+                except Exception as e:  # noqa
+                    print(f"  !! {pct_path}{suffix}: {e}")
+            amount_by_hop: dict[str, tuple] = {}
+            if amount_path:
+                try:
+                    payload = _beer_analytics_get(amount_path + suffix, timeout=timeout, sleep=sleep)
+                    for trace in parsers.plotly_traces(payload):
+                        amount_by_hop[trace["name"]] = parsers.parse_box_trace(trace)
+                except Exception as e:  # noqa
+                    print(f"  !! {amount_path}{suffix}: {e}")
+            for hop_name in sorted(set(pct_by_hop) | set(amount_by_hop)):
+                variety = _resolve_hop_variety(index, hop_name)
+                n_variety_total += 1
+                if variety:
+                    n_variety_resolved += 1
+                latest, avg24m = pct_by_hop.get(hop_name, (None, None))
+                q1, median, q3 = amount_by_hop.get(hop_name, (None, None, None))
+                con.execute(
+                    "INSERT OR REPLACE INTO style_hop_usage VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (style_slug, style_id, hop_name, variety, usage_type,
+                     latest, avg24m, q1, median, q3, "beer-analytics", fetched_at))
+                n_rows += 1
+        if i % 10 == 0:
+            con.commit()
+    con.commit(); con.close()
+    print(f"  {n_resolved_style} style_id résolus, {n_unresolved_style} non résolus")
+    print(f"  {n_variety_resolved}/{n_variety_total} houblons résolus vers une variety, "
+         f"{n_rows} lignes écrites")

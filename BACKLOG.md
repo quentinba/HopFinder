@@ -735,37 +735,59 @@ Elles sont écrites pour qu'aucune décision implicite ne reste à deviner.
   **Test** : fixture JSON locale réduite (un seul trace, 3 bins), vérifier le
   parsing des intervalles et que `layout` est ignoré. Aucun appel réseau.
 
-- [ ] **T86 — `style_hop_usage` : quels houblons pour ce style**
+- [x] **T86 — `style_hop_usage` : quels houblons pour ce style**
 
-  **Dépend de T85** (réutiliser `_beer_analytics_get` / `_plotly_traces`).
+  **Compte rendu (2026-08-28)** : vérifié en direct AVANT de trancher le
+  point le plus incertain du ticket, comme demandé. Réponse à « à vérifier
+  pendant l'implémentation » : **URLs distinctes, pas un filtrage client**.
+  Reverse engineering du bundle JS `/static/app.js` (le HTML seul ne
+  suffisait pas à trancher : les onglets "Used for" utilisent `data-bs-
+  toggle="tab"`, un composant Bootstrap générique) — trouvé la classe
+  `Chart` : `load(e={})` appelle `getRequest(this.chartUrl, e, ...)`, et le
+  callback de navigation fait `chart.load({filter: i})` où `i` est la
+  valeur de l'onglet cliqué (`aroma`/`bittering`/`dry-hop`, vide pour "Any").
+  Confirmé par fetch réel : `popular-hops.json?filter=bittering` renvoie des
+  valeurs RÉELLEMENT différentes de `popular-hops.json` seul (ex. Citra sur
+  American IPA : dernière valeur 0,3311 en "any" vs 0,2120 en "bittering") —
+  donc **capturé, comme demandé par le ticket** ("c'est la donnée la plus
+  intéressante").
 
-  **Charts** : `popular-hops.json` (part de recettes dans le temps, une trace
-  par houblon avec `x` = mois, `y` = `recipes_percent`) et
-  `popular-hops-amount.json` (dosage).
+  ⚠ **Schéma étendu par rapport au ticket original** : `usage_type` ajouté à
+  la clé primaire (`style_slug, hop_name, usage_type` au lieu de
+  `style_slug, hop_name`) — le `CREATE TABLE` du ticket avait été rédigé
+  AVANT cette vérification et n'avait nulle part où stocker la ventilation
+  par usage qu'il demandait pourtant de capturer. `usage_type ∈ {any,
+  bittering, aroma, dry-hop}`, "any" = onglet "Any" = aucun paramètre.
 
-  ⚠ `popular-hops.json` est une **série temporelle**, pas une valeur unique.
-  Décision : stocker la **dernière valeur non nulle** de chaque trace comme
-  part actuelle, ET la moyenne sur les 24 derniers mois. Ne pas écraser l'une
-  par l'autre — ce sont deux questions différentes (« quoi maintenant » vs
-  « quoi en général »).
+  ⚠ **Bug réel trouvé et corrigé en marge de ce ticket** :
+  `ingest._beer_analytics_cache_filename` ne gérait pas les query strings —
+  `"....json?filter=aroma"` ne se termine plus par `.json` littéralement,
+  tombait dans le repli `.html` alors que le contenu est du JSON, ET aurait
+  fait collision entre différents filtres du même chart s'il avait
+  simplement tronqué la query string au lieu de la sanitiser en suffixe.
+  Corrigé (voir `schema.py`/`ingest.py`), testé.
 
-  ```sql
-  CREATE TABLE style_hop_usage (
-      style_slug TEXT, style_id TEXT, hop_name TEXT, variety TEXT,
-      recipes_pct_latest REAL, recipes_pct_avg24m REAL,
-      amount_q1 REAL, amount_median REAL, amount_q3 REAL,
-      source TEXT, fetched_at TEXT,
-      PRIMARY KEY (style_slug, hop_name)
-  );
-  ```
-  `variety` résolu via `ingest._resolve_hop_variety`, `NULL` si inconnu.
+  **Crawl complet, en plusieurs passes** (2026-08-28) : le premier passage
+  complet (123 styles × jusqu'à 8 requêtes) a essuyé ~291 échecs `NameResolutionError`
+  groupés (panne DNS/réseau LOCALE transitoire — symptôme différent du
+  ralentissement serveur de T85, jamais reproduit côté serveur : `curl`
+  direct restait rapide pendant l'incident). Une reprise (cache-first, ne
+  refetch que le manquant) a elle-même buté deux fois sur un blocage
+  silencieux (aucune requête ne progressait pendant 15-20 min, CPU quasi
+  nul — proche d'un hang réseau local plutôt qu'un vrai timeout, chaque
+  tentative tuée puis relancée). **Troisième reprise complète sans
+  incident** : **123/123 styles couverts, 112/123 style_id résolus (même
+  taux que T85, cohérent), 3997 lignes, 3611/3997 (90%) houblons résolus
+  vers une `variety`** — 28 noms de houblon distincts non résolus (variantes
+  d'orthographe réelles type "Hallertauer Blanc"/"Mount Hood", houblons
+  absents de notre catalogue à 203 variétés type Belma/Calypso/Strata, et
+  une anomalie côté source : "Lambic" apparaît comme "houblon" sur un chart
+  — un style de bière mal étiqueté chez beer-analytics, pas une erreur
+  d'ici) — `variety` reste `NULL`, jamais deviné, `hop_name` brut toujours
+  conservé.
 
-  **À vérifier pendant l'implémentation** : la page de style porte des
-  attributs `data-filter` (`aroma`, `bittering`, `dry-hop`, `base`,
-  `cara-crystal`…). Regarder s'ils correspondent à des **URLs de charts
-  distinctes** ou à un filtrage côté client. Si ce sont des URLs, capturer la
-  ventilation par type d'usage — c'est la donnée la plus intéressante de ce
-  ticket. Si c'est du client, le noter et passer.
+  **Aucun changement GUI** — ticket infrastructure/données pures, pas
+  d'entrée `_RECENT_UPDATES`.
 
 - [ ] **T87 — `style_hop_pairings` : paires réelles par style**
 

@@ -843,6 +843,25 @@ def test_beer_analytics_cache_filename_flattens_path():
         "/styles/ipa/american-ipa/"
     ) == "styles_ipa_american-ipa.html"
 
+def test_beer_analytics_cache_filename_keeps_json_extension_with_query_string():
+    # T86 : bug réel trouvé en direct -- "....json?filter=aroma" ne se
+    # termine plus par ".json" littéralement, tombait dans le repli ".html"
+    # (contenu réellement JSON) avant correction.
+    assert ingest._beer_analytics_cache_filename(
+        "/styles/ipa/american-ipa/charts/popular-hops.json?filter=aroma"
+    ) == "styles_ipa_american-ipa_charts_popular-hops__filter_aroma.json"
+
+def test_beer_analytics_cache_filename_distinguishes_different_query_strings():
+    # deux filtres différents du même chart -> entrées de cache DISTINCTES,
+    # jamais une collision (payloads réellement différents, vérifié en direct).
+    a = ingest._beer_analytics_cache_filename(
+        "/styles/ipa/american-ipa/charts/popular-hops.json?filter=aroma")
+    b = ingest._beer_analytics_cache_filename(
+        "/styles/ipa/american-ipa/charts/popular-hops.json?filter=bittering")
+    c = ingest._beer_analytics_cache_filename(
+        "/styles/ipa/american-ipa/charts/popular-hops.json")
+    assert len({a, b, c}) == 3
+
 def test_beer_analytics_fetch_uses_disk_cache_and_skips_network_on_hit(tmp_path, monkeypatch):
     # `requests`/`time` sont importés LOCALEMENT dans _beer_analytics_fetch
     # (même style que le reste du module) -- patcher le module `requests`
@@ -863,3 +882,132 @@ def test_beer_analytics_fetch_uses_disk_cache_and_skips_network_on_hit(tmp_path,
     assert text1 == "cached content"
     assert text2 == "cached content"
     assert len(calls) == 1  # deuxième appel = hit de cache, aucun 2e GET réseau
+
+
+# --------------------------------------------------------------------------- #
+# T86 -- beer-analytics.com (style_hop_usage)
+# --------------------------------------------------------------------------- #
+
+_BA_STYLE_PAGE_WITH_HOP_USAGE_FIXTURE = (
+    "<html><body><h1>American IPA</h1>"
+    '<div data-chart="/styles/ipa/american-ipa/charts/popular-hops.json"></div>'
+    '<div data-chart="/styles/ipa/american-ipa/charts/popular-hops-amount.json"></div>'
+    "</body></html>")
+
+
+def _ba_pct_chart(citra_last, centennial_last):
+    # gabarit trimmé d'une vraie trace popular-hops.json (scattergl, série
+    # temporelle) -- deux houblons, quelques mois seulement (le parseur ne
+    # dépend pas d'une longueur fixe, voir parsers.parse_time_series_trace).
+    return json.dumps({
+        "data": [
+            {"name": "Citra", "type": "scattergl", "y": [0.30, 0.32, citra_last]},
+            {"name": "Centennial", "type": "scattergl", "y": [0.20, 0.21, centennial_last]},
+        ],
+        "layout": {"template": "unused"},
+    })
+
+
+def _ba_amount_chart(citra_median):
+    return json.dumps({
+        "data": [
+            {"name": "Citra", "type": "box", "q1": [0.2], "median": [citra_median], "q3": [0.5]},
+            {"name": "Centennial", "type": "box", "q1": [0.1], "median": [0.15], "q3": [0.2]},
+        ],
+        "layout": {},
+    })
+
+
+_BA_HOP_USAGE_FIXTURES = {
+    "/sitemap.xml": _BA_SITEMAP_FIXTURE,
+    "/styles/india-pale-ale/american-ipa/": _BA_STYLE_PAGE_WITH_HOP_USAGE_FIXTURE,
+    "/styles/ipa/american-ipa/charts/popular-hops.json": _ba_pct_chart(0.36, 0.21),
+    "/styles/ipa/american-ipa/charts/popular-hops.json?filter=bittering":
+        _ba_pct_chart(0.21, 0.16),
+    "/styles/ipa/american-ipa/charts/popular-hops.json?filter=aroma": _ba_pct_chart(0.40, 0.25),
+    "/styles/ipa/american-ipa/charts/popular-hops.json?filter=dry-hop": _ba_pct_chart(0.45, 0.10),
+    "/styles/ipa/american-ipa/charts/popular-hops-amount.json": _ba_amount_chart(0.36),
+    "/styles/ipa/american-ipa/charts/popular-hops-amount.json?filter=bittering":
+        _ba_amount_chart(0.18),
+    "/styles/ipa/american-ipa/charts/popular-hops-amount.json?filter=aroma": _ba_amount_chart(0.40),
+    "/styles/ipa/american-ipa/charts/popular-hops-amount.json?filter=dry-hop": _ba_amount_chart(0.50),
+}
+
+
+def test_ingest_style_hop_usage_writes_one_row_per_usage_type(tmp_path, monkeypatch):
+    # aucun appel réseau : _beer_analytics_fetch/_get et _load_yaml_mapping mockés.
+    monkeypatch.setattr(ingest, "_beer_analytics_fetch",
+                        lambda path, **kw: _BA_HOP_USAGE_FIXTURES[path])
+    monkeypatch.setattr(ingest, "_beer_analytics_get",
+                        lambda path, **kw: json.loads(_BA_HOP_USAGE_FIXTURES[path]))
+    monkeypatch.setattr(ingest, "_load_yaml_mapping", lambda filename: {"American IPA": "21A"})
+
+    db_path = str(tmp_path / "t.db")
+    ingest.ingest_style_hop_usage(db_path)
+
+    con = connect(db_path)
+    rows = {r["usage_type"]: dict(r) for r in con.execute(
+        "SELECT * FROM style_hop_usage WHERE style_slug='american-ipa' AND hop_name='Citra'")}
+    con.close()
+
+    assert set(rows) == {"any", "bittering", "aroma", "dry-hop"}
+    # "quoi maintenant" (dernière valeur) DIFFÉRENT par usage_type -- pas
+    # un simple filtrage client qui renverrait la même chose partout.
+    assert rows["any"]["recipes_pct_latest"] == 0.36
+    assert rows["bittering"]["recipes_pct_latest"] == 0.21
+    assert rows["aroma"]["recipes_pct_latest"] == 0.40
+    assert rows["dry-hop"]["recipes_pct_latest"] == 0.45
+    # style_id résolu, propagé à chaque ligne
+    assert all(r["style_id"] == "21A" for r in rows.values())
+    # dosage (boxplot) capturé séparément de la part de recettes -- même ligne
+    assert rows["any"]["amount_median"] == 0.36
+    assert rows["bittering"]["amount_median"] == 0.18
+
+def test_ingest_style_hop_usage_resolves_variety_and_avg24m(tmp_path, monkeypatch):
+    monkeypatch.setattr(ingest, "_beer_analytics_fetch",
+                        lambda path, **kw: _BA_HOP_USAGE_FIXTURES[path])
+    monkeypatch.setattr(ingest, "_beer_analytics_get",
+                        lambda path, **kw: json.loads(_BA_HOP_USAGE_FIXTURES[path]))
+    monkeypatch.setattr(ingest, "_load_yaml_mapping", lambda filename: {"American IPA": "21A"})
+
+    con = connect(str(tmp_path / "t.db"))
+    init_db(con)
+    con.execute("INSERT INTO hops (variety, name, region, sources, purpose) "
+               "VALUES ('citra', 'Citra', 'United States', 'yakima', NULL)")
+    con.commit(); con.close()
+
+    ingest.ingest_style_hop_usage(str(tmp_path / "t.db"))
+
+    con = connect(str(tmp_path / "t.db"))
+    row = con.execute("SELECT * FROM style_hop_usage WHERE hop_name='Citra' AND usage_type='any'").fetchone()
+    unresolved = con.execute("SELECT variety FROM style_hop_usage WHERE hop_name='Centennial' "
+                             "AND usage_type='any'").fetchone()
+    con.close()
+    assert row["variety"] == "citra"
+    # 3 points fournis par la fixture -> moyenne des 3 (fenêtre 24 mois pas
+    # atteinte, jamais comblée artificiellement)
+    assert row["recipes_pct_avg24m"] == pytest.approx((0.30 + 0.32 + 0.36) / 3)
+    # Centennial absent de `hops` dans ce test -> variety NULL, jamais deviné
+    assert unresolved["variety"] is None
+
+def test_ingest_style_hop_usage_creates_table_without_wiping_existing_data(tmp_path, monkeypatch):
+    con = connect(str(tmp_path / "t.db"))
+    init_db(con)
+    con.execute("INSERT INTO hops (variety, name, region, sources, purpose) "
+               "VALUES ('citra', 'Citra', 'United States', 'yakima', NULL)")
+    con.execute("DROP TABLE style_hop_usage")
+    con.commit(); con.close()
+
+    monkeypatch.setattr(ingest, "_beer_analytics_fetch",
+                        lambda path, **kw: _BA_HOP_USAGE_FIXTURES[path])
+    monkeypatch.setattr(ingest, "_beer_analytics_get",
+                        lambda path, **kw: json.loads(_BA_HOP_USAGE_FIXTURES[path]))
+    monkeypatch.setattr(ingest, "_load_yaml_mapping", lambda filename: {"American IPA": "21A"})
+    ingest.ingest_style_hop_usage(str(tmp_path / "t.db"))
+
+    con = connect(str(tmp_path / "t.db"))
+    hops = [r[0] for r in con.execute("SELECT variety FROM hops")]
+    n = con.execute("SELECT COUNT(*) FROM style_hop_usage").fetchone()[0]
+    con.close()
+    assert hops == ["citra"]
+    assert n == 8  # 2 houblons x 4 usage_type

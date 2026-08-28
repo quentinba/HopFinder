@@ -160,6 +160,13 @@ def main(argv=None):
     ba.add_argument("--sleep", type=float, default=1.0)
     ba.add_argument("--limit", type=int)
 
+    hu = sub.add_parser("ingest-style-hop-usage",
+                        help="quels houblons pour quel style, et combien (beer-analytics.com) : "
+                             "part de recettes + dosage, par type d'usage (any/bittering/aroma/dry-hop)")
+    hu.add_argument("--db", default=DEFAULT_DB)
+    hu.add_argument("--sleep", type=float, default=1.0)
+    hu.add_argument("--limit", type=int)
+
     am = sub.add_parser("amplify", help="cas d'usage : amplify")
     am.add_argument("note")
     am.add_argument("--db", default=DEFAULT_DB)
@@ -238,6 +245,8 @@ def main(argv=None):
         ingest.ingest_beer_styles(a.db, year=a.year); return 0
     if a.cmd == "ingest-beer-analytics":
         ingest.ingest_beer_analytics(a.db, limit=a.limit, sleep=a.sleep); return 0
+    if a.cmd == "ingest-style-hop-usage":
+        ingest.ingest_style_hop_usage(a.db, limit=a.limit, sleep=a.sleep); return 0
 
     con = connect(a.db)
     try:

@@ -170,6 +170,35 @@ CREATE TABLE style_recipe_stats (
 """
 SCHEMA += STYLE_RECIPE_STATS_SCHEMA
 
+# Quels houblons sont réellement utilisés pour un style, et combien (T86,
+# épique B) -- beer-analytics.com, `popular-hops.json` (part de recettes,
+# série temporelle, T86 en garde la dernière valeur ET une moyenne 24 mois --
+# deux questions différentes, jamais l'une n'écrase l'autre) et
+# `popular-hops-amount.json` (dosage, boxplot q1/median/q3). `usage_type` :
+# le ticket anticipait deux issues possibles pour les onglets "Used for"
+# (Any/Bittering/Aroma/Dry-Hop) de la page de style -- filtrage CLIENT (rien
+# à capturer) ou VRAIES URLs distinctes (capturer la ventilation, "la donnée
+# la plus intéressante de ce ticket", texte du ticket lui-même). Vérifié en
+# direct (reverse engineering du bundle JS `/static/app.js`, T86) : ce sont
+# de vraies requêtes avec un paramètre `?filter=...` sur la MÊME URL de
+# chart, payloads réellement différents (ex. Citra "bittering" vs "any" :
+# valeurs distinctes, pas juste une réétiquette). D'où `usage_type` ajouté à
+# la clé primaire du ticket original (qui ne l'avait pas, rédigée avant
+# cette vérification) -- "any" = onglet "Any" (aucun filtre), sinon
+# aroma/bittering/dry-hop. `style_id` = notre id BJCP via `data/mappings/
+# beer_style_aliases.yaml` (T84/T85), `variety` = notre clé houblon via
+# `ingest._resolve_hop_variety`, tous deux NULL si non résolus.
+STYLE_HOP_USAGE_SCHEMA = """
+CREATE TABLE style_hop_usage (
+    style_slug TEXT, style_id TEXT, hop_name TEXT, variety TEXT, usage_type TEXT,
+    recipes_pct_latest REAL, recipes_pct_avg24m REAL,
+    amount_q1 REAL, amount_median REAL, amount_q3 REAL,
+    source TEXT, fetched_at TEXT,
+    PRIMARY KEY (style_slug, hop_name, usage_type)
+);
+"""
+SCHEMA += STYLE_HOP_USAGE_SCHEMA
+
 # alpha_acid/beta_acid retirés de ce filtre (2026-08-19, demande utilisateur) :
 # non-aromatiques (jamais utilisés dans le scoring moléculaire, qui n'itère
 # que sur les molécules de la NOTE -- aucune note FooDB ne référence jamais
@@ -196,7 +225,8 @@ def init_db(con: sqlite3.Connection) -> None:
         "DROP TABLE IF EXISTS pubchem_cids;"
         "DROP TABLE IF EXISTS beer_styles;"
         "DROP TABLE IF EXISTS hop_beer_styles;"
-        "DROP TABLE IF EXISTS style_recipe_stats;")
+        "DROP TABLE IF EXISTS style_recipe_stats;"
+        "DROP TABLE IF EXISTS style_hop_usage;")
     con.executescript(SCHEMA)
 
 
