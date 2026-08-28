@@ -32,7 +32,8 @@ import sqlite3
 from . import parsers, reference
 from .schema import (init_db, validate_and_repair, DROP_COMPOUNDS, ensure_table, ensure_columns,
                      BEER_STYLES_SCHEMA, HOP_BEER_STYLES_SCHEMA, HOP_IDENTITY_COLUMNS,
-                     HOP_DESCRIPTION_COLUMNS, STYLE_RECIPE_STATS_SCHEMA, STYLE_HOP_USAGE_SCHEMA)
+                     HOP_DESCRIPTION_COLUMNS, STYLE_RECIPE_STATS_SCHEMA, STYLE_HOP_USAGE_SCHEMA,
+                     STYLE_HOP_PAIRINGS_SCHEMA)
 
 MAPPINGS_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "data", "mappings")
 
@@ -1823,6 +1824,93 @@ def ingest_style_hop_usage(out_db: str, limit: int | None = None, sleep: float =
                     (style_slug, style_id, hop_name, variety, usage_type,
                      latest, avg24m, q1, median, q3, "beer-analytics", fetched_at))
                 n_rows += 1
+        if i % 10 == 0:
+            con.commit()
+    con.commit(); con.close()
+    print(f"  {n_resolved_style} style_id résolus, {n_unresolved_style} non résolus")
+    print(f"  {n_variety_resolved}/{n_variety_total} houblons résolus vers une variety, "
+         f"{n_rows} lignes écrites")
+
+
+# --------------------------------------------------------------------------- #
+# beer-analytics.com (T87) -- paires de houblons réellement co-utilisées
+# --------------------------------------------------------------------------- #
+def ingest_style_hop_pairings(out_db: str, limit: int | None = None, sleep: float = 1.0,
+                              timeout: float = 30.0) -> None:
+    """
+    beer-analytics.com (T87) : quelles paires de houblons sont réellement
+    co-utilisées pour un style -- table `style_hop_pairings`. Réutilise les
+    pages de style déjà en cache (T85/T86) mais UN SEUL chart par style,
+    `hop-pairings.json` -- vérifié en direct : contrairement à `popular-
+    hops*.json` (T86), cette section n'a PAS de `data-chart-navigation`
+    (pas d'onglet any/aroma/bittering/dry-hop), une seule URL suffit.
+
+    Une trace `box` par houblon partenaire (`parsers.parse_box_trace`, même
+    format que `popular-hops-amount.json`) : `share_*` = distribution de la
+    part de charge houblon (`amount_percent`) de CE partenaire dans les
+    recettes qui combinent les deux houblons -- PAS une fréquence de
+    recette. ⚠ Ce sont des PAIRES uniquement (`calculate_hop_pairings` côté
+    beer-analytics = JOIN sur deux houblons distincts, seuil 20 recettes) --
+    ne jamais dériver un triplet de trois paires ici, ce serait une
+    invention (voir schema.STYLE_HOP_PAIRINGS_SCHEMA).
+
+    `style_id`/`variety` résolus comme T85/T86 (`data/mappings/beer_style_
+    aliases.yaml`, `ingest._resolve_hop_variety`), `NULL` si non résolus.
+    """
+    from datetime import datetime, timezone
+    from .schema import connect
+    con = connect(out_db)
+    if not con.execute("SELECT name FROM sqlite_master WHERE name='hops'").fetchone():
+        init_db(con); seed_reference(con); con.commit()
+    else:
+        ensure_table(con, "style_hop_pairings", STYLE_HOP_PAIRINGS_SCHEMA)  # base existante : ne PAS la vider
+    style_aliases = _load_yaml_mapping("beer_style_aliases.yaml")
+    index = _build_hop_name_index(con)
+
+    sitemap = _beer_analytics_fetch("/sitemap.xml", timeout=timeout, sleep=sleep)
+    style_paths = sorted(set(_BA_STYLE_PAGE_RE.findall(sitemap)))
+    if limit:
+        style_paths = style_paths[:limit]
+    print(f"beer-analytics (hop pairings) : {len(style_paths)} pages de style (sitemap)")
+
+    fetched_at = datetime.now(timezone.utc).isoformat()
+    n_resolved_style = n_unresolved_style = n_rows = n_variety_resolved = n_variety_total = 0
+    for i, style_path in enumerate(style_paths, 1):
+        try:
+            html = _beer_analytics_fetch(style_path, timeout=timeout, sleep=sleep)
+        except Exception as e:  # noqa
+            print(f"  !! {style_path}: {e}"); continue
+        charts = parsers.discover_beer_analytics_charts(html)
+        style_name = parsers.parse_beer_analytics_style_name(html)
+        style_id = style_aliases.get(style_name) if style_name else None
+        if style_id:
+            n_resolved_style += 1
+        else:
+            n_unresolved_style += 1
+        style_slug = style_path.strip("/").rsplit("/", 1)[-1]
+
+        pairings_path = charts.get("hop-pairings")
+        if not pairings_path:
+            continue
+        try:
+            payload = _beer_analytics_get(pairings_path, timeout=timeout, sleep=sleep)
+        except Exception as e:  # noqa
+            print(f"  !! {pairings_path}: {e}"); continue
+        for trace in parsers.plotly_traces(payload):
+            hop_name = trace.get("name")
+            if not hop_name:
+                continue
+            variety = _resolve_hop_variety(index, hop_name)
+            n_variety_total += 1
+            if variety:
+                n_variety_resolved += 1
+            q1, median, q3 = parsers.parse_box_trace(trace)
+            mean = (trace.get("mean") or [None])[0]
+            con.execute(
+                "INSERT OR REPLACE INTO style_hop_pairings VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (style_slug, style_id, hop_name, variety, q1, median, q3, mean,
+                 "beer-analytics", fetched_at))
+            n_rows += 1
         if i % 10 == 0:
             con.commit()
     con.commit(); con.close()

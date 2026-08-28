@@ -789,27 +789,37 @@ Elles sont écrites pour qu'aucune décision implicite ne reste à deviner.
   **Aucun changement GUI** — ticket infrastructure/données pures, pas
   d'entrée `_RECENT_UPDATES`.
 
-- [ ] **T87 — `style_hop_pairings` : paires réelles par style**
+- [x] **T87 — `style_hop_pairings` : paires réelles par style**
 
-  **Chart** : `/styles/<cat>/<style>/charts/hop-pairings.json`. Une trace de
-  type `box` par houblon partenaire, avec `name` (le houblon), `q1`,
-  `median`, `q3`, `lowerfence`, `upperfence`, `mean` — la distribution de la
-  **part de charge houblon** (`amount_percent`) de ce partenaire.
+  **Compte rendu (2026-08-28)** : ticket direct, aucune ambiguïté à trancher
+  cette fois (contrairement à T86) — vérifié en direct que la section « Hop
+  Pairings » d'une page de style n'a PAS de `data-chart-navigation` (pas
+  d'onglet any/aroma/bittering/dry-hop, contrairement à `popular-hops*.json`)
+  : une seule URL par style suffit. Trace `box` par houblon partenaire,
+  format identique à `popular-hops-amount.json` (T86) — réutilise
+  directement `parsers.parse_box_trace`. Schéma implémenté TEL QUEL, sans
+  déviation.
 
-  ```sql
-  CREATE TABLE style_hop_pairings (
-      style_slug TEXT, style_id TEXT, hop_name TEXT, variety TEXT,
-      share_q1 REAL, share_median REAL, share_q3 REAL, share_mean REAL,
-      source TEXT, fetched_at TEXT,
-      PRIMARY KEY (style_slug, hop_name)
-  );
-  ```
+  `style_id`/`variety` résolus comme T85/T86. **123/123 styles couverts,
+  112/123 style_id résolus (même taux que T85/T86, cohérent), 1182 lignes,
+  1055/1182 (89%) houblons résolus vers une `variety`.**
 
-  ⚠ **Ce sont des PAIRES, et seulement des paires.** `calculate_hop_pairings`
-  côté beer-analytics est un JOIN `rh1.kind_id != rh2.kind_id`, seuil
-  `HOP_MIN_RECIPES = 20`. Les triplets viennent de T93 et de nulle part
-  ailleurs. **Ne jamais dériver un triplet de trois paires** — ce serait une
-  invention. La GUI doit dire « pairs » explicitement.
+  ⚠ **Crawl marqué par une instabilité réseau LOCALE récurrente** (déjà vue
+  sur T86) : 3 tentatives se sont arrêtées net après quelques minutes
+  (progression quasi nulle, CPU quasi nul — `curl` direct restait rapide à
+  chaque fois pendant l'incident, donc pas un problème serveur). Chaque
+  tentative tuée puis relancée (cache-first, ne refetch que le manquant) ;
+  la 4e est passée sans aucun souci apparent. Deux tickets de suite touchés
+  par le même symptôme — voir CLAUDE.md, probablement un problème propre à
+  cette session/machine plutôt qu'à beer-analytics.com, à surveiller si ça
+  continue sur les tickets suivants de l'épique B (T88/T89).
+
+  ⚠ **PAIRES uniquement, respecté** : `calculate_hop_pairings` côté
+  beer-analytics est un JOIN sur deux houblons distincts (seuil 20
+  recettes) — aucun triplet dérivé ici, aucune tentative. La réserve « pairs
+  only » reste à afficher explicitement le jour où une GUI consomme cette
+  table (pas ce ticket, infrastructure/données pures — pas d'entrée
+  `_RECENT_UPDATES`).
 
 - [ ] **T88 — `hop_usage_stats` : où ce houblon est réellement utilisé**
   *Socle empirique de T99. À faire EN PREMIER dans l'épique B.*

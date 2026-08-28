@@ -1011,3 +1011,97 @@ def test_ingest_style_hop_usage_creates_table_without_wiping_existing_data(tmp_p
     con.close()
     assert hops == ["citra"]
     assert n == 8  # 2 houblons x 4 usage_type
+
+
+# --------------------------------------------------------------------------- #
+# T87 -- beer-analytics.com (style_hop_pairings)
+# --------------------------------------------------------------------------- #
+
+_BA_STYLE_PAGE_WITH_PAIRINGS_FIXTURE = (
+    "<html><body><h1>American IPA</h1>"
+    '<div data-chart="/styles/ipa/american-ipa/charts/hop-pairings.json"></div>'
+    "</body></html>")
+
+_BA_PAIRINGS_CHART_FIXTURE = json.dumps({
+    "data": [
+        {"name": "Cascade", "type": "box", "q1": [0.21], "median": [0.31], "q3": [0.43],
+         "lowerfence": [0.08], "upperfence": [0.71], "mean": [0.33]},
+        {"name": "Centennial", "type": "box", "q1": [0.15], "median": [0.25], "q3": [0.35],
+         "lowerfence": [0.05], "upperfence": [0.60], "mean": [0.26]},
+    ],
+    "layout": {"template": "unused"},
+})
+
+_BA_PAIRINGS_FIXTURES = {
+    "/sitemap.xml": _BA_SITEMAP_FIXTURE,
+    "/styles/india-pale-ale/american-ipa/": _BA_STYLE_PAGE_WITH_PAIRINGS_FIXTURE,
+    "/styles/ipa/american-ipa/charts/hop-pairings.json": _BA_PAIRINGS_CHART_FIXTURE,
+}
+
+
+def test_ingest_style_hop_pairings_writes_share_distribution(tmp_path, monkeypatch):
+    monkeypatch.setattr(ingest, "_beer_analytics_fetch",
+                        lambda path, **kw: _BA_PAIRINGS_FIXTURES[path])
+    monkeypatch.setattr(ingest, "_beer_analytics_get",
+                        lambda path, **kw: json.loads(_BA_PAIRINGS_FIXTURES[path]))
+    monkeypatch.setattr(ingest, "_load_yaml_mapping", lambda filename: {"American IPA": "21A"})
+
+    db_path = str(tmp_path / "t.db")
+    ingest.ingest_style_hop_pairings(db_path)
+
+    con = connect(db_path)
+    rows = {r["hop_name"]: dict(r) for r in con.execute(
+        "SELECT * FROM style_hop_pairings WHERE style_slug='american-ipa'")}
+    con.close()
+
+    assert set(rows) == {"Cascade", "Centennial"}
+    assert rows["Cascade"]["style_id"] == "21A"
+    assert rows["Cascade"]["share_q1"] == 0.21
+    assert rows["Cascade"]["share_median"] == 0.31
+    assert rows["Cascade"]["share_q3"] == 0.43
+    assert rows["Cascade"]["share_mean"] == 0.33
+
+def test_ingest_style_hop_pairings_resolves_variety(tmp_path, monkeypatch):
+    monkeypatch.setattr(ingest, "_beer_analytics_fetch",
+                        lambda path, **kw: _BA_PAIRINGS_FIXTURES[path])
+    monkeypatch.setattr(ingest, "_beer_analytics_get",
+                        lambda path, **kw: json.loads(_BA_PAIRINGS_FIXTURES[path]))
+    monkeypatch.setattr(ingest, "_load_yaml_mapping", lambda filename: {"American IPA": "21A"})
+
+    con = connect(str(tmp_path / "t.db"))
+    init_db(con)
+    con.execute("INSERT INTO hops (variety, name, region, sources, purpose) "
+               "VALUES ('cascade', 'Cascade', 'United States', 'yakima', NULL)")
+    con.commit(); con.close()
+
+    ingest.ingest_style_hop_pairings(str(tmp_path / "t.db"))
+
+    con = connect(str(tmp_path / "t.db"))
+    cascade = con.execute("SELECT variety FROM style_hop_pairings WHERE hop_name='Cascade'").fetchone()
+    centennial = con.execute("SELECT variety FROM style_hop_pairings WHERE hop_name='Centennial'").fetchone()
+    con.close()
+    assert cascade["variety"] == "cascade"
+    # Centennial absent de `hops` dans ce test -> variety NULL, jamais deviné
+    assert centennial["variety"] is None
+
+def test_ingest_style_hop_pairings_creates_table_without_wiping_existing_data(tmp_path, monkeypatch):
+    con = connect(str(tmp_path / "t.db"))
+    init_db(con)
+    con.execute("INSERT INTO hops (variety, name, region, sources, purpose) "
+               "VALUES ('cascade', 'Cascade', 'United States', 'yakima', NULL)")
+    con.execute("DROP TABLE style_hop_pairings")
+    con.commit(); con.close()
+
+    monkeypatch.setattr(ingest, "_beer_analytics_fetch",
+                        lambda path, **kw: _BA_PAIRINGS_FIXTURES[path])
+    monkeypatch.setattr(ingest, "_beer_analytics_get",
+                        lambda path, **kw: json.loads(_BA_PAIRINGS_FIXTURES[path]))
+    monkeypatch.setattr(ingest, "_load_yaml_mapping", lambda filename: {"American IPA": "21A"})
+    ingest.ingest_style_hop_pairings(str(tmp_path / "t.db"))
+
+    con = connect(str(tmp_path / "t.db"))
+    hops = [r[0] for r in con.execute("SELECT variety FROM hops")]
+    n = con.execute("SELECT COUNT(*) FROM style_hop_pairings").fetchone()[0]
+    con.close()
+    assert hops == ["cascade"]
+    assert n == 2

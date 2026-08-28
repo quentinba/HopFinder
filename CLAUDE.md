@@ -275,16 +275,24 @@ affiché, ex. page `/styles/india-pale-ale/american-ipa/` mais charts sous
   `_beer_analytics_cache_filename` doit gérer les query strings (sanitisées
   en suffixe de nom de fichier, jamais tronquées -- sinon collision entre
   deux filtres du même chart, bug réel trouvé et corrigé).
-- **Échecs réseau LOCAUX pendant un crawl (T86, 2026-08-28) : pas le même
-  symptôme que le rate-limiting T85.** Un crawl complet a essuyé ~291
+- **Échecs réseau LOCAUX pendant un crawl (T86 puis T87, 2026-08-28) :
+  RÉCURRENT, pas un incident isolé, et pas le même symptôme que le
+  rate-limiting T85.** Sur T86 : un crawl complet a essuyé ~291
   `NameResolutionError` groupés puis, sur reprise, deux blocages silencieux
-  (aucune progression pendant 15-20 min, CPU quasi nul) -- `curl` direct
-  restait rapide pendant l'incident, donc panne locale (DNS/réseau),
-  jamais reproduite côté serveur. Traité en tuant le process bloqué et en
-  relançant (cache-first, ne refetch que le manquant) -- a fini par passer
-  proprement à la 3e tentative. Ne pas confondre avec un ralentissement
-  serveur progressif (T85) : symptôme différent (blocage net vs
-  dégradation progressive), réponse différente (retenter vs arrêter).
+  (aucune progression pendant 15-20 min, CPU quasi nul), passé à la 3e
+  tentative. Sur T87 (même session, quelques heures plus tard) : RE-touché,
+  3 tentatives de suite bloquées net après quelques minutes, passé à la 4e.
+  Signature constante à chaque incident : `curl` direct restait rapide
+  PENDANT le blocage -- jamais un problème serveur beer-analytics.com,
+  presque certainement quelque chose de propre à cette session/machine
+  (état réseau local qui se dégrade après un usage prolongé de la session ?
+  pas isolé plus précisément). Réponse qui a marché à chaque fois : tuer le
+  process bloqué et relancer tel quel (cache-first, ne refetch que le
+  manquant, jamais de perte de progression) -- jamais eu besoin d'autre
+  chose qu'un retry brut. Si un futur crawl (T88/T89 ou un re-crawl) touche
+  encore ce symptôme (blocage net, CPU quasi nul, `curl` direct qui reste
+  rapide), même traitement : tuer + relancer, pas la peine de diagnostiquer
+  plus loin avant d'essayer.
 
 ### Licence
 Code MIT. FooDB/FlavorDB2 non commerciales. BeerMaverick sans licence de données
