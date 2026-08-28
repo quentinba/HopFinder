@@ -148,6 +148,28 @@ CREATE TABLE hop_beer_styles (
 """
 SCHEMA += HOP_BEER_STYLES_SCHEMA
 
+# Distributions RÉELLES observées dans des recettes publiées (T85, épique B) --
+# beer-analytics.com, agrégateur de recettes homebrew, PAS du BJCP (voir
+# `beer_styles` ci-dessus) ni une mesure de labo. `metric` in
+# {abv, ibu, og, fg, srm}, un bin par ligne (`bin_low`/`bin_high` = bornes de
+# l'intervalle pandas source, `count` = nombre de recettes dans ce bin) --
+# des HISTOGRAMMES PRÉ-BINNÉS avec outliers déjà retirés côté beer-analytics
+# (`remove_outliers(..., 0.02)`), jamais un vrai percentile dérivable (GUI :
+# "observed distribution", jamais "P5-P95"). `style_id` = notre id BJCP via
+# `data/mappings/beer_style_aliases.yaml` (T84), NULL si non résolu (leurs
+# styles ne sont pas tous BJCP) -- jamais deviné. Constante séparée (même
+# raison que BEER_STYLES_SCHEMA/HOP_BEER_STYLES_SCHEMA) : `ingest_beer_
+# analytics` doit pouvoir créer cette seule table sur une base déjà peuplée.
+STYLE_RECIPE_STATS_SCHEMA = """
+CREATE TABLE style_recipe_stats (
+    style_id TEXT, style_slug TEXT, metric TEXT,
+    bin_low REAL, bin_high REAL, count INTEGER,
+    source TEXT, fetched_at TEXT,
+    PRIMARY KEY (style_slug, metric, bin_low)
+);
+"""
+SCHEMA += STYLE_RECIPE_STATS_SCHEMA
+
 # alpha_acid/beta_acid retirés de ce filtre (2026-08-19, demande utilisateur) :
 # non-aromatiques (jamais utilisés dans le scoring moléculaire, qui n'itère
 # que sur les molécules de la NOTE -- aucune note FooDB ne référence jamais
@@ -173,7 +195,8 @@ def init_db(con: sqlite3.Connection) -> None:
         "DROP TABLE IF EXISTS flavornet_compounds; DROP TABLE IF EXISTS flavordb2_thresholds;"
         "DROP TABLE IF EXISTS pubchem_cids;"
         "DROP TABLE IF EXISTS beer_styles;"
-        "DROP TABLE IF EXISTS hop_beer_styles;")
+        "DROP TABLE IF EXISTS hop_beer_styles;"
+        "DROP TABLE IF EXISTS style_recipe_stats;")
     con.executescript(SCHEMA)
 
 

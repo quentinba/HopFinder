@@ -1,3 +1,5 @@
+import pytest
+
 from hopmatch import parsers
 
 def test_parse_range():
@@ -607,6 +609,56 @@ def test_parse_beermaverick_origin():
 
 def test_parse_beermaverick_origin_absent_returns_none():
     assert parsers.parse_beermaverick_origin("<p>rien ici</p>") is None
+
+def test_discover_beer_analytics_charts_finds_all_data_chart_attributes():
+    # gabarit trimmé d'une vraie page beer-analytics.com/styles/ipa/american-ipa/
+    # (2026-08-27) -- le segment de catégorie ("ipa") diffère du slug de page
+    # affiché ("india-pale-ale"), jamais reconstruit à la main.
+    html = """
+    <div data-chart="/styles/ipa/american-ipa/charts/abv-histogram.json"></div>
+    <div data-chart="/styles/ipa/american-ipa/charts/ibu-histogram.json"></div>
+    <div data-chart="/styles/ipa/american-ipa/charts/hop-pairings.json"></div>
+    """
+    charts = parsers.discover_beer_analytics_charts(html)
+    assert charts == {
+        "abv-histogram": "/styles/ipa/american-ipa/charts/abv-histogram.json",
+        "ibu-histogram": "/styles/ipa/american-ipa/charts/ibu-histogram.json",
+        "hop-pairings": "/styles/ipa/american-ipa/charts/hop-pairings.json",
+    }
+
+def test_discover_beer_analytics_charts_absent_returns_empty():
+    assert parsers.discover_beer_analytics_charts("<p>rien ici</p>") == {}
+
+def test_parse_beer_analytics_style_name():
+    html = "<html><head><title>American IPA...</title></head><body><h1>American IPA</h1></body></html>"
+    assert parsers.parse_beer_analytics_style_name(html) == "American IPA"
+
+def test_parse_beer_analytics_style_name_absent_returns_none():
+    assert parsers.parse_beer_analytics_style_name("<p>rien ici</p>") is None
+
+def test_plotly_traces_ignores_layout():
+    # payload["layout"] (le template Plotly, ~90% du poids réel observé)
+    # ne doit jamais être renvoyé -- seul payload["data"] compte.
+    payload = {"data": [{"x": ["(5.0, 5.3]"], "y": [6244], "type": "bar"}],
+              "layout": {"template": {"huge": "unused" * 1000}}}
+    traces = parsers.plotly_traces(payload)
+    assert traces == [{"x": ["(5.0, 5.3]"], "y": [6244], "type": "bar"}]
+
+def test_plotly_traces_missing_data_returns_empty():
+    assert parsers.plotly_traces({"layout": {}}) == []
+
+def test_parse_pandas_interval():
+    # gabarit trimmé d'un vrai bin abv-histogram (American IPA, 2026-08-27)
+    assert parsers.parse_pandas_interval("(5.0, 5.3]") == (5.0, 5.3)
+    assert parsers.parse_pandas_interval("(1.048, 1.05]") == (1.048, 1.05)
+
+def test_parse_pandas_interval_fails_loudly_on_unexpected_format():
+    # jamais de repli silencieux -- un format inattendu doit lever, pas
+    # inventer un bin faux (règle explicite du ticket T85).
+    with pytest.raises(ValueError):
+        parsers.parse_pandas_interval("5.0-5.3")
+    with pytest.raises(ValueError):
+        parsers.parse_pandas_interval("not a bin at all")
 
 def test_pubchem_name_fallbacks():
     # échantillons réels : CAS non résolus par PubChem, noms Flavornet en cause
