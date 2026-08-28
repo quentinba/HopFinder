@@ -238,14 +238,19 @@ construites à la main — le segment de catégorie diverge du slug de page
 affiché, ex. page `/styles/india-pale-ale/american-ipa/` mais charts sous
 `/styles/ipa/american-ipa/charts/…`).
 - **Cache disque `data/cache/beer_analytics/` réellement obligatoire, pas
-  cosmétique** : le site a ralenti brutalement (~13 req/min → ~0,1 req/min)
-  après ~500 requêtes/1h30 même à notre rythme poli d'1 req/s — rate-limiting
-  informel probable. Crawl complet arrêté délibérément plutôt que forcé
-  (89/159 styles réellement ingérés, 2026-08-27/28) : reprendre plus tard ne
-  refetch que le manquant, tout le reste rejoue depuis le cache en secondes.
-  Ne pas retenter un crawl complet agressif sans un délai plus long entre
-  requêtes ou sans avoir d'abord envoyé le message de prise de contact prévu
-  (T89, `docs/OUTREACH_beer-analytics.md`).
+  cosmétique** : lors du premier essai (2026-08-27) le site a ralenti
+  brutalement (~13 req/min → ~0,1 req/min) après ~500 requêtes/1h30 même à
+  notre rythme poli d'1 req/s — rate-limiting informel probable. Crawl arrêté
+  délibérément plutôt que forcé (89/159 -- 159 était un COMPTAGE ERRONÉ,
+  incluant les pages catégorie à un seul segment ; le vrai total est 123).
+  Repris le lendemain sur demande explicite de l'utilisateur (« I want as
+  much data as possible ») : rythme redevenu normal, **123/123 pages
+  terminées proprement, zéro erreur** — le cache a évité de re-fetcher les
+  89 déjà obtenues. État actuel : crawl complet, 6577 bins, 112/123 style_id
+  résolus. Si un futur re-crawl (nouvelles données, pas juste une reprise)
+  montre à nouveau un ralentissement soutenu, même précaution : arrêter
+  plutôt que forcer, et considérer la prise de contact prévue (T89,
+  `docs/OUTREACH_beer-analytics.md`) avant de retenter.
 - **`style_id` (résolution BJCP) jamais fabriqué en ajoutant une ligne
   `beer_styles`.** beer-analytics a une granularité de style PARFOIS plus
   fine que BJCP (ex. 7 variantes de « Specialty IPA » — Black/White/Red IPA

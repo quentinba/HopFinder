@@ -87,19 +87,20 @@
 "Rye Ale": null                  # 1  -- rye is an ingredient variant across many styles, not its own BJCP style
 
 # =============================================================================
-# beer-analytics.com style page names (T85, 2026-08-27) -- THIRD usage of this
-# file (see file header). Extracted from live <h1> text on 89/159 style pages
-# (partial: the full 159-style crawl was interrupted mid-run by the site
-# slowing down sharply after ~500 requests over ~1h30, consistent with
-# informal rate-limiting even at our polite 1 req/s -- stopped deliberately
-# rather than grinding through, see BACKLOG.md T85 compte-rendu. The
-# remaining ~70 style names will surface as unresolved on a future resumed
-# run -- the disk cache under data/cache/beer_analytics/ already holds
-# everything fetched so far, a resume is cheap). Unlike Yakima's editorial
-# vocabulary (T84 section above, mostly BROAD/ambiguous labels), beer-
-# analytics names are near-literal BJCP 2021 style names -- 68/89 resolved
-# by EXACT, UNAMBIGUOUS match against `beer_styles.name` (single style_id
-# candidate each, unlike Yakima's "IPA"/"Lager"/"Stout" which each span many
+# beer-analytics.com style page names (T85, 2026-08-27/28) -- THIRD usage of
+# this file (see file header). Extracted from live <h1> text on ALL 123 real
+# style pages (full crawl -- first attempt (2026-08-27) was stopped after
+# ~500 requests/1h30 when the site slowed sharply, consistent with informal
+# rate-limiting even at our polite 1 req/s (see BACKLOG.md T85 compte-rendu);
+# resumed and completed cleanly the next day, 2026-08-28, zero errors, 123/123
+# pages -- NOTE the true total is 123, not the 159 first quoted in BACKLOG.md
+# T85's own ticket text, which counted category INDEX pages too, e.g.
+# `/styles/standard-american-beer/` alone, never actual leaf style pages).
+# Unlike Yakima's editorial vocabulary (T84 section above, mostly BROAD/
+# ambiguous labels), beer-analytics names are near-literal BJCP 2021 style
+# names -- 98/123 resolved by EXACT, UNAMBIGUOUS match against `beer_styles.
+# name` (single style_id candidate each, unlike Yakima's "IPA"/"Lager"/
+# "Stout" which each span many
 # BJCP ids and stay null above).
 
 # --- Exact BJCP name match (68) ---------------------------------------------
@@ -172,6 +173,41 @@
 "Wild Specialty Beer": "28C"
 "Witbier": "24A"
 
+# --- Exact BJCP name match, discovered on crawl completion (30) -------------
+# Same batch as above (2026-08-28, full 123-page crawl finished cleanly the
+# day after the first attempt was interrupted) -- separate block only
+# because it was found a day later, not a different resolution standard.
+"American Barleywine": "22C"
+"American Lager": "1B"
+"American Light Lager": "1A"
+"American Strong Ale": "22B"
+"American Wheat Beer": "1D"
+"Autumn Seasonal Beer": "30B"
+"Baltic Porter": "9C"
+"Belgian Blond Ale": "25A"
+"Belgian Golden Strong Ale": "25C"
+"British Strong Ale": "17A"
+"Classic Style Smoked Beer": "32A"
+"Commercial Specialty Beer": "34A"
+"Cream Ale": "1C"
+"Doppelbock": "9A"
+"Eisbock": "9B"
+"English Barley Wine": "17D"
+"Experimental Beer": "34C"
+"Helles Bock": "4C"
+"Mixed-Style Beer": "34B"
+"Munich Helles": "4A"
+"Old Ale": "17B"
+"Scottish Export": "14C"
+"Scottish Heavy": "14B"
+"Scottish Light": "14A"
+"Specialty Smoked Beer": "32B"
+"Specialty Spice Beer": "30D"
+"Spice, Herb, or Vegetable Beer": "30A"
+"Wee Heavy": "17C"
+"Wheatwine": "22D"
+"Winter Seasonal Beer": "30C"
+
 # --- Specialty IPA sub-variants (7) ------------------------------------------
 # BJCP has only ONE style_id (21B) with one official vital-stat range for
 # this whole family -- these 7 are beer-analytics' own finer split, each with
@@ -208,3 +244,8 @@
 "Pre-Prohibition Porter": null
 "Roggenbier": null
 "Sahti": null
+# discovered on crawl completion (2026-08-28) -- same reason, checked live
+# against all 110 real BJCP names, no "Wood Beer" category present at all
+# in our ingested beerjson/bjcp-json set (BJCP 2021's real category 33).
+"Specialty Wood-Aged Beer": null
+"Wood-Aged Beer": null
