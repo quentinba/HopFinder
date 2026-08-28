@@ -660,6 +660,33 @@ def test_parse_pandas_interval_fails_loudly_on_unexpected_format():
     with pytest.raises(ValueError):
         parsers.parse_pandas_interval("not a bin at all")
 
+def test_parse_time_series_trace_returns_latest_and_avg24m():
+    # gabarit trimmé d'une vraie trace popular-hops.json (Citra, American IPA)
+    trace = {"name": "Citra", "y": [0.1] * 150 + [0.2] * 24 + [0.36]}
+    latest, avg24m = parsers.parse_time_series_trace(trace)
+    assert latest == 0.36
+    # fenêtre des 24 DERNIERS points -- ici les 23 x 0.2 + le point final 0.36
+    assert avg24m == pytest.approx((0.2 * 23 + 0.36) / 24)
+
+def test_parse_time_series_trace_ignores_none_gaps():
+    trace = {"name": "RareHop", "y": [None, None, 0.1, 0.2, None, 0.3]}
+    latest, avg24m = parsers.parse_time_series_trace(trace)
+    assert latest == 0.3
+    assert avg24m == pytest.approx((0.1 + 0.2 + 0.3) / 3)
+
+def test_parse_time_series_trace_no_data_returns_none():
+    assert parsers.parse_time_series_trace({"name": "Empty", "y": []}) == (None, None)
+    assert parsers.parse_time_series_trace({"name": "AllNull", "y": [None, None]}) == (None, None)
+
+def test_parse_box_trace_unwraps_single_element_lists():
+    # gabarit trimmé d'une vraie trace popular-hops-amount.json (Citra)
+    trace = {"name": "Citra", "type": "box", "q1": [0.25], "median": [0.36], "q3": [0.5],
+            "lowerfence": [0.09], "upperfence": [1.0], "mean": [0.43]}
+    assert parsers.parse_box_trace(trace) == (0.25, 0.36, 0.5)
+
+def test_parse_box_trace_missing_fields_returns_none():
+    assert parsers.parse_box_trace({"name": "Empty"}) == (None, None, None)
+
 def test_pubchem_name_fallbacks():
     # échantillons réels : CAS non résolus par PubChem, noms Flavornet en cause
     assert parsers.pubchem_name_fallbacks("δ-cadinol") == ["δ-cadinol", "delta-cadinol"]

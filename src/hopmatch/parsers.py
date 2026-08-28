@@ -933,3 +933,31 @@ def parse_pandas_interval(s: str) -> tuple[float, float]:
     if not m:
         raise ValueError(f"Format d'intervalle pandas beer-analytics inattendu : {s!r}")
     return float(m.group(1)), float(m.group(2))
+
+
+def parse_time_series_trace(trace: dict, avg_window: int = 24) -> tuple[float | None, float | None]:
+    """(dernière valeur non nulle, moyenne des `avg_window` derniers points
+    non nuls) d'une trace Plotly `scattergl` temporelle -- format réel de
+    `popular-hops.json` (T86) : `x` = mois ISO, `y` = part de recettes,
+    un point par mois, jamais un seul point. « quoi maintenant » vs « quoi
+    en général » (ticket) sont deux questions différentes -- ni ne remplace
+    l'autre. Trous (valeurs `None`, non vus en direct sur les hops les plus
+    utilisés mais possibles pour un houblon plus rare) ignorés, jamais
+    comblés. Trace sans aucun point exploitable -> `(None, None)`."""
+    ys = [y for y in (trace.get("y") or []) if y is not None]
+    if not ys:
+        return None, None
+    window = ys[-avg_window:]
+    return ys[-1], sum(window) / len(window)
+
+
+def parse_box_trace(trace: dict) -> tuple[float | None, float | None, float | None]:
+    """(q1, median, q3) d'une trace Plotly `box` -- format réel de
+    `popular-hops-amount.json`/`hop-pairings.json` (T86/T87) : chaque champ
+    est une liste à UN SEUL élément côté beer-analytics (vérifié en direct :
+    `q1: [0.25]`), jamais un scalaire nu -- piège si on lit `trace["q1"]`
+    directement sans déballer."""
+    def first(key):
+        vals = trace.get(key)
+        return vals[0] if vals else None
+    return first("q1"), first("median"), first("q3")

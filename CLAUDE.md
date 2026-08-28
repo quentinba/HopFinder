@@ -263,6 +263,28 @@ affiché, ex. page `/styles/india-pale-ale/american-ipa/` mais charts sous
   garde sa propre ligne `style_recipe_stats` par `style_slug`, jamais fondue
   avec les autres) ; les rendre cherchables individuellement dans `browse`
   est le sujet de T130 (recherche par alias), pas de l'ingestion elle-même.
+- **Onglets "Used for" (Any/Bittering/Aroma/Dry-Hop, T86) : de vraies
+  requêtes `?filter=<valeur>` sur la même URL de chart, PAS un filtrage
+  client** malgré `data-bs-toggle="tab"` (Bootstrap générique, ne suffit
+  pas à trancher par le HTML seul) — confirmé par reverse engineering du
+  bundle `/static/app.js` (`Chart.load({filter: i})` -> `getRequest(this.
+  chartUrl, {filter: i}, ...)`) ET par fetch réel (payloads réellement
+  différents). `style_hop_usage.usage_type` fait partie de la clé primaire
+  pour cette raison (le `CREATE TABLE` du ticket T86 original n'avait nulle
+  part où stocker cette ventilation, rédigé avant la vérification).
+  `_beer_analytics_cache_filename` doit gérer les query strings (sanitisées
+  en suffixe de nom de fichier, jamais tronquées -- sinon collision entre
+  deux filtres du même chart, bug réel trouvé et corrigé).
+- **Échecs réseau LOCAUX pendant un crawl (T86, 2026-08-28) : pas le même
+  symptôme que le rate-limiting T85.** Un crawl complet a essuyé ~291
+  `NameResolutionError` groupés puis, sur reprise, deux blocages silencieux
+  (aucune progression pendant 15-20 min, CPU quasi nul) -- `curl` direct
+  restait rapide pendant l'incident, donc panne locale (DNS/réseau),
+  jamais reproduite côté serveur. Traité en tuant le process bloqué et en
+  relançant (cache-first, ne refetch que le manquant) -- a fini par passer
+  proprement à la 3e tentative. Ne pas confondre avec un ralentissement
+  serveur progressif (T85) : symptôme différent (blocage net vs
+  dégradation progressive), réponse différente (retenter vs arrêter).
 
 ### Licence
 Code MIT. FooDB/FlavorDB2 non commerciales. BeerMaverick sans licence de données
