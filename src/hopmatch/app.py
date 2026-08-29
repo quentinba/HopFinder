@@ -94,6 +94,7 @@ MODE_LABELS = {
     "compare": "Compare hops",
     "styles": "Beer styles",
     "style-hops": "Hops for a style",
+    "survivables": "Survivables",
 }
 
 # Page d'accueil (front page) : résumé des outils, avec accès direct à chacun.
@@ -186,6 +187,20 @@ _TOOL_SUMMARIES = [
             "computes."
         ),
     },
+    {
+        "mode": "survivables",
+        "icon": ":material/eco:",
+        "tagline": "Derived survivability index",
+        "description": (
+            "Ranks hops by our own measured linalool, geraniol, isobutyrate "
+            "and thiols — 4 of the compounds YCH's handbook flags as "
+            "surviving the hot side into the fermenter, each normalized "
+            "against every hop in the database. A derived estimate from our "
+            "composition data, not a lab measurement of the full 8 YCH "
+            "survivable compounds — only hops with real data for at least "
+            "one of the 4 are shown."
+        ),
+    },
 ]
 
 # T-D12 (2026-08-23, spec Claude Design) : lookup mode -> résumé, pour le
@@ -209,6 +224,16 @@ _TOOL_SUMMARY_BY_MODE = {t["mode"]: t for t in _TOOL_SUMMARIES}
 # un `git log` en direct exigerait aussi que `.git` soit présent dans le
 # conteneur déployé, ce qui n'est pas garanti.
 _RECENT_UPDATES = [
+    ("2026-08-29", "New \"Survivables\" tool: ranks hops by a derived "
+                   "survivability index (our own measured linalool, "
+                   "geraniol, isobutyrate and thiols, each normalized "
+                   "against the whole database and stacked into one bar "
+                   "per hop) with a High/Medium/Low filter. Clearly "
+                   "labeled as an estimate from our composition data, not "
+                   "a lab measurement of the full YCH survivable-compound "
+                   "panel -- only hops with real data for at least one of "
+                   "the 4 compounds are shown, with honest per-compound "
+                   "coverage counts."),
     ("2026-08-29", "Browse a hop now sorts by Popularity by default (so "
                    "the hop dropdown shows recipe counts right away), and "
                    "the \"Minimum recipes\" filter only appears when a "
@@ -3322,23 +3347,21 @@ _RECOMMENDED_USAGE_CHEMICAL_COMPOUNDS = ["linalool", "geraniol", "isobutyrate", 
 _USAGE_STAGE_ORDER = ["Mash", "First Wort", "Boil", "Aroma", "Dry Hop"]
 
 
-def _chemical_earliness_index_all(hops: dict, comp: dict) -> dict[str, dict]:
-    """T99, couche (b) CHIMIQUE : pour chaque houblon de la base, indice
-    dérivé des règles 1/2 du handbook YCH 2022 (voir CLAUDE.md) appliquées
-    à NOS mesures -- PAS une mesure directe des survivables (l'API de lot
-    YCH a été explicitement écartée comme socle, voir CLAUDE.md : "source
-    ABANDONNÉE comme socle systématique"). Moyenne du rang quantile PAR
-    COMPOSÉ (`_RECOMMENDED_USAGE_CHEMICAL_COMPOUNDS`) sur TOUTE la base --
+def _survivable_compound_positions_all(hops: dict, comp: dict) -> dict[str, dict[str, float]]:
+    """{variety: {compound: rang quantile 0..1}} pour les 4 composés
+    "survivables" mesurés (`_RECOMMENDED_USAGE_CHEMICAL_COMPOUNDS`) --
     réutilise `_normalize_quantile`/`_compare_field_db_values`/
-    `_compare_detail_value` déjà écrits pour Compare Hops (ticket : "ne pas
-    en réécrire un"), jamais une normalisation ad hoc. Indice élevé ->
-    plutôt whirlpool/dry hop en fermentation active (règles 1 et 4) ; bas ->
-    plutôt réservé au dry hop post-fermentation (règle 2).
+    `_compare_detail_value` déjà écrits pour Compare Hops, jamais une
+    normalisation ad hoc. Socle COMMUN de deux agrégations différentes en
+    aval, calculé UNE SEULE fois : `_chemical_earliness_index_all` (T99,
+    MOYENNE -- indice "précocité d'usage") et le classement "Survivables"
+    (T117, SOMME -- indice de survivabilité empilé par composé). Même
+    normalisation, deux lectures différentes du même signal, jamais
+    recalculées séparément.
 
-    Composé sans mesure pour un houblon donné -> simplement omis de SA
-    moyenne (jamais un 0 fabriqué qui tirerait l'indice vers le bas
-    artificiellement). Houblon sans AUCUN des 4 composés mesurés -> absent
-    du dict, jamais un indice fabriqué à partir de rien.
+    Composé sans mesure pour un houblon donné -> simplement absent de SON
+    dict (jamais un 0 fabriqué). Houblon sans AUCUN des 4 composés mesurés
+    -> absent du dict externe, jamais une entrée fabriquée à partir de rien.
 
     Calcule les valeurs DB-wide de chaque composé UNE SEULE FOIS
     (`_compare_field_db_values`) puis les réutilise pour chaque houblon,
@@ -3346,19 +3369,36 @@ def _chemical_earliness_index_all(hops: dict, comp: dict) -> dict[str, dict]:
     de O(n^2))."""
     db_values = {c: _compare_field_db_values(comp, c, absolute=False)
                 for c in _RECOMMENDED_USAGE_CHEMICAL_COMPOUNDS}
-    out: dict[str, dict] = {}
+    out: dict[str, dict[str, float]] = {}
     for v in hops:
         hcomp = comp.get(v, {})
-        positions, used = [], []
+        positions: dict[str, float] = {}
         for c in _RECOMMENDED_USAGE_CHEMICAL_COMPOUNDS:
             value = _compare_detail_value(hcomp, c, absolute=False)
             if value is None:
                 continue
-            positions.append(_normalize_quantile(value, db_values[c]))
-            used.append(c)
+            positions[c] = _normalize_quantile(value, db_values[c])
         if positions:
-            out[v] = {"index": sum(positions) / len(positions), "compounds": used}
+            out[v] = positions
     return out
+
+
+def _chemical_earliness_index_all(hops: dict, comp: dict) -> dict[str, dict]:
+    """T99, couche (b) CHIMIQUE : pour chaque houblon de la base, indice
+    dérivé des règles 1/2 du handbook YCH 2022 (voir CLAUDE.md) appliquées
+    à NOS mesures -- PAS une mesure directe des survivables (l'API de lot
+    YCH a été explicitement écartée comme socle, voir CLAUDE.md : "source
+    ABANDONNÉE comme socle systématique"). MOYENNE du rang quantile par
+    composé (`_survivable_compound_positions_all`). Indice élevé -> plutôt
+    whirlpool/dry hop en fermentation active (règles 1 et 4) ; bas -> plutôt
+    réservé au dry hop post-fermentation (règle 2)."""
+    positions_all = _survivable_compound_positions_all(hops, comp)
+    return {v: {"index": sum(pos.values()) / len(pos),
+               # ordre FIXE (_RECOMMENDED_USAGE_CHEMICAL_COMPOUNDS), pas
+               # alphabétique -- affiché tel quel dans la caption "Recommended
+               # usage" (Browse), doit rester stable/prévisible.
+               "compounds": [c for c in _RECOMMENDED_USAGE_CHEMICAL_COMPOUNDS if c in pos]}
+           for v, pos in positions_all.items()}
 
 
 def _usage_share_db_values(usage_all: dict[str, dict], use_type: str) -> list[float]:
@@ -5528,6 +5568,146 @@ def _style_hops(con) -> None:
                     column_config={"Matched descriptors": st.column_config.ListColumn()})
 
 
+# T117 : couleur FIXE par composé (pas par houblon, contrairement à
+# `_COMPARE_PALETTE` habituellement utilisé par hop) -- 4 teintes prises du
+# même cercle chromatique Organic, EN ÉVITANT la terracotta (réservée à
+# "interaction/cliquable" ailleurs dans la GUI, voir CLAUDE.md heatmap).
+# Théâtre-agnostique comme `_COMPARE_PALETTE` lui-même (pas de variante
+# clair/sombre séparée -- couleurs de SÉRIE de données, pas de chrome UI).
+_SURVIVABLE_COMPOUND_LABELS = {"linalool": "Linalool", "geraniol": "Geraniol",
+                              "isobutyrate": "Isobutyrate", "thiols": "Thiols"}
+_SURVIVABLE_COMPOUND_COLORS = {"Linalool": "#4f86b8", "Geraniol": "#7f9455",
+                               "Isobutyrate": "#d9a441", "Thiols": "#a5678a"}
+# Tri des paliers Haute/Moyenne/Basse (2026-08-29) : terciles du "total"
+# (somme des rangs quantile) PARMI LES HOUBLONS RÉELLEMENT AFFICHÉS (au
+# moins un des 4 composés mesuré) -- jamais un seuil absolu inventé, même
+# logique DB-relative que le reste du projet (cf. T99 "divergence": rang
+# quantile vs médiane de la base, jamais un % fixe).
+_SURVIVABLE_BUCKETS = ["High", "Medium", "Low"]
+
+
+def _survivable_buckets(totals: dict[str, float]) -> dict[str, str]:
+    """{variety: "High"/"Medium"/"Low"} -- terciles de `totals.values()`
+    (somme des rangs quantile par composé, T117), calculés PARMI les
+    houblons couverts eux-mêmes (jamais un seuil absolu). Cas dégénéré (< 3
+    houblons couverts) : tout le monde "High", un tercile n'a pas de sens
+    en dessous de 3 valeurs."""
+    values = sorted(totals.values())
+    n = len(values)
+    if n < 3:
+        return {v: "High" for v in totals}
+    lo, hi = values[n // 3], values[(2 * n) // 3]
+    out = {}
+    for v, t in totals.items():
+        out[v] = "High" if t >= hi else ("Medium" if t >= lo else "Low")
+    return out
+
+
+def _survivables(con) -> None:
+    """T117 : onglet "Survivables", indice DÉRIVÉ (pas une mesure) de
+    survivabilité procédé -- classement des houblons par la SOMME (barres
+    empilées) des rangs quantile de linalool/géraniol/isobutyrate/thiols
+    (`_survivable_compound_positions_all`, même socle que l'indice de
+    précocité T99, qui en fait la MOYENNE -- deux lectures différentes du
+    même signal, jamais recalculées séparément).
+
+    Repris de l'onglet SURVIVABLE du hop-finder russe, mais **sans aucune
+    donnée reconstruite** -- seulement nos 4 composés réellement mesurés.
+    ⚠ Ce ne sont que 3 des 8 survivables YCH officiels (isobutyrate/thiols
+    sont des AGRÉGATS recouvrant plusieurs des 8, voir CLAUDE.md) -- jamais
+    présenté au même niveau qu'une mesure de labo YCH (même traitement que
+    le préfixe `Inferred:`). Le méthyl géranate (composé le plus abondant
+    des survivables sur les lots YCH testés) n'est couvert par AUCUN de nos
+    agrégats -- trou affiché explicitement, jamais comblé.
+
+    ⚠ **Couverture honnête** (ticket) : seuls les houblons ayant AU MOINS UN
+    des 4 composés mesurés sont affichés -- jamais 189 houblons dont la
+    majorité sur une donnée absente. Couverture par composé affichée
+    explicitement (isobutyrate/thiols bien plus rares que linalool/
+    géraniol dans `hop_composition`)."""
+    hops, comp, _, _ = matching.load(con)
+    positions_all = _survivable_compound_positions_all(hops, comp)
+    n_total = len(hops)
+    n_covered = len(positions_all)
+    coverage_by_compound = {
+        c: sum(1 for pos in positions_all.values() if c in pos)
+        for c in _RECOMMENDED_USAGE_CHEMICAL_COMPOUNDS}
+
+    with _panel():
+        st.write("Derived survivability index — ranks hops by our own measured "
+                 "linalool, geraniol, isobutyrate and thiols, each normalized "
+                 "against every hop in the database (quantile rank), then "
+                 "summed and shown as a stacked bar.")
+        st.caption(
+            "**Not a lab measurement** of the YCH \"survivable compounds\" -- "
+            "isobutyrate and thiols are aggregates covering only some of the 8 "
+            "official survivables (see \"How does this work?\"), and methyl "
+            "geranate — the most abundant survivable on tested YCH lots — isn't "
+            "covered by any of our aggregates at all. Estimated from "
+            "composition, same caveat as the early-use index in Browse a "
+            "hop's \"Recommended usage\" card.")
+        st.caption(
+            f"{n_covered} of {n_total} hops have at least one of these 4 "
+            "compounds measured (hops with none are never shown). Per-compound "
+            "coverage: " +
+            ", ".join(f"{_SURVIVABLE_COMPOUND_LABELS[c]} {coverage_by_compound[c]}/{n_total}"
+                     for c in _RECOMMENDED_USAGE_CHEMICAL_COMPOUNDS) + ".")
+
+    if not positions_all:
+        with _panel():
+            st.write("No hop has any of these 4 compounds measured.")
+        return
+
+    totals = {v: sum(pos.values()) for v, pos in positions_all.items()}
+    buckets = _survivable_buckets(totals)
+
+    with _panel():
+        selected_buckets = st.pills(
+            "Filter", _SURVIVABLE_BUCKETS, selection_mode="multi",
+            default=_SURVIVABLE_BUCKETS, key="survivables_bucket_filter",
+            help="High/Medium/Low are terciles of the summed index among the "
+                 "hops actually shown here, not a fixed threshold.")
+    shown = [v for v in positions_all if buckets[v] in (selected_buckets or [])]
+    if not shown:
+        with _panel():
+            st.write("No hop in the selected bucket(s).")
+        return
+    shown.sort(key=lambda v: -totals[v])
+
+    rows = [
+        {"hop": hops[v]["name"], "compound": _SURVIVABLE_COMPOUND_LABELS[c], "value": pos}
+        for v in shown for c, pos in positions_all[v].items()]
+    # Largeur proportionnelle au nombre de houblons affichés (jusqu'à ~170) --
+    # même logique "délibérément large/défilant" que le barplot détaillé de
+    # Compare Hops (voir `_COMPARE_CHART_WIDTH`), `width="content"` laisse le
+    # graphique dépasser la carte plutôt que d'écraser les barres.
+    chart_width = max(700, 26 * len(shown))
+    # `sort=alt.SortField(field="total", ...)` (piège Vega-Lite réel, trouvé
+    # en vérification live : zoom sur le graphique réel montrant des barres
+    # PLUS HAUTES que leurs voisines de GAUCHE malgré un tri "descending")
+    # -- `rows` porte PLUSIEURS lignes par houblon (une par composé mesuré),
+    # et Vega-Lite agrège le champ de tri par SOMME par défaut quand aucun
+    # `op` n'est précisé (`alt.SortField` de cette version d'Altair n'expose
+    # PAS de paramètre `op`, contrairement au schéma Vega-Lite brut) : un
+    # houblon à 4 composés mesurés voyait son total sommé 4 fois (4x sa
+    # vraie valeur) contre 1x pour un houblon à 1 seul composé mesuré,
+    # inversant l'ordre. Corrigé en passant directement la liste ORDONNÉE
+    # des noms (déjà triée en Python ci-dessus) comme domaine `sort` --
+    # aucune agrégation Vega-Lite ambiguë possible sur une liste explicite.
+    hop_order = [hops[v]["name"] for v in shown]
+    chart = alt.Chart(alt.Data(values=rows)).mark_bar().encode(
+        x=alt.X("hop:N", sort=hop_order,
+               title=None, axis=alt.Axis(labelAngle=_COMPARE_LABEL_ANGLE)),
+        y=alt.Y("value:Q", title="Summed quantile rank (stacked)"),
+        color=alt.Color("compound:N", title="Compound",
+                        scale=alt.Scale(domain=list(_SURVIVABLE_COMPOUND_COLORS),
+                                       range=list(_SURVIVABLE_COMPOUND_COLORS.values()))),
+        tooltip=["hop:N", "compound:N", alt.Tooltip("value:Q", format=".2f", title="Rank")],
+    ).properties(width=chart_width, height=420)
+    with _panel():
+        st.altair_chart(chart, width="content")
+
+
 def main():
     # Nom d'affichage GUI = "HopFinder" (demande utilisateur 2026-08-19,
     # renommage d'affichage seulement -- le paquet/CLI restent "hopmatch",
@@ -5607,10 +5787,10 @@ def main():
     _MODE_GROUP_PREFIX = {"amplify": "HopFinder — ", "contrast": "HopFinder — ",
                           "by-descriptor": "HopFinder — ", "browse": "Explore — ",
                           "compare": "Explore — ", "styles": "Explore — ",
-                          "style-hops": "Explore — "}
+                          "style-hops": "Explore — ", "survivables": "Explore — "}
     mode = st.sidebar.radio(
         "Mode", ["home", "amplify", "contrast", "by-descriptor", "browse", "compare", "styles",
-                "style-hops"],
+                "style-hops", "survivables"],
         format_func=lambda m: _MODE_GROUP_PREFIX.get(m, "") + MODE_LABELS[m], key="mode")
 
     with st.sidebar.popover("Database", icon=":material/database:", width="stretch"):
@@ -5673,6 +5853,9 @@ def main():
         return
     if mode == "style-hops":
         _style_hops(con)
+        return
+    if mode == "survivables":
+        _survivables(con)
         return
     # "amplify" : seul mode restant après les dispatches explicites
     # ci-dessus -- la sélection de note vit désormais DANS `_amplify` (page
