@@ -95,6 +95,7 @@ MODE_LABELS = {
     "styles": "Beer styles",
     "style-hops": "Hops for a style",
     "survivables": "Survivables",
+    "coverage": "Hopping plan",
 }
 
 # Page d'accueil (front page) : résumé des outils, avec accès direct à chacun.
@@ -201,6 +202,20 @@ _TOOL_SUMMARIES = [
             "one of the 4 are shown."
         ),
     },
+    {
+        "mode": "coverage",
+        "icon": ":material/checklist:",
+        "tagline": "What does your blend actually deliver?",
+        "description": (
+            "Build a hopping plan (hops + the stage(s) you add each one at) "
+            "and see, compound by compound, what's delivered, what generates "
+            "a related aroma through oxidation instead (the hot-side "
+            "sesquiterpenes), and what's a priori not covered at all. Reads "
+            "our own measured composition against the T119 process-survival "
+            "rules — no solver, no suggestions, just what your plan as "
+            "entered actually shows."
+        ),
+    },
 ]
 
 # T-D12 (2026-08-23, spec Claude Design) : lookup mode -> résumé, pour le
@@ -224,6 +239,13 @@ _TOOL_SUMMARY_BY_MODE = {t["mode"]: t for t in _TOOL_SUMMARIES}
 # un `git log` en direct exigerait aussi que `.git` soit présent dans le
 # conteneur déployé, ce qui n'est pas garanti.
 _RECENT_UPDATES = [
+    ("2026-08-30", "New \"Hopping plan\" tool: build a plan (hops + the "
+                   "stage(s) you add each one at) and see, compound by "
+                   "compound, what's delivered, what generates a related "
+                   "aroma through oxidation instead (the hot-side "
+                   "sesquiterpenes), and what's a priori not covered at "
+                   "all -- reads our own measured composition against the "
+                   "process-survival rules, no solver, no suggestions."),
     ("2026-08-29", "Browse a hop's \"Recommended usage\" card now shows a "
                    "plain-language tendency (\"Leans early\"/\"Leans "
                    "late\"/\"Middle of the range\") right under the "
@@ -5953,6 +5975,170 @@ def _survivables(con) -> None:
             "from alpha acid. No marker = purpose unknown, not guessed.")
 
 
+_COVERAGE_STAGE_LABELS = {"boil": "Boil", "whirlpool": "Whirlpool", "afdh": "AFDH", "pfdh": "PFDH"}
+_COVERAGE_MAX_HOPS = 6
+# Vocabulaire imposé par le ticket T121 pour le cas précurseur (T119 : "il
+# ne livre pas le composé, il en génère un autre") -- les 4 composés
+# concernés (humulène/caryophyllène/farnésène/sélinène) partagent tous cette
+# même annotation de classe dans `reference.PROCESS_SURVIVAL` ("direct
+# traces, contributes via oxidation"), d'où un texte unique plutôt qu'un par
+# composé.
+_COVERAGE_PRECURSOR_CELL_TEXT = "Generates spicy/woody aroma through oxidation"
+
+
+def _coverage_cell_text(compound: str, stage: str, entry: dict | None) -> str:
+    """Texte d'UNE cellule (composé, addition) de la grille T121 -- distingue
+    deux affirmations différentes, jamais confondues :
+    - "a priori not delivered" : AUCUNE valeur mesurée pour ce composé chez
+      CE houblon (`entry` absent/nul) -- doctrine a priori du ticket
+      (`matching.hopping_plan_coverage`), jamais "does not contain" ni "0".
+    - "Lost during this addition" : le composé EST mesuré chez ce houblon,
+      mais son `state` T119 à CE stade précis vaut "lost" -- un fait de
+      PROCÉDÉ, pas une absence de composition.
+
+    `entry` : `comp[variety].get(compound)` (déjà réconcilié multi-sources
+    par `matching.load`), jamais une requête `hop_composition` séparée."""
+    if not entry or entry.get("mid") in (None, 0):
+        return "a priori not delivered"
+    survival = matching.compound_survival(compound, stage)
+    if survival is None:
+        return "a priori not delivered"
+    if survival["state"] in ("kept", "partial"):
+        return "Delivered"
+    if survival["state"] == "precursor":
+        return _COVERAGE_PRECURSOR_CELL_TEXT
+    return "Lost during this addition"
+
+
+def _coverage(con) -> None:
+    """T121 : nouveau mode "Hopping plan" -- grille composé × addition d'un
+    plan de houblonnage (`matching.hopping_plan_coverage`, T120, sur la
+    matrice de survie au procédé `matching.compound_survival`, T119), plus
+    la section "a priori not covered" (demande centrale du ticket : « voir
+    directement quels composés ne sont pas couverts par son blend ») et un
+    encart explicatif replié. **Aucun solveur, aucune optimisation -- on
+    constate, on ne propose pas** (même contrainte que T120).
+
+    **Grille** : réutilise le VOCABULAIRE (`_compound_display_label`),
+    l'ORDRE et les CATÉGORIES CHIMIQUES (`_compound_category`) du 2e barplot
+    de Compare Hops -- même source (`reference.PROCESS_SURVIVAL`), donc les
+    deux vues se lisent pareil, comme demandé. PAS le même objet Vega-Lite
+    `_compare_category_gutter` littéral : cette machinerie est bâtie sur
+    mesure au pixel près pour la géométrie d'un barplot HORIZONTAL (largeurs/
+    hauteurs ajustées après plusieurs tours de retour utilisateur en direct,
+    voir son commentaire) et ne correspondrait à rien de sensé pour une
+    grille composé×addition -- `st.dataframe`/colonnes est la convention
+    déjà établie du projet pour ce type d'affichage (CLAUDE.md, "Tables via
+    column_config"), retenue ici plutôt que forcer un widget hors de son
+    cas d'usage.
+
+    **Colonnes** : une par ADDITION du plan (houblon × stade), pas une par
+    houblon ni une par stade seul -- un même houblon ajouté à 2 stades
+    obtient 2 colonnes distinctes ("Citra · Whirlpool", "Citra · AFDH"),
+    lisible directement sans ambiguïté sur QUELLE addition livre quoi."""
+    hops, comp, _, _ = matching.load(con)
+    options = sorted(hops, key=lambda v: hops[v]["name"].lower())
+    with _panel():
+        selected = st.multiselect(
+            f"Hops in your plan (up to {_COVERAGE_MAX_HOPS})", options,
+            format_func=lambda v: hops[v]["name"], max_selections=_COVERAGE_MAX_HOPS,
+            key="coverage_hops")
+        if not selected:
+            st.write("Choose at least one hop, then pick the stage(s) you add it at below.")
+    if not selected:
+        return
+
+    plan: list[tuple[str, str]] = []
+    with _panel():
+        st.caption("Pick the stage(s) each hop is added at — a hop can be added at more "
+                  "than one stage (e.g. some at whirlpool, more at dry hop).")
+        for v in selected:
+            stage_labels = st.segmented_control(
+                hops[v]["name"], list(_COVERAGE_STAGE_LABELS.values()), selection_mode="multi",
+                key=f"coverage_stage_{v}")
+            for label in stage_labels or []:
+                stage = next(code for code, lbl in _COVERAGE_STAGE_LABELS.items() if lbl == label)
+                plan.append((v, stage))
+    if not plan:
+        with _panel():
+            st.write("Pick at least one stage for a hop above (Boil / Whirlpool / AFDH / PFDH).")
+        return
+
+    rows = matching.hopping_plan_coverage(con, plan)
+    compounds = list(reference.PROCESS_STAGE_SURVIVAL)
+
+    grid_rows = []
+    for compound in compounds:
+        cls, _, subclass_display = _compound_category(compound)
+        row = {"Class": cls, "Subclass": subclass_display,
+               "Compound": _compound_display_label(compound)}
+        for variety, stage in plan:
+            column = f"{hops[variety]['name']} · {_COVERAGE_STAGE_LABELS[stage]}"
+            row[column] = _coverage_cell_text(compound, stage, comp.get(variety, {}).get(compound))
+        grid_rows.append(row)
+    with _panel():
+        st.write("**Coverage grid**")
+        st.caption("One row per compound (same order and chemical categories as Compare "
+                  "Hops' detailed barplot), one column per addition in your plan.")
+        st.dataframe(grid_rows, width="stretch", hide_index=True)
+
+    not_covered = [r for r in rows if r["state"] == "presumed_absent"]
+    with _panel():
+        st.write("**A priori not covered by this plan**")
+        if not not_covered:
+            st.write("Every one of the 11 tracked compounds is delivered by at least one "
+                     "addition in this plan.")
+        else:
+            plain = [r for r in not_covered if not r["precursor_by"]]
+            precursor_only = [r for r in not_covered if r["precursor_by"]]
+            if plain:
+                with st.container(horizontal=True):
+                    for r in plain:
+                        label = _compound_display_label(r["compound"])
+                        if r["measured_source_missing"]:
+                            help_text = ("Not enough data to say either way — no source "
+                                        "that measures this compound has ever covered any "
+                                        "hop in this plan.")
+                        else:
+                            help_text = "a priori not delivered by any addition in this plan."
+                        st.badge(label, color="orange", help=help_text)
+            if precursor_only:
+                st.caption("Generate a related aroma through oxidation instead of being "
+                          "delivered directly (see the grid above):")
+                with st.container(horizontal=True):
+                    for r in precursor_only:
+                        st.badge(_compound_display_label(r["compound"]), color="gray",
+                                help=_COVERAGE_PRECURSOR_CELL_TEXT)
+
+    with _panel_expander("Why \"a priori\"? What does each compound's coverage look like?"):
+        st.write(
+            "\"a priori not delivered\" / \"presumed absent\" means no source has ever "
+            "measured this compound in this hop's composition — **never** \"contains "
+            "0%\". Composition comes from BarthHaas and Yakima Chief profiles; some "
+            "compounds (isobutyrate, ketones, thiols) are only ever reported by "
+            "BarthHaas, so a hop BarthHaas never profiled hasn't been \"measured at "
+            "~0\" for those — it simply hasn't been looked at. That's the one case "
+            "flagged above as \"not enough data to say either way\" rather than treated "
+            "as an ordinary a priori absence.")
+        n_total = len(hops)
+        counts = {c: sum(1 for v in comp if comp[v].get(c, {}).get("mid") not in (None, 0))
+                 for c in compounds}
+        st.caption(f"Real per-compound coverage, this database ({n_total} hops): " +
+                  ", ".join(f"{_compound_display_label(c)} {counts[c]}/{n_total}"
+                           for c in compounds))
+        st.caption(
+            "Not every compound is equally informative for a plan like this one "
+            "(measured on ~20 realistic plans, see BACKLOG.md T122): myrcene, linalool "
+            "and geraniol are delivered by almost any plan with at least one non-boil "
+            "addition, so their coverage rarely tells you much. Beta-pinene and the "
+            "sesquiterpenes (humulene/caryophyllene/farnesene/selinene) genuinely depend "
+            "on your plan's stages — the sesquiterpenes only ever reach \"Delivered\" "
+            "from a post-fermentation dry hop addition, generating their oxidized aroma "
+            "instead at boil/whirlpool/AFDH. Isobutyrate/ketones/thiols depend on "
+            "whether your hops are in BarthHaas' catalog at all. Selinene is essentially "
+            "never covered (2 hops in the whole database).")
+
+
 def main():
     # Nom d'affichage GUI = "HopFinder" (demande utilisateur 2026-08-19,
     # renommage d'affichage seulement -- le paquet/CLI restent "hopmatch",
@@ -6032,10 +6218,11 @@ def main():
     _MODE_GROUP_PREFIX = {"amplify": "HopFinder — ", "contrast": "HopFinder — ",
                           "by-descriptor": "HopFinder — ", "browse": "Explore — ",
                           "compare": "Explore — ", "styles": "Explore — ",
-                          "style-hops": "Explore — ", "survivables": "Explore — "}
+                          "style-hops": "Explore — ", "survivables": "Explore — ",
+                          "coverage": "Explore — "}
     mode = st.sidebar.radio(
         "Mode", ["home", "amplify", "contrast", "by-descriptor", "browse", "compare", "styles",
-                "style-hops", "survivables"],
+                "style-hops", "survivables", "coverage"],
         format_func=lambda m: _MODE_GROUP_PREFIX.get(m, "") + MODE_LABELS[m], key="mode")
 
     with st.sidebar.popover("Database", icon=":material/database:", width="stretch"):
@@ -6101,6 +6288,9 @@ def main():
         return
     if mode == "survivables":
         _survivables(con)
+        return
+    if mode == "coverage":
+        _coverage(con)
         return
     # "amplify" : seul mode restant après les dispatches explicites
     # ci-dessus -- la sélection de note vit désormais DANS `_amplify` (page
