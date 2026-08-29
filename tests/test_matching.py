@@ -555,6 +555,51 @@ def test_hop_usage_breakdown_computes_share_per_use_type(db):
     db.execute("DELETE FROM hop_usage_stats WHERE variety='_fixture_usage'")
     db.commit()
 
+def test_style_hop_frequency_filters_to_resolvable_varieties(db):
+    db.execute("INSERT INTO hops (variety, name, region, sources, purpose) VALUES (?,?,?,?,?)",
+              ("_fixture_freq_hop", "Fixture Freq Hop", "test", "toy", None))
+    db.executemany("INSERT INTO style_hop_usage VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", [
+        ("fixture-style", "_fixture_style2", "Fixture Freq Hop", "_fixture_freq_hop", "any",
+         0.3, 0.25, 0.1, 0.2, 0.3, "test", "2026"),
+        # variety sans correspondance dans `hops` (T86 : ~90% de résolution,
+        # pas 100%) -> exclue par le JOIN, jamais fabriquée.
+        ("fixture-style", "_fixture_style2", "Unresolved Hop", "_fixture_unresolved", "any",
+         0.1, 0.1, None, None, None, "test", "2026"),
+    ])
+    db.commit()
+    out = matching.style_hop_frequency(db, "_fixture_style2", "any")
+    assert out == {"_fixture_freq_hop": {"hop_name": "Fixture Freq Hop",
+                                         "share_latest": 0.3, "share_avg24m": 0.25}}
+    # usage_type sans ligne -> dict vide, jamais un 0 fabriqué.
+    assert matching.style_hop_frequency(db, "_fixture_style2", "dry-hop") == {}
+    db.execute("DELETE FROM style_hop_usage WHERE style_id='_fixture_style2'")
+    db.execute("DELETE FROM hops WHERE variety='_fixture_freq_hop'")
+    db.commit()
+
+def test_style_typical_descriptors_matches_whole_words_only(db):
+    db.execute("INSERT INTO hops (variety, name, region, sources, purpose) VALUES (?,?,?,?,?)",
+              ("_fixture_word_hop", "Fixture Word Hop", "test", "toy", None))
+    db.executemany("INSERT INTO hop_descriptors VALUES (?,?,?)", [
+        ("_fixture_word_hop", "pine", "test"),
+        ("_fixture_word_hop", "pineapple", "test"),
+    ])
+    db.execute(
+        "INSERT INTO beer_styles (style_id, guideline_year, aroma, flavor, ingredients) "
+        "VALUES (?,?,?,?,?)",
+        ("_fixture_style3", 2021, "Citrus and pineapple aroma.", "Not much else.", None))
+    db.commit()
+    out = matching.style_typical_descriptors(db, "_fixture_style3")
+    assert "citrus" in out       # déjà dans le vocabulaire fixture (build_from_fixtures)
+    assert "pineapple" in out
+    # "pine" ne doit JAMAIS matcher via la sous-chaîne contenue dans
+    # "pineapple" -- recherche mot entier, pas une sous-chaîne.
+    assert "pine" not in out
+    assert matching.style_typical_descriptors(db, "_fixture_never_seen") == []
+    db.execute("DELETE FROM beer_styles WHERE style_id='_fixture_style3'")
+    db.execute("DELETE FROM hop_descriptors WHERE variety='_fixture_word_hop'")
+    db.execute("DELETE FROM hops WHERE variety='_fixture_word_hop'")
+    db.commit()
+
 def test_style_observed_distribution_groups_bins_by_metric_sorted(db):
     db.executemany("INSERT INTO style_recipe_stats VALUES (?,?,?,?,?,?,?,?)", [
         ("_fixture_style", "american-ipa", "abv", 6.0, 6.5, 20, "test", "2026"),

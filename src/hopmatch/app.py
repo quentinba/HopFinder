@@ -93,6 +93,7 @@ MODE_LABELS = {
     "browse": "Browse a hop",
     "compare": "Compare hops",
     "styles": "Beer styles",
+    "style-hops": "Hops for a style",
 }
 
 # Page d'accueil (front page) : résumé des outils, avec accès direct à chacun.
@@ -170,6 +171,21 @@ _TOOL_SUMMARIES = [
             "recipes."
         ),
     },
+    {
+        "mode": "style-hops",
+        "icon": ":material/join_inner:",
+        "tagline": "Recipes x aroma, side by side",
+        "description": (
+            "Pick a BJCP style and see two rankings side by side: how "
+            "often each hop is actually used in that style's recipes "
+            "(beer-analytics.com), and how well each hop matches the "
+            "style's typical aroma descriptors (pre-filled from the BJCP "
+            "text, freely editable). The hops that rank well on aroma but "
+            "are rarely used in the style's real recipes are highlighted "
+            "separately — a combination neither tool this was inspired by "
+            "computes."
+        ),
+    },
 ]
 
 # T-D12 (2026-08-23, spec Claude Design) : lookup mode -> résumé, pour le
@@ -193,6 +209,13 @@ _TOOL_SUMMARY_BY_MODE = {t["mode"]: t for t in _TOOL_SUMMARIES}
 # un `git log` en direct exigerait aussi que `.git` soit présent dans le
 # conteneur déployé, ce qui n'est pas garanti.
 _RECENT_UPDATES = [
+    ("2026-08-29", "New \"Hops for a style\" tool: pick a BJCP style and see "
+                   "two rankings side by side -- real recipe frequency "
+                   "(beer-analytics.com) and aroma relevance (typical "
+                   "descriptors, pre-filled from the BJCP text and freely "
+                   "editable). Hops that rank well on aroma but have no "
+                   "measured usage in that style's real recipes get their "
+                   "own highlighted section, right up top."),
     ("2026-08-29", "Browse a hop now has a \"Recommended usage\" card, right "
                    "after the aroma wheel: where brewers actually use this "
                    "hop by process stage (real recipe share from beer-"
@@ -5348,6 +5371,134 @@ def _styles(con) -> None:
             st.markdown(_source_chips(examples))
 
 
+_STYLE_HOPS_USAGE_TYPES = {"Any": "any", "Bittering": "bittering", "Aroma": "aroma",
+                          "Dry hop": "dry-hop"}
+
+
+def _style_hops(con) -> None:
+    """T103 : mode "Hops for a style" -- la fonctionnalité la plus originale
+    du backlog (aucun des deux outils qui l'ont inspiré ne fait ce
+    croisement). Deux classements CÔTE À CÔTE pour un style BJCP donné :
+    (1) fréquence RÉELLE (`matching.style_hop_frequency`, T86, beer-
+    analytics.com -- ce que font les brasseurs) et (2) pertinence
+    AROMATIQUE (`matching.by_descriptor` lancé sur les descripteurs
+    typiques du style -- ce que dit la chimie/roue d'arôme). **Le
+    livrable réel** : les houblons bien classés en (2) mais ABSENTS de (1)
+    -- pertinents aromatiquement, jamais mesurés dans ce style -- mis EN
+    AVANT (section dédiée, en tête), pas en annexe d'un tableau combiné.
+
+    Descripteurs typiques PRÉ-REMPLIS depuis le texte BJCP
+    (`matching.style_typical_descriptors`) mais librement ÉDITABLES --
+    recommandation explicite du ticket plutôt qu'une extraction automatique
+    opaque imposée (précédent FooDB déjà rejeté deux fois, voir CLAUDE.md).
+
+    Sélecteur catégorie/style dupliqué de `_styles` (T82) plutôt que
+    factorisé -- la logique tient en une quinzaine de lignes, et ça évite
+    de toucher `_styles` (stable, déjà testé) pour un gain de réutilisation
+    marginal."""
+    categories = sorted(
+        {(r["category_id"], r["category"]) for r in
+         con.execute("SELECT DISTINCT category_id, category FROM beer_styles")},
+        key=_category_sort_key)
+    if not categories:
+        st.write("No style in the database yet — run `hopmatch ingest-styles` first.")
+        return
+    category_id, category = st.selectbox(
+        "Category", categories, format_func=lambda c: f"{c[0]} - {c[1]}", key="style_hops_category")
+    style_rows = con.execute(
+        "SELECT style_id, name FROM beer_styles WHERE category_id=? AND category=? "
+        "ORDER BY style_id", (category_id, category)).fetchall()
+    style_id, style_name = st.selectbox(
+        "Style", [(r["style_id"], r["name"]) for r in style_rows],
+        format_func=lambda s: f"{s[0]} - {s[1]}", key="style_hops_style")
+
+    with _panel():
+        st.subheader(f"{style_id} - {style_name}")
+        usage_type_label = st.segmented_control(
+            "Usage stage (real recipe frequency)", list(_STYLE_HOPS_USAGE_TYPES),
+            default="Any", key="style_hops_usage_type", required=True,
+            help="Filters the real-frequency ranking to hops used at this stage "
+                 "specifically (beer-analytics.com). The aroma-relevance ranking "
+                 "is unaffected -- it doesn't depend on process stage.")
+        # `key` inclut `style_id` : changer de style doit réinitialiser le
+        # pré-remplissage (sinon la sélection éditée d'un style précédent
+        # resterait affichée, sans rapport avec le nouveau style choisi).
+        prefilled = matching.style_typical_descriptors(con, style_id)
+        descriptors = st.multiselect(
+            "Typical descriptors for this style", _descriptors(con), default=prefilled,
+            key=f"style_hops_descriptors_{style_id}",
+            help="Pre-filled from this style's BJCP aroma/flavor/ingredients text "
+                 "(literal word match against the real descriptor vocabulary) -- "
+                 "freely editable, never a filter you're locked into.")
+        top = st.slider("Number of hops shown per ranking", 5, 30, 15, key="style_hops_top")
+
+    usage_type = _STYLE_HOPS_USAGE_TYPES[usage_type_label]
+    frequency = matching.style_hop_frequency(con, style_id, usage_type)
+    if not descriptors:
+        with _panel():
+            st.write("Choose at least one typical descriptor above (or edit the pre-filled list).")
+        return
+    relevance_ranked = matching.by_descriptor(con, descriptors, top=top)["ranked"]
+
+    if not frequency and not relevance_ranked:
+        with _panel():
+            st.write("No data (real frequency or aroma relevance) for this style/selection.")
+        return
+
+    # Livrable réel du ticket : pertinent aromatiquement (dans le
+    # classement affiché) ET absent de la fréquence réelle mesurée --
+    # calculé SEULEMENT si `frequency` a au moins une ligne pour ce style/
+    # usage_type (sinon "absent" ne voudrait rien dire : on n'a simplement
+    # AUCUNE donnée beer-analytics pour ce style, pas la confirmation que
+    # ces houblons y sont rares -- honnêteté d'abord).
+    if frequency:
+        rare_relevant = [h for h in relevance_ranked if h["variety"] not in frequency]
+        if rare_relevant:
+            with _panel():
+                st.subheader(":material/priority_high: Aromatically relevant, "
+                             "rarely used in this style")
+                st.caption(
+                    "Ranks well on the typical-descriptor match above, but has no "
+                    f"measured recipe usage in this style at the '{usage_type_label}' "
+                    "stage (beer-analytics.com). Possibly overlooked — or there's a "
+                    "real reason (cost, availability, tradition) this comparison "
+                    "doesn't capture.")
+                st.dataframe(
+                    [{"Hop": h["name"],
+                      "Matched descriptors": ", ".join(h["matched_descriptors"])}
+                     for h in rare_relevant],
+                    width="stretch", hide_index=True,
+                    column_config={"Matched descriptors": st.column_config.ListColumn()})
+
+    col_freq, col_rel = st.columns(2)
+    with col_freq:
+        st.write(f"**Real frequency ({usage_type_label.lower()} usage in this style)**")
+        st.caption("Share of this style's recipes using each hop (beer-analytics.com) "
+                  "-- observed, not modeled.")
+        if frequency:
+            freq_rows = sorted(frequency.items(), key=lambda kv: -(kv[1]["share_avg24m"] or 0))[:top]
+            st.dataframe(
+                [{"Hop": d["hop_name"], "Recipe share": d["share_avg24m"]} for _, d in freq_rows],
+                width="stretch", hide_index=True,
+                column_config={"Recipe share": st.column_config.NumberColumn(format="percent")})
+        else:
+            st.caption(f"No beer-analytics.com data for this style at the "
+                      f"'{usage_type_label}' stage.")
+    with col_rel:
+        st.write("**Aroma relevance (typical descriptors)**")
+        st.caption("Hops whose real aroma wheel/descriptors best match the typical "
+                  "descriptors selected above -- see \"From descriptors\" for the "
+                  "full method.")
+        if relevance_ranked:
+            st.dataframe(
+                [{"Hop": h["name"], "Matched descriptors": len(h["matched_descriptors"])}
+                 for h in relevance_ranked],
+                width="stretch", hide_index=True,
+                column_config={"Matched descriptors": st.column_config.NumberColumn()})
+        else:
+            st.caption("No hop matches the selected descriptors.")
+
+
 def main():
     # Nom d'affichage GUI = "HopFinder" (demande utilisateur 2026-08-19,
     # renommage d'affichage seulement -- le paquet/CLI restent "hopmatch",
@@ -5426,9 +5577,11 @@ def main():
     # Browse a hop") -- la lecture reste groupée sans dupliquer le widget.
     _MODE_GROUP_PREFIX = {"amplify": "HopFinder — ", "contrast": "HopFinder — ",
                           "by-descriptor": "HopFinder — ", "browse": "Explore — ",
-                          "compare": "Explore — ", "styles": "Explore — "}
+                          "compare": "Explore — ", "styles": "Explore — ",
+                          "style-hops": "Explore — "}
     mode = st.sidebar.radio(
-        "Mode", ["home", "amplify", "contrast", "by-descriptor", "browse", "compare", "styles"],
+        "Mode", ["home", "amplify", "contrast", "by-descriptor", "browse", "compare", "styles",
+                "style-hops"],
         format_func=lambda m: _MODE_GROUP_PREFIX.get(m, "") + MODE_LABELS[m], key="mode")
 
     with st.sidebar.popover("Database", icon=":material/database:", width="stretch"):
@@ -5488,6 +5641,9 @@ def main():
         return
     if mode == "styles":
         _styles(con)
+        return
+    if mode == "style-hops":
+        _style_hops(con)
         return
     # "amplify" : seul mode restant après les dispatches explicites
     # ci-dessus -- la sélection de note vit désormais DANS `_amplify` (page
