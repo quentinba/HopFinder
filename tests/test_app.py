@@ -707,8 +707,13 @@ def test_browse_recommended_usage_shows_both_layers_when_available(toy_cwd):
     assert any("Estimated from composition" in m.value for m in at.markdown)
     # seul composé chimique connu pour hopa dans la fixture (T99) -- seul
     # houblon à le porter, donc rang quantile dégénéré (n=1) -> 100%.
-    metrics = {m.label: m.value for m in at.metric}
-    assert metrics["Early-use index (whirlpool / active dry hop)"] == "100%"
+    metrics = {m.label: m for m in at.metric}
+    assert metrics["Early-use index"].value == "100%"
+    # 2026-08-29, retour utilisateur ("not clear if a low score means an
+    # early usage or a late usage") : tendance qualitative en `delta`,
+    # lisible sans lire la caption méthodologique -- cas dégénéré (seul
+    # houblon couvert, _survivable_buckets renvoie "High") -> "Leans early".
+    assert "Leans early" in metrics["Early-use index"].delta
     assert any("linalool" in c.value for c in at.caption)
     # table empirique : la seule étape connue pour hopa est "Boil" -- repérée
     # par sa colonne "Stage" (unique à cette table) plutôt qu'un index
@@ -730,7 +735,7 @@ def test_browse_recommended_usage_falls_back_silently_without_any_data(toy_cwd):
     assert any(s.value == "Recommended usage" for s in at.subheader)
     assert any("No usage data (empirical or chemical) for this variety." in c.value
               for c in at.caption)
-    assert "Early-use index (whirlpool / active dry hop)" not in {m.label for m in at.metric}
+    assert "Early-use index" not in {m.label for m in at.metric}
 
 def test_browse_shows_purpose_badge_as_top_info(toy_cwd):
     # T-purpose backlog (demande utilisateur explicite : "should appear in

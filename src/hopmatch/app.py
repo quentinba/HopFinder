@@ -224,6 +224,12 @@ _TOOL_SUMMARY_BY_MODE = {t["mode"]: t for t in _TOOL_SUMMARIES}
 # un `git log` en direct exigerait aussi que `.git` soit présent dans le
 # conteneur déployé, ce qui n'est pas garanti.
 _RECENT_UPDATES = [
+    ("2026-08-29", "Browse a hop's \"Recommended usage\" card now shows a "
+                   "plain-language tendency (\"Leans early\"/\"Leans "
+                   "late\"/\"Middle of the range\") right under the "
+                   "early-use percentage, so the number is readable "
+                   "without digging into the caption to know which "
+                   "direction it points."),
     ("2026-08-29", "From descriptors now has an optional \"Family\" filter "
                    "(Tropical, Citrus, Berry, Floral...) above the "
                    "descriptor picker, grouping the 138 real aroma words "
@@ -3504,14 +3510,28 @@ def _recommended_usage_panel(con, hops: dict, comp: dict, variety: str) -> None:
         st.caption("YCH \"survivable compounds\" rules applied to our own measurements "
                   "-- not a lab measurement of this hop.")
         if chem is not None:
-            st.metric("Early-use index (whirlpool / active dry hop)", f"{chem['index']:.0%}")
-            st.caption("Quantile rank of " + ", ".join(chem["compounds"]) +
-                      " vs. every hop in the database. High = favors whirlpool/active "
-                      "fermentation dry hop (rules 1 & 4); low = better reserved for "
-                      "post-fermentation dry hop (rule 2). Estimated from composition, "
-                      "not a lab measurement -- methyl geranate (the most abundant "
-                      "survivable on tested YCH lots) is not covered by any of our "
-                      "aggregates.")
+            # 2026-08-29, retour utilisateur explicite : "not clear enough
+            # ... not clear if a low score means an early usage or a late
+            # usage" -- l'ancienne caption expliquait déjà le sens, mais
+            # APRÈS le pourcentage brut, facile à ignorer. Corrigé par un
+            # libellé de tendance qualitatif juste sous le chiffre (mêmes
+            # terciles DB-relatifs que `_survivable_buckets`, T117 --
+            # réutilisé tel quel, pas une seconde implémentation), donc le
+            # sens (précoce/tardif) est lisible SANS avoir à lire la
+            # caption méthodologique en dessous.
+            chem_tendency = {"High": "Leans early (whirlpool / active dry hop)",
+                             "Medium": "Middle of the range",
+                             "Low": "Leans late (post-fermentation dry hop)"}
+            bucket = _survivable_buckets({v: c["index"] for v, c in chem_all.items()})[variety]
+            st.metric("Early-use index", f"{chem['index']:.0%}",
+                      delta=chem_tendency[bucket], delta_color="off")
+            st.caption("0% = chemistry leans toward reserving this hop for late "
+                      "(post-fermentation) dry hop; 100% = chemistry favors whirlpool "
+                      "or active-fermentation dry hop. Quantile rank of " +
+                      ", ".join(chem["compounds"]) + " vs. every hop in the database "
+                      "(rules 1, 2 & 4). Estimated from composition, not a lab "
+                      "measurement -- methyl geranate (the most abundant survivable "
+                      "on tested YCH lots) is not covered by any of our aggregates.")
         else:
             st.caption("No linalool/geraniol/isobutyrate/thiols measurement for this variety.")
 

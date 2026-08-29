@@ -1342,6 +1342,21 @@ Elles sont écrites pour qu'aucune décision implicite ne reste à deviner.
   347 tests passent. Aucune modification de `aromahops.db` (GUI seule) —
   pas de push HopFinder-db nécessaire.
 
+  **Addendum (2026-08-29, retour utilisateur explicite)** : "not clear
+  enough ... not clear if a low score means an early usage or a late
+  usage of the hop" — l'explication existait déjà mais APRÈS le
+  pourcentage brut (`st.metric`), facile à ignorer. Corrigé par une
+  tendance qualitative en `delta` (`st.metric(..., delta="↑ Leans early
+  (...)"/"↓ Leans late (...)"/"Middle of the range", delta_color="off")`),
+  lisible directement sous le chiffre sans lire la caption — réutilise
+  `_survivable_buckets` (T117, terciles DB-relatifs) tel quel plutôt qu'un
+  seuillage ad hoc. Caption reformulée pour donner l'ancrage 0%/100%
+  (tardif/précoce) en PREMIÈRE phrase plutôt qu'en dernier. Vérifié en
+  direct sur Cascade (26 %, "Leans late" affiché, déclenche bien le
+  bandeau de divergence puisque Boil 60,3 %/Aroma 17,86 % — chimiquement
+  tardif mais massivement utilisé en whirlpool, cohérent). 365 tests
+  passent (2 tests existants adaptés au nouveau libellé/`delta`).
+
 - [x] **T100 — Calibrer (b) contre (a) AVANT de parler de « modèle »**
 
   **Mesure à produire, résultat écrit dans ce ticket** : sur les houblons
