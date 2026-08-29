@@ -666,6 +666,103 @@ def compound_survival(compound: str, stage: str) -> dict[str, str] | None:
     return reference.PROCESS_STAGE_SURVIVAL.get(compound, {}).get(stage)
 
 
+_PLAN_STAGES = frozenset({"boil", "whirlpool", "afdh", "pfdh"})
+
+
+def hopping_plan_coverage(con, plan: list[tuple[str, str]]) -> list[dict]:
+    """T120 (2026-08-30) : couverture composé par composé d'un plan de
+    houblonnage `plan = [(variety, stage), ...]` (un même houblon peut
+    apparaître à plusieurs stades). **On constate, on ne propose pas** --
+    aucun solveur, aucune optimisation.
+
+    Périmètre composé = EXACTEMENT les 11 de `reference.PROCESS_STAGE_
+    SURVIVAL` (celui de T119), dans son ordre d'insertion (même ordre que
+    le 2e barplot de Compare Hops -- les deux vues doivent se lire pareil,
+    T121).
+
+    Une entrée par composé :
+    `{"compound", "state": "delivered"|"presumed_absent", "delivered_by":
+    [{"variety", "stage", "amount", "unit"}], "precursor_by": [...même
+    forme...], "survival": "kept"|"partial"|None, "measured_source_missing"}`.
+
+    **Règle de combinaison** : un composé est `delivered` si au moins un
+    couple (houblon, stade) du plan a (a) une valeur mesurée NON NULLE pour
+    ce composé (`matching.load` -- déjà réconcilié multi-sources, moyenne
+    des milieux) ET (b) un `state` T119 valant "kept" ou "partial" à ce
+    stade. `survival` reflète alors le meilleur des états contributeurs
+    ("kept" prime sur "partial" si le plan mélange les deux). Un couple
+    dont le `state` T119 vaut "precursor" ne livre PAS le composé lui-même
+    -- il est reporté séparément dans `precursor_by` (T119 : "il ne livre
+    pas le composé, il en génère un autre" -- ex. humulène au boil ne
+    devient jamais "delivered", même mesuré, mais apparaît dans
+    `precursor_by` pour signaler l'arôme épicé/boisé généré par oxydation).
+    Un couple dont le `state` T119 vaut "lost", ou sans valeur mesurée, ou
+    hors matrice T119 (composé/stade inconnu), ne contribue à rien.
+
+    **Doctrine « a priori »** (décision utilisateur, intro de l'épique
+    procédé) : l'ABSENCE de ligne `hop_composition` est traitée comme « a
+    priori absent », jamais comme « inconnu » -- `state="presumed_absent"`
+    est donc la valeur par défaut d'un composé qu'aucun couple ne livre,
+    PAS une 3e valeur "unknown". **Seule nuance conservée** :
+    `measured_source_missing=True` quand AUCUNE des sources qui mesurent ce
+    composé quelque part dans la base n'a jamais mesuré NE SERAIT-CE QU'UN
+    AUTRE composé pour l'un des houblons du plan (concrètement : isobutyrate/
+    ketones/thiols ne viennent que de BarthHaas -- un houblon totalement
+    absent du catalogue BarthHaas, càd sans AUCUNE ligne `hop_composition`
+    de source barthhaas pour ce houblon, n'a pas été « mesuré à ~0 », il n'a
+    pas été regardé). Seulement calculé quand `state="presumed_absent"` --
+    si le composé est déjà `delivered` par un autre couple du plan, la
+    question ne se pose pas pour ce composé. `False` par construction si
+    aucune source ne mesure jamais ce composé nulle part dans la base (cas
+    dégénéré, ne devrait pas arriver sur les 11 composés réels du
+    périmètre)."""
+    hops, comp, hop_desc, mols = load(con)
+    for _, stage in plan:
+        if stage not in _PLAN_STAGES:
+            raise ValueError(f"stade de procédé inconnu : {stage!r} (attendu {sorted(_PLAN_STAGES)})")
+
+    compound_sources: dict[str, set[str]] = {}
+    for v_comp in comp.values():
+        for compound, info in v_comp.items():
+            compound_sources.setdefault(compound, set()).update(info.get("sources", ()))
+
+    varieties_in_plan = {variety for variety, _ in plan}
+    variety_sources: dict[str, set[str]] = {}
+    for v in varieties_in_plan:
+        seen: set[str] = set()
+        for info in comp.get(v, {}).values():
+            seen.update(info.get("sources", ()))
+        variety_sources[v] = seen
+
+    out = []
+    for compound in reference.PROCESS_STAGE_SURVIVAL:
+        delivered_by, precursor_by, survival_states = [], [], []
+        for variety, stage in plan:
+            entry = comp.get(variety, {}).get(compound)
+            if not entry or entry["mid"] in (None, 0):
+                continue
+            surv = compound_survival(compound, stage)
+            if surv is None:
+                continue
+            row = {"variety": variety, "stage": stage, "amount": entry["mid"], "unit": entry["unit"]}
+            if surv["state"] in ("kept", "partial"):
+                delivered_by.append(row)
+                survival_states.append(surv["state"])
+            elif surv["state"] == "precursor":
+                precursor_by.append(row)
+        state = "delivered" if delivered_by else "presumed_absent"
+        survival = "kept" if "kept" in survival_states else ("partial" if survival_states else None)
+        missing_source = False
+        if state == "presumed_absent":
+            sources_for_compound = compound_sources.get(compound, set())
+            missing_source = bool(sources_for_compound) and not any(
+                variety_sources.get(v, set()) & sources_for_compound for v in varieties_in_plan)
+        out.append({"compound": compound, "state": state, "delivered_by": delivered_by,
+                   "precursor_by": precursor_by, "survival": survival,
+                   "measured_source_missing": missing_source})
+    return out
+
+
 def hop_similar_varieties(con, variety: str) -> list[str]:
     """Variétés similaires/substituts curées par Yakima (T25 backlog,
     `hop_similar`) — toujours une `variety` de notre propre catalogue (résolue

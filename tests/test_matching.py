@@ -422,6 +422,92 @@ def test_compound_survival_never_consulted_by_any_scoring_path(db, monkeypatch):
     matching.contrast(db, descriptors=["citrus", "floral"])
     matching.by_descriptor(db, ["citrus", "tropical"])
 
+def _coverage_row(rows, compound):
+    return next(r for r in rows if r["compound"] == compound)
+
+def test_hopping_plan_coverage_covers_the_eleven_t119_compounds(db):
+    # Périmètre exact = reference.PROCESS_STAGE_SURVIVAL (T119), même ordre.
+    rows = matching.hopping_plan_coverage(db, [("citra", "whirlpool")])
+    assert [r["compound"] for r in rows] == list(matching.reference.PROCESS_STAGE_SURVIVAL)
+
+def test_hopping_plan_coverage_rejects_unknown_stage(db):
+    with pytest.raises(ValueError):
+        matching.hopping_plan_coverage(db, [("citra", "fermentation")])
+
+def test_hopping_plan_coverage_delivered_by_a_kept_stage(db):
+    # citra a du linalol mesuré (barthhaas+yakima) ; whirlpool="kept" pour
+    # le linalol (T119, un des 8 survivables YCH officiels).
+    rows = matching.hopping_plan_coverage(db, [("citra", "whirlpool")])
+    linalool = _coverage_row(rows, "linalool")
+    assert linalool["state"] == "delivered"
+    assert linalool["survival"] == "kept"
+    assert linalool["delivered_by"] == [
+        {"variety": "citra", "stage": "whirlpool",
+         "amount": linalool["delivered_by"][0]["amount"], "unit": "pct_oil"}]
+    assert linalool["delivered_by"][0]["amount"] > 0
+    assert linalool["measured_source_missing"] is False
+
+def test_hopping_plan_coverage_precursor_never_delivers_the_compound(db):
+    # T119 : humulène au boil = "precursor" -- ne livre PAS le composé
+    # lui-même (il génère un dérivé d'oxydation différent), même si citra a
+    # bien de l'humulène mesuré. Reporté séparément dans precursor_by.
+    rows = matching.hopping_plan_coverage(db, [("citra", "boil")])
+    humulene = _coverage_row(rows, "humulene")
+    assert humulene["state"] == "presumed_absent"
+    assert humulene["survival"] is None
+    assert humulene["delivered_by"] == []
+    assert len(humulene["precursor_by"]) == 1
+    assert humulene["precursor_by"][0]["variety"] == "citra"
+
+def test_hopping_plan_coverage_survival_is_the_best_of_several_contributors(db):
+    # myrcène : whirlpool="partial", afdh="kept" (T119) -- un plan qui
+    # combine les deux doit rapporter "kept" (le meilleur des contributeurs),
+    # pas "partial".
+    rows = matching.hopping_plan_coverage(db, [("citra", "whirlpool"), ("mosaic", "afdh")])
+    myrcene = _coverage_row(rows, "myrcene")
+    assert myrcene["state"] == "delivered"
+    assert myrcene["survival"] == "kept"
+    assert len(myrcene["delivered_by"]) == 2
+
+def test_hopping_plan_coverage_presumed_absent_when_no_variety_has_it(db):
+    # saazer et simcoe n'ont NI l'un ni l'autre d'isobutyrate mesuré --
+    # cf. le test explicite du ticket T120 ("plan à 2 houblons dont un sans
+    # isobutyrate"). saazer a par ailleurs une couverture BarthHaas réelle
+    # (d'autres composés mesurés par cette source) -- measured_source_missing
+    # doit donc rester False : la source a bien "regardé" ce plan, elle n'a
+    # simplement pas rapporté d'isobutyrate.
+    rows = matching.hopping_plan_coverage(db, [("saazer", "whirlpool"), ("simcoe", "whirlpool")])
+    isobutyrate = _coverage_row(rows, "isobutyrate")
+    assert isobutyrate["state"] == "presumed_absent"
+    assert isobutyrate["delivered_by"] == []
+    assert isobutyrate["measured_source_missing"] is False
+
+def test_hopping_plan_coverage_measured_source_missing_for_a_hop_outside_barthhaas(db):
+    # simcoe (fixture Yakima uniquement, AUCUNE ligne hop_composition de
+    # source barthhaas) : isobutyrate/ketones/thiols ne viennent que de
+    # BarthHaas -- ce houblon n'a jamais été regardé par cette source,
+    # contrairement à saazer ci-dessus. "presumed_absent" reste l'état
+    # (doctrine a priori), mais measured_source_missing=True signale que
+    # l'inférence ne s'applique pas ici.
+    rows = matching.hopping_plan_coverage(db, [("simcoe", "whirlpool")])
+    for compound in ("isobutyrate", "ketones", "thiols"):
+        row = _coverage_row(rows, compound)
+        assert row["state"] == "presumed_absent"
+        assert row["measured_source_missing"] is True
+    # myrcène, lui, est mesuré par Yakima (pas seulement BarthHaas) --
+    # aucune raison de nuancer son absence sur ce composé.
+    assert _coverage_row(rows, "geraniol")["measured_source_missing"] is False
+
+def test_hopping_plan_coverage_amount_and_unit_come_from_reconciled_composition(db):
+    # `matching.load` réconcilie déjà barthhaas+yakima (moyenne des milieux)
+    # -- `hopping_plan_coverage` doit réutiliser ça, jamais requêter
+    # `hop_composition` directement ni recalculer une moyenne à part.
+    hops, comp, hop_desc, mols = matching.load(db)
+    rows = matching.hopping_plan_coverage(db, [("citra", "whirlpool")])
+    linalool = _coverage_row(rows, "linalool")
+    assert linalool["delivered_by"][0]["amount"] == comp["citra"]["linalool"]["mid"]
+    assert linalool["delivered_by"][0]["unit"] == comp["citra"]["linalool"]["unit"]
+
 def test_amplify_ranks(db):
     r = matching.amplify(db, "_citrus")
     assert r["ranked"], "au moins un houblon"
