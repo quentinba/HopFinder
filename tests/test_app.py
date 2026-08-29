@@ -112,6 +112,13 @@ def _build_toy_db(path):
     ]
     con.executemany(
         f"INSERT INTO beer_styles VALUES ({','.join(':' + c for c in style_cols)})", style_rows)
+    # T105 : distribution observée (style_recipe_stats) pour "2A" uniquement
+    # -- "10A" reste sans AUCUNE donnée observée (teste le repli silencieux
+    # sur la simple barre BJCP, voir app._vital_stat_row).
+    con.executemany("INSERT INTO style_recipe_stats VALUES (?,?,?,?,?,?,?,?)", [
+        ("2A", "test-lager-style", "abv", 4.5, 5.0, 30, "test", "2026"),
+        ("2A", "test-lager-style", "abv", 5.0, 5.5, 70, "test", "2026"),
+    ])
     # T106 : métadonnées d'identité -- hopa porte tout (cultivar/breeder/
     # release_year/pedigree + is_experimental=1), hopb seulement is_organic=1,
     # hopc rien du tout (teste l'omission silencieuse de la ligne entière,
@@ -960,6 +967,31 @@ def test_styles_mode_density_toggle_shows_sg(toy_cwd):
     assert metrics["OG (SG)"] == "1.044–1.056"
     assert metrics["FG (SG)"] == "1.008–1.013"
     assert metrics["EBC"] == "6–12"  # couleur restée en EBC (défaut)
+
+def test_styles_mode_shows_observed_distribution_legend_when_beer_analytics_covers_style(toy_cwd):
+    # T105 : "2A" a des bins style_recipe_stats pour "abv" -- la légende
+    # explicite (bande BJCP vs histogramme observé) doit apparaître.
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("styles").run()
+    at.selectbox(key="styles_category").set_value(("2", "Test Lager")).run()
+    at.selectbox(key="styles_style").set_value(("2A", "Test Lager Style")).run()
+    assert not at.exception
+    assert any("Terracotta band = official BJCP range" in c.value
+              and "beer-analytics.com" in c.value for c in at.caption)
+    assert any(m.label == "ABV" for m in at.metric)  # metric inchangé, voir test ci-dessus
+
+def test_styles_mode_falls_back_silently_without_observed_data(toy_cwd):
+    # "10A" : aucune ligne style_recipe_stats -- pas de légende T105, jamais
+    # d'histogramme fabriqué (repli silencieux sur la simple barre BJCP,
+    # de toute façon absente ici puisque "10A" n'a aucune vital stat).
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("styles").run()
+    at.selectbox(key="styles_category").set_value(("10", "Test Wheat")).run()
+    at.selectbox(key="styles_style").set_value(("10A", "Test Wheat Style")).run()
+    assert not at.exception
+    assert not any("official BJCP range" in c.value for c in at.caption)
 
 def test_styles_mode_shows_dash_and_shared_caption_when_no_vital_stats(toy_cwd):
     # "10A" : les 17 styles réels sans vital stats (specialty/fruit/...)

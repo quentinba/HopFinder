@@ -339,6 +339,25 @@ def hop_popularity(con) -> dict[str, int]:
     return out
 
 
+def style_observed_distribution(con, style_id: str) -> dict[str, list[dict]]:
+    """{metric: [{"bin_low", "bin_high", "count"}, ...]} depuis
+    `style_recipe_stats` (T85, beer-analytics.com) pour un `style_id` BJCP
+    donné, bins triés par `bin_low` -- métriques en minuscules telles que
+    stockées (`abv`/`ibu`/`og`/`fg`/`srm`). Histogramme PRÉ-BINNÉ avec
+    outliers déjà retirés côté beer-analytics -- jamais un percentile
+    dérivable (T105 : afficher "observed distribution", jamais "P5-P95").
+    Un `style_id` sans aucune ligne (style non résolu côté beer-analytics,
+    ou non couvert par leur crawl) renvoie un dict vide, jamais un
+    histogramme vide fabriqué."""
+    out: dict[str, list[dict]] = {}
+    for r in con.execute(
+        "SELECT metric, bin_low, bin_high, count FROM style_recipe_stats "
+        "WHERE style_id=? ORDER BY metric, bin_low", (style_id,)):
+        out.setdefault(r["metric"], []).append(
+            {"bin_low": r["bin_low"], "bin_high": r["bin_high"], "count": r["count"]})
+    return out
+
+
 def _usable_aroma_readings(values: dict[str, float]) -> bool:
     """Une entrée `hop_aroma_intensity` "présente mais entièrement à 0" (le
     cas corrompu déjà documenté côté Yakima, ex. `admiral`, voir

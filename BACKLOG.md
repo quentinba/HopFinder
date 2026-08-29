@@ -1394,7 +1394,7 @@ Elles sont écrites pour qu'aucune décision implicite ne reste à deviner.
   exactement le comportement d'aujourd'hui, vérifié par les tests existants
   qui doivent rester verts sans modification.
 
-- [ ] **T105 — Ranges officiels vs ranges observés, côte à côte**
+- [x] **T105 — Ranges officiels vs ranges observés, côte à côte**
 
   Dans le mode Beer styles (T82) : la fourchette **BJCP** (T81,
   prescriptive) et la distribution **réellement brassée** (T85, descriptive)
@@ -1409,6 +1409,40 @@ Elles sont écrites pour qu'aucune décision implicite ne reste à deviner.
   derrière), légende explicite.
   ⚠ Rappeler que la distribution observée est **pré-binnée et écrêtée** par
   beer-analytics (cf. T85) — ce n'est pas un percentile.
+
+  **Compte rendu (2026-08-29)** : `matching.style_observed_distribution(con,
+  style_id)` lit `style_recipe_stats` (T85) et renvoie
+  `{metric: [{"bin_low","bin_high","count"}, ...]}` triés par `bin_low` —
+  dict vide (jamais un histogramme fabriqué) si le style n'est pas couvert
+  côté beer-analytics. `_style_observed_vs_official_chart()` (Altair) rend
+  deux couches superposées : `mark_rect` translucide terracotta pour la
+  fourchette BJCP (band), `mark_bar` sage pour l'histogramme observé — jamais
+  moyennées, jamais fusionnées en une seule courbe. Wiré dans
+  `_vital_stat_row()` : repli silencieux sur l'ancienne `_range_bar_html()`
+  quand `observed` est vide pour ce critère (style non couvert). Légende
+  explicite affichée seulement si au moins un critère a des données
+  observées, rappelant que l'histogramme est pré-binné/écrêté par
+  beer-analytics, pas un percentile.
+
+  ⚠ **Piège Vega-Lite trouvé en vérification live (screenshot zoomé, Chrome,
+  thème sombre)** : `mark_bar` avec un encodage `x`/`x2` de largeur variable
+  (bins) et seulement `y` (sans `y2`) ne redescend PAS à 0 automatiquement
+  comme le ferait un bar chart classique `x:nominal` — chaque bin rendait un
+  petit carré flottant à la hauteur de sa valeur au lieu d'une vraie barre.
+  Corrigé par `y2=alt.Y2Datum(0)` explicite, même famille que le piège déjà
+  documenté (`x2=alt.X2Datum(domain_min)` pour le barplot en échelle log de
+  Compare Hops). Reverifié en direct après correction : ABV/IBU/OG/FG/SRM
+  tous corrects, thème clair ET sombre, bascule EBC↔SRM aussi vérifiée
+  (12–28 EBC ↔ 6.0–14.0 SRM sur 21A, conversion cohérente).
+  342 tests passent (2 nouveaux : `test_style_observed_distribution_groups_
+  bins_by_metric_sorted` dans `test_matching.py`,
+  `test_styles_mode_shows_observed_distribution_legend_when_beer_analytics_
+  covers_style` + `test_styles_mode_falls_back_silently_without_observed_
+  data` dans `test_app.py` — ces derniers ne couvrent que le texte de la
+  légende, pas le rendu réel du graphique, d'où le bug non détecté par les
+  tests automatisés et trouvé seulement en vérification navigateur live).
+  Aucune modification de `aromahops.db` (GUI seule) — pas de push
+  HopFinder-db nécessaire.
 
 ---
 
