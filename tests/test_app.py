@@ -577,6 +577,37 @@ def test_by_descriptor_popularity_filter_never_hides_no_data_hops(toy_cwd):
     assert "Hopa" in labels      # 10000 recettes -> reste
     assert "Hopc" in labels      # aucune donnée -> jamais exclu
 
+def test_by_descriptor_family_pills_narrow_descriptor_options(toy_cwd):
+    # T129 : premier niveau par famille -- toy vocab (citrus/woody/floral/
+    # resinous, voir _build_toy_db) recoupe 3 familles réelles distinctes.
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("by-descriptor").run()
+    assert not at.exception
+    family_pills = at.pills(key="by_descriptor_family_pills")
+    assert "Citrus" in family_pills.options
+    assert "Resinous / woody" in family_pills.options
+    family_pills.set_value(["Citrus"]).run()
+    assert not at.exception
+    options = at.multiselect(key="by_descriptor_text_multiselect").options
+    assert "citrus" in options
+    assert "woody" not in options
+    assert "floral" not in options
+
+def test_by_descriptor_family_filter_never_invalidates_existing_selection(toy_cwd):
+    # "woody"/"resinous" partagent la MÊME famille (Resinous / woody) --
+    # choisir "woody" PUIS filtrer sur "Citrus" ne doit jamais faire
+    # planter le multiselect (StreamlitAPIException si une valeur choisie
+    # sort de `options` sans le mécanisme d'union par session_state).
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("by-descriptor").run()
+    at.multiselect(key="by_descriptor_text_multiselect").select("woody").run()
+    assert not at.exception
+    at.pills(key="by_descriptor_family_pills").set_value(["Citrus"]).run()
+    assert not at.exception
+    assert "woody" in at.multiselect(key="by_descriptor_text_multiselect").value
+
 def test_by_descriptor_wheel_pills_appear_and_contribute_to_match(toy_cwd):
     # Demande utilisateur explicite (2026-08-19) : "propose a section here
     # user can click on the boxes corresponding to aroma wheel flavors" --
@@ -589,9 +620,12 @@ def test_by_descriptor_wheel_pills_appear_and_contribute_to_match(toy_cwd):
     at.run()
     at.sidebar.radio[0].set_value("by-descriptor").run()
     assert not at.exception
-    assert len(at.pills) == 1
-    assert set(at.pills[0].options) == {"citrus", "woody"}
-    at.pills[0].set_value(["citrus"]).run()
+    # 2 pills désormais : familles T129 (by_descriptor_family_pills) +
+    # roue d'arôme (by_descriptor_wheel_pills, celle testée ici).
+    assert len(at.pills) == 2
+    wheel_pills = at.pills(key="by_descriptor_wheel_pills")
+    assert set(wheel_pills.options) == {"citrus", "woody"}
+    wheel_pills.set_value(["citrus"]).run()
     assert not at.exception
     assert any("Hopa" in e.label for e in at.expander)
     assert not any("Hopb" in e.label for e in at.expander)
@@ -603,7 +637,7 @@ def test_by_descriptor_shows_quantitative_refinement_when_intensity_available(to
     at = _app()
     at.run()
     at.sidebar.radio[0].set_value("by-descriptor").run()
-    at.pills[0].set_value(["citrus"]).run()
+    at.pills(key="by_descriptor_wheel_pills").set_value(["citrus"]).run()
     assert not at.exception
     assert any("Quantitative refinement: 80/100" in c.value and "citrus" in c.value
               for c in at.caption)

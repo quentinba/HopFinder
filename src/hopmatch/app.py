@@ -29,7 +29,7 @@ import altair as alt
 import streamlit as st
 from PIL import Image
 
-from hopmatch import matching
+from hopmatch import matching, reference
 from hopmatch.schema import connect
 
 DEFAULT_DB = "aromahops.db"
@@ -224,6 +224,13 @@ _TOOL_SUMMARY_BY_MODE = {t["mode"]: t for t in _TOOL_SUMMARIES}
 # un `git log` en direct exigerait aussi que `.git` soit présent dans le
 # conteneur déployé, ce qui n'est pas garanti.
 _RECENT_UPDATES = [
+    ("2026-08-29", "From descriptors now has an optional \"Family\" filter "
+                   "(Tropical, Citrus, Berry, Floral...) above the "
+                   "descriptor picker, grouping the 138 real aroma words "
+                   "into 16 families to narrow the list before choosing "
+                   "precise terms -- picking a family never removes an "
+                   "already-chosen word, and leaving none checked shows "
+                   "the full list exactly as before."),
     ("2026-08-29", "Survivables now shows every hop name on the x-axis "
                    "(no more silently thinned labels), and a small "
                    "triangle above each bar flags whether the hop is "
@@ -2902,7 +2909,33 @@ def _by_descriptor(con):
     descriptors = _descriptors(con)
     panel_a = _panel()
     with panel_a:
-        text_selected = st.multiselect("Descriptors", descriptors)
+        # T129 : familles comme premier niveau facultatif, pour réduire le
+        # bruit visuel de la liste plate à 138 termes AVANT de choisir les
+        # mots précis (ticket, usage #1) -- NARROWING pur sur les `options`
+        # du multiselect ci-dessous, jamais un second filtre appliqué au
+        # résultat : un mot déjà choisi reste sélectionnable/affiché même
+        # si on change ensuite de famille (union avec la sélection en
+        # cours via `st.session_state`, pattern nécessaire pour que
+        # Streamlit n'invalide pas une valeur qui sortirait de `options`
+        # sur un rerun -- sinon `StreamlitAPIException`). Un mot du
+        # vocabulaire réel absent de `reference.DESCRIPTOR_FAMILIES`
+        # (aucun cas connu aujourd'hui, 138/138 couverts -- mais le
+        # garde-fou n'impose pas une couverture à 100%, voir sa docstring)
+        # reste choisissable tant qu'AUCUNE famille n'est cochée, jamais
+        # rendu invisible pour de bon.
+        families = sorted(set(reference.DESCRIPTOR_FAMILIES.values()))
+        family_selected = st.pills(
+            "Family (optional — narrows the list below)", families,
+            selection_mode="multi", key="by_descriptor_family_pills") or []
+        if family_selected:
+            narrowed = [d for d in descriptors
+                       if reference.DESCRIPTOR_FAMILIES.get(d) in family_selected]
+        else:
+            narrowed = descriptors
+        text_key = "by_descriptor_text_multiselect"
+        already_selected = st.session_state.get(text_key, [])
+        options = sorted(set(narrowed) | set(already_selected))
+        text_selected = st.multiselect("Descriptors", options, key=text_key)
 
     # Roue d'arôme QUANTITATIVE : ne FILTRE plus, sert uniquement à NOTER
     # (moyenne d'intensité mesurée) les houblons déjà retenus par les
