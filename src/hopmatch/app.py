@@ -224,6 +224,14 @@ _TOOL_SUMMARY_BY_MODE = {t["mode"]: t for t in _TOOL_SUMMARIES}
 # un `git log` en direct exigerait aussi que `.git` soit présent dans le
 # conteneur déployé, ce qui n'est pas garanti.
 _RECENT_UPDATES = [
+    ("2026-08-29", "Compare hops gained a \"Blend Explorer\" card (2+ hops "
+                   "selected): stacks the same 4 survivable compounds as "
+                   "Survivables/Recommended usage, one bar per compound, "
+                   "segmented by hop — materializes the YCH handbook's "
+                   "\"blend to balance, not to stack\" rule. The "
+                   "Survivables tool also gained an infobox citing all 4 "
+                   "YCH handbook rules as context, never applied "
+                   "automatically to the index itself."),
     ("2026-08-29", "New \"Survivables\" tool: ranks hops by a derived "
                    "survivability index (our own measured linalool, "
                    "geraniol, isobutyrate and thiols, each normalized "
@@ -5069,6 +5077,50 @@ def _compare(con):
             st.caption(":material/info: Total oil unknown for: " + ", ".join(sorted(set(missing_oil)))
                       + " — their % of oil composition can't be converted to an absolute amount.")
 
+    # T102 : "Blend Explorer", BRANCHÉ sur ce mode existant (pas un nouveau
+    # mode, ticket explicite) -- une blend a besoin d'AU MOINS 2 houblons,
+    # jamais affiché pour une sélection d'un seul houblon. Réutilise le même
+    # socle chimique que T99 (indice de précocité)/T117 (onglet Survivables),
+    # `_survivable_compound_positions_all`, jamais une troisième
+    # implémentation de la même normalisation par composé.
+    if len(selected) >= 2:
+        with _panel():
+            st.subheader("Blend Explorer (survivable compounds)")
+            st.caption(
+                "Materializes YCH handbook rule 3 — \"blend to balance "
+                "concentrations, not to stack them.\" Stacks linalool, "
+                "geraniol, isobutyrate and thiols (each normalized against "
+                "every hop in the database, quantile rank), one bar per "
+                "compound, segmented by hop. A blend spread across several "
+                "tall bars is more dynamic than one dominated by a single "
+                "compound stacked from every hop (e.g. two linalool-heavy "
+                "hops blended together stay flat/one-dimensional on this "
+                "chart, even though two bars are stacked).")
+            positions_all = _survivable_compound_positions_all(hops, comp)
+            blend_rows = [
+                {"compound": _SURVIVABLE_COMPOUND_LABELS[c], "hop": hops[v]["name"],
+                 "value": positions_all[v][c]}
+                for v in selected if v in positions_all
+                for c in _RECOMMENDED_USAGE_CHEMICAL_COMPOUNDS if c in positions_all[v]]
+            if blend_rows:
+                blend_chart = alt.Chart(alt.Data(values=blend_rows)).mark_bar().encode(
+                    x=alt.X("compound:N", sort=list(_SURVIVABLE_COMPOUND_LABELS.values()),
+                           title=None),
+                    y=alt.Y("value:Q", title="Summed quantile rank (stacked)"),
+                    color=alt.Color("hop:N", title="Hop",
+                                    scale=alt.Scale(domain=list(colors.keys()),
+                                                   range=list(colors.values()))),
+                    tooltip=["hop:N", "compound:N",
+                            alt.Tooltip("value:Q", format=".2f", title="Rank")],
+                ).properties(width=_COMPARE_CHART_WIDTH, height=350)
+                st.altair_chart(blend_chart, width="content")
+            else:
+                st.write("None of the selected hops has any of these 4 compounds measured.")
+            missing_blend = [hops[v]["name"] for v in selected if v not in positions_all]
+            if missing_blend:
+                st.caption(":material/info: No survivable-compound data for: " +
+                          ", ".join(missing_blend))
+
 
 # --------------------------------------------------------------------------- #
 # Mode GUI "Beer styles" (T82, épique A)
@@ -5652,6 +5704,28 @@ def _survivables(con) -> None:
             "coverage: " +
             ", ".join(f"{_SURVIVABLE_COMPOUND_LABELS[c]} {coverage_by_compound[c]}/{n_total}"
                      for c in _RECOMMENDED_USAGE_CHEMICAL_COMPOUNDS) + ".")
+
+    # Infobox des 4 règles YCH (2026-08-29, demande utilisateur explicite en
+    # revue) -- citées telles quelles (texte, source handbook YCH 2022, voir
+    # CLAUDE.md), jamais appliquées automatiquement au classement ci-dessous
+    # (aucune des 4 n'est codée en dur dans le calcul de l'indice, qui reste
+    # une simple normalisation par composé -- ces règles sont le CONTEXTE
+    # pour interpréter le classement, pas un paramètre du calcul).
+    with _panel():
+        st.write("**YCH handbook rules (2022) — context for reading this index**")
+        st.markdown(
+            "1. **High survivables → usable early** (late kettle, whirlpool, "
+            "dry hop in active fermentation).  \n"
+            "2. **Low survivables → reserve for late** (post-fermentation dry "
+            "hop).  \n"
+            "3. **Blend to balance concentrations, not to stack them** — see "
+            "the Blend Explorer in Compare Hops.  \n"
+            "4. **Loading the wort early with survivables favors "
+            "biotransformation** (yeast converts geraniol into β-citronellol, "
+            "amplifying the citrus/floral profile).")
+        st.caption("Cited as text, not applied automatically to the ranking below — "
+                  "none of the 4 rules is coded into the index itself, which stays a "
+                  "plain per-compound normalization.")
 
     if not positions_all:
         with _panel():
