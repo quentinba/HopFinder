@@ -767,6 +767,23 @@ PROCESS_SURVIVAL_EXPLANATIONS: dict[str, str] = {
 # associée à l'agrégat BarthHaas complet ("ketones" inclut aussi le
 # 2-undécanone, non documenté comme survivable -- même réserve que
 # PROCESS_SURVIVAL["ketones"]["confidence"]="low").
+#
+# ⚠ Piège de lecture identifié en relecture le 2026-08-30 (question directe
+# de l'utilisateur sur linalol) : "early" est AMBIGU entre deux axes
+# indépendants -- (a) tôt DANS L'ÉBULLITION (exposition longue à chaud,
+# défavorable) et (b) tôt DANS LA CHRONOLOGIE relative à la fermentation
+# (règle YCH 1 : "late kettle, whirlpool, dry hop en fermentation active" --
+# ce sont TOUS des ajouts à exposition d'ébullition active FAIBLE OU NULLE).
+# Un composé peut donc être "lost" au stade "boil" (ajout au début d'une
+# ébullition COMPLÈTE, hostile) tout en étant "kept" au whirlpool (juste
+# après, exposition bien moindre) SANS AUCUNE contradiction -- ce n'est pas
+# un ordre "plus tôt = pire" monotone, "boil" est un cas hostile à part,
+# pas le point de départ d'un continuum. Le cas linalol (perte quasi
+# totale à 60 min de boil actif, MAIS l'un des 8 survivables YCH officiels,
+# recommandé justement au whirlpool par la règle 1) illustre exactement ce
+# piège. Éviter le mot "early" seul dans une note "whirlpool" sans préciser
+# de quel axe il s'agit -- l'entrée linalool ci-dessous documente le
+# distinguo en toutes lettres.
 PROCESS_STAGE_SURVIVAL: dict[str, dict[str, dict[str, str]]] = {
     "myrcene": {
         "boil": {"state": "lost", "source": "Janish, The New IPA / OSU Hop Lab",
@@ -870,13 +887,23 @@ PROCESS_STAGE_SURVIVAL: dict[str, dict[str, dict[str, str]]] = {
     "linalool": {
         "boil": {"state": "lost",
                  "source": "reference.PROCESS_SURVIVAL_EXPLANATIONS['boil-sensitive, survives whirlpool']",
-                 "note": "Same quantified loss order as myrcene under active boil -- "
+                 "note": "Same quantified loss order as myrcene under ACTIVE boil -- "
                          "~50% at 10 minutes, essentially gone by 60 minutes. Not "
-                         "boil-resistant just because it's oxygenated."},
+                         "boil-resistant just because it's oxygenated -- this is NOT "
+                         "inconsistent with being a top YCH survivable (see whirlpool "
+                         "below): 'survivable' and 'boil-resistant' are different "
+                         "properties. YCH's own list of 'early' uses for high "
+                         "survivables (rule 1: late kettle, whirlpool, AFDH) never "
+                         "includes a full active boil."},
         "whirlpool": {"state": "kept", "source": "CLAUDE.md — YCH handbook rule 1",
                       "note": "One of the 8 officially published YCH survivable "
-                              "compounds -- high survivables are usable early, including "
-                              "whirlpool."},
+                              "compounds. YCH rule 1's 'early' means early relative to "
+                              "FERMENTATION (late kettle / whirlpool / AFDH, all "
+                              "low-or-no active-boil-exposure additions) -- not early "
+                              "in the boil. Whirlpool is past active boiling (lower heat "
+                              "exposure than the full boil above), which is exactly why "
+                              "linalool is a strong pick here despite losing most of "
+                              "itself to a full active boil."},
         "afdh": {"state": "kept", "source": "CLAUDE.md — YCH handbook rule 4",
                  "note": "Loading the wort early with survivables (linalool included) "
                          "favors biotransformation."},

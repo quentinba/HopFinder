@@ -2419,6 +2419,24 @@ Mais la transparence doit être RÉELLE, pas un simple adverbe :
   cette matrice, également T121) -- `_RECENT_UPDATES` non touché (aucun
   changement visible utilisateur final pour l'instant).
 
+  **Addendum (2026-08-30, relecture utilisateur en direct sur linalol).**
+  Piège de lecture identifié : "early" est ambigu entre deux axes -- tôt
+  DANS L'ÉBULLITION (défavorable au linalol, Janish) vs. tôt DANS LA
+  CHRONOLOGIE relative à la fermentation (règle YCH 1 : "late kettle,
+  whirlpool, AFDH" -- tous à exposition d'ébullition active faible/nulle).
+  Pas de contradiction dans les DONNÉES (linalol reste `lost` au boil,
+  `kept` au whirlpool -- "boil" est un cas hostile à part, pas le point de
+  départ d'un continuum "plus tôt = pire"), mais la note "whirlpool" du
+  linalol utilisait elle-même le mot "early" de façon ambiguë ("high
+  survivables are usable early, including whirlpool") -- exactement le
+  piège que l'utilisateur a repéré. Corrigé : notes boil/whirlpool du
+  linalol réécrites pour distinguer explicitement les deux axes et se
+  référencer l'une l'autre (pas de contradiction), + paragraphe d'avertissement
+  général ajouté en tête de `reference.PROCESS_STAGE_SURVIVAL` pour que ce
+  piège ne se reproduise pas sur un futur composé similaire (haut survivable
+  mais mauvaise résistance au boil). Aucun `state` changé, uniquement la
+  clarté des `note`. Suite verte (373 tests).
+
 - [ ] **T120 — Calcul de couverture d'un plan de houblonnage**
 
   `matching.hopping_plan_coverage(con, plan) -> list[dict]` où
