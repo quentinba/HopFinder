@@ -2493,7 +2493,7 @@ Mais la transparence doit être RÉELLE, pas un simple adverbe :
   ticket, amount/unit vs `load()`). Suite verte (381 tests). Pas de câblage
   GUI (T121) ni de garde-fou de discrimination (T122, à faire avant T121).
 
-- [ ] **T121 — GUI : le tableau de couverture**
+- [x] **T121 — GUI : le tableau de couverture**
 
   **Nouveau mode** `app.MODE_LABELS["coverage"] = "Hopping plan"`.
 
@@ -2521,6 +2521,36 @@ Mais la transparence doit être RÉELLE, pas un simple adverbe :
   comme un composé livré tel quel.
 
   ⚠ `_RECENT_UPDATES` même commit.
+
+  **FAIT (2026-08-30).** Nouveau mode `app._coverage` ("Explore — Hopping
+  plan"). Saisie : `st.multiselect` de houblons (jusqu'à 6) puis, par
+  houblon, un `st.segmented_control(selection_mode="multi")` de stades --
+  un houblon ajouté à 2 stades donne bien 2 entrées de plan indépendantes,
+  comme demandé, sans widget "plan builder" séparé. Grille : une COLONNE PAR
+  ADDITION (houblon × stade, ex. "Citra · Whirlpool"), pas par houblon ni
+  par stade seul -- lisible sans ambiguïté sur quelle addition livre quoi.
+  Réutilise le vocabulaire/ordre/catégories chimiques du 2e barplot Compare
+  Hops via les MÊMES fonctions (`_compound_category`, `_compound_display_
+  label`, même source `reference.PROCESS_SURVIVAL`) -- **PAS** le même objet
+  Vega-Lite `_compare_category_gutter` littéral (bâti sur mesure pour la
+  géométrie d'un barplot horizontal, ne correspondrait à rien pour une
+  grille) : `st.dataframe` à la place, convention déjà établie du projet.
+  Distinction honnête au niveau CELLULE entre "a priori not delivered"
+  (composé jamais mesuré chez ce houblon) et "Lost during this addition"
+  (composé mesuré, mais `state` T119 = "lost" à CE stade précis) -- deux
+  affirmations différentes, jamais confondues. Section "A priori not
+  covered" : badges terracotta pour les composés vraiment absents (avec
+  nuance "not enough data to say either way" si `measured_source_missing`),
+  sous-section grise séparée pour les composés precursor-only (génèrent un
+  arôme par oxydation sans être livrés). Encart explicatif : compte de
+  couverture RÉEL calculé en direct sur la base (pas de nombre figé, contrairement
+  au brouillon du ticket) + le résultat de T122 (3 composés peu informatifs,
+  7 discriminants, sélinène à part). Vérifié en direct (Chrome, dark ET
+  light) : grille/badges/expander corrects sur un plan Citra boil+whirlpool
+  (linalol lost au boil / delivered au whirlpool, exactement T119 ; humulène/
+  caryophyllène/farnésène en precursor aux deux stades ; sélinène a priori
+  absent, citra n'en a aucune mesure). 10 nouveaux tests (5 unitaires sur
+  `_coverage_cell_text`, 5 AppTest sur `_coverage`), suite verte (391 tests).
 
 - [x] **T122 — Garde-fou : l'outil discrimine-t-il vraiment ?**
   *À faire AVANT d'écrire la GUI de T121.*

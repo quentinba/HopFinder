@@ -262,7 +262,7 @@ def test_app_loads_with_no_exception_default_home_mode(toy_cwd):
     # (h1, un seul par page, exigence de la spec).
     assert at.title[0].value == "Home"
     assert at.sidebar.radio[0].value == "home"
-    assert len(at.button) == 8  # T117 : "Survivables" ajouté aux 7 outils existants
+    assert len(at.button) == 9  # T121 : "Hopping plan" ajouté aux 8 outils existants
 
 def test_home_open_button_switches_to_target_mode(toy_cwd):
     at = _app()
@@ -1325,3 +1325,102 @@ def test_survivables_mode_shows_purpose_flag_caption(toy_cwd):
     assert any("circle = aromatic" in c.value and "triangle = bittering" in c.value
               for c in at.caption)
     assert len([n for n in at.main if isinstance(n, UnknownElement)]) >= 1
+
+# T121 -- mode "Hopping plan" (matching.hopping_plan_coverage/T120,
+# matching.compound_survival/T119). app._coverage_cell_text est une
+# fonction pure (compound, stage, entry) -- testée directement sans passer
+# par AppTest pour les 4 branches de texte, plus honnête et bien plus
+# rapide que de fabriquer une fixture DB avec un composé "precursor" mesuré
+# juste pour cette vérification.
+
+def test_coverage_cell_text_absent_entry_is_a_priori_not_delivered():
+    assert app._coverage_cell_text("linalool", "whirlpool", None) == "a priori not delivered"
+    assert app._coverage_cell_text("linalool", "whirlpool", {"mid": 0}) == "a priori not delivered"
+    assert app._coverage_cell_text("linalool", "whirlpool", {"mid": None}) == "a priori not delivered"
+
+def test_coverage_cell_text_delivered_when_kept_or_partial():
+    # linalol : whirlpool="kept" (T119) -- un des 8 survivables YCH officiels.
+    assert app._coverage_cell_text("linalool", "whirlpool", {"mid": 5.0}) == "Delivered"
+    # géraniol : boil="partial" (T119) -- livre aussi, pas seulement "kept".
+    assert app._coverage_cell_text("geraniol", "boil", {"mid": 5.0}) == "Delivered"
+
+def test_coverage_cell_text_lost_when_measured_but_not_surviving_this_stage():
+    # linalol : boil="lost" (T119, corrigé T119-addendum -- même perte que
+    # le myrcène) -- MESURÉ chez le houblon, mais ne survit pas à CE stade.
+    # Distinct de "a priori not delivered" (qui, lui, dit "jamais mesuré").
+    assert app._coverage_cell_text("linalool", "boil", {"mid": 5.0}) == "Lost during this addition"
+
+def test_coverage_cell_text_precursor_uses_the_mandated_phrase():
+    # humulène : boil/whirlpool="precursor" (T119) -- ne livre PAS le
+    # composé lui-même, vocabulaire imposé par le ticket T121.
+    for stage in ("boil", "whirlpool"):
+        assert (app._coverage_cell_text("humulene", stage, {"mid": 5.0})
+                == "Generates spicy/woody aroma through oxidation")
+
+def test_coverage_cell_text_unknown_stage_is_a_priori_not_delivered():
+    # matching.compound_survival renvoie None pour un stade hors des 4
+    # reconnus -- jamais un état fabriqué.
+    assert app._coverage_cell_text("linalool", "fermentation", {"mid": 5.0}) == "a priori not delivered"
+
+def test_coverage_requires_at_least_one_hop(toy_cwd):
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("coverage").run()
+    assert not at.exception
+    assert any("Choose at least one hop" in m.value for m in at.markdown)
+
+def test_coverage_requires_at_least_one_stage(toy_cwd):
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("coverage").run()
+    at.multiselect(key="coverage_hops").select("Hopa").run()
+    assert not at.exception
+    assert any("Pick at least one stage" in m.value for m in at.markdown)
+
+def test_coverage_grid_shows_delivered_lost_and_a_priori_not_delivered(toy_cwd):
+    # hopa porte linalool=30 (voir _build_toy_db) -- le SEUL des 11 composés
+    # T119 mesuré dans la fixture jouet. Boil ET whirlpool sélectionnés pour
+    # tester les deux états linalool (lost/delivered) sur la même grille ;
+    # tous les autres composés doivent afficher "a priori not delivered"
+    # dans les DEUX colonnes (jamais mesurés pour aucun houblon jouet).
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("coverage").run()
+    at.multiselect(key="coverage_hops").select("Hopa").run()
+    at.segmented_control(key="coverage_stage_hopa").set_value(["Boil", "Whirlpool"]).run()
+    assert not at.exception
+    grid = next(df.value for df in at.dataframe if "Compound" in df.value.columns)
+    boil_col = next(c for c in grid.columns if "Boil" in c)
+    whirlpool_col = next(c for c in grid.columns if "Whirlpool" in c)
+    linalool_row = grid[grid["Compound"] == "Linalool"].iloc[0]
+    assert linalool_row[boil_col] == "Lost during this addition"
+    assert linalool_row[whirlpool_col] == "Delivered"
+    myrcene_row = grid[grid["Compound"] == "Myrcene"].iloc[0]
+    assert myrcene_row[boil_col] == "a priori not delivered"
+    assert myrcene_row[whirlpool_col] == "a priori not delivered"
+
+def test_coverage_not_covered_section_lists_every_undelivered_compound(toy_cwd):
+    # 11 composés au total (T119), 1 seul livré (linalool @ whirlpool) --
+    # les 10 autres doivent apparaître comme badges "a priori not covered".
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("coverage").run()
+    at.multiselect(key="coverage_hops").select("Hopa").run()
+    at.segmented_control(key="coverage_stage_hopa").set_value(["Whirlpool"]).run()
+    assert not at.exception
+    assert any("A priori not covered" in m.value for m in at.markdown)
+    # `st.badge` se rend en markdown ":color-badge[label]" sous AppTest (même
+    # pattern que test_browse_shows_purpose_badge_as_top_info).
+    badge_markdown = [m.value for m in at.markdown if "-badge[" in m.value]
+    assert any("Myrcene" in m for m in badge_markdown)
+    assert not any("Linalool" in m for m in badge_markdown)
+
+def test_coverage_explanatory_expander_shows_real_coverage_counts(toy_cwd):
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("coverage").run()
+    at.multiselect(key="coverage_hops").select("Hopa").run()
+    at.segmented_control(key="coverage_stage_hopa").set_value(["Whirlpool"]).run()
+    assert not at.exception
+    assert any("Why \"a priori\"" in e.label for e in at.expander)
+    assert any("Linalool 1/" in c.value for c in at.caption)
