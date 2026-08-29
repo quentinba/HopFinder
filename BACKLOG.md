@@ -2522,7 +2522,7 @@ Mais la transparence doit être RÉELLE, pas un simple adverbe :
 
   ⚠ `_RECENT_UPDATES` même commit.
 
-- [ ] **T122 — Garde-fou : l'outil discrimine-t-il vraiment ?**
+- [x] **T122 — Garde-fou : l'outil discrimine-t-il vraiment ?**
   *À faire AVANT d'écrire la GUI de T121.*
 
   **Le risque, chiffré** : 5 composés sur 11 sont présents chez presque tous
@@ -2539,6 +2539,64 @@ Mais la transparence doit être RÉELLE, pas un simple adverbe :
   **Conséquence si la mesure confirme** : la GUI doit **mettre en avant les 4
   composés discriminants** et reléguer visuellement les 5 ubiquitaires (section
   repliée « always present »), sinon l'outil est joli et ne dit rien.
+
+  **FAIT (2026-08-30) -- MESURE RÉALISÉE, HYPOTHÈSE DE DÉPART INFIRMÉE SUR
+  LE DÉCOUPAGE EXACT (mais le risque global est réel, juste pas sur les
+  composés attendus).** 20 plans réalistes (2-4 houblons courants -- Citra,
+  Mosaic, Simcoe, Amarillo, Centennial, Cascade, Galaxy, Nelson Sauvin, El
+  Dorado, Idaho 7, Sabro, Motueka, Enigma, Vic Secret, Azacca, Ekuanot,
+  Talus, Loral, Comet, Willamette, Saaz, Chinook, Columbus, Wai-iti, Rakau,
+  Riwaka, Pacifica -- stades variés boil/whirlpool/afdh/pfdh), passés dans
+  `matching.hopping_plan_coverage` (script `t122_measure.py`, base réelle
+  187 houblons). Résultat, état (`delivered`/`presumed_absent`) sur les 20
+  plans :
+
+  | Composé | États vus | Delivered/20 |
+  |---|---|---|
+  | myrcène | delivered seul | 20/20 |
+  | linalol | delivered seul | 20/20 |
+  | géraniol | delivered seul | 20/20 |
+  | sélinène | presumed_absent seul | 0/20 |
+  | beta-pinène | **les deux** | 17/20 |
+  | humulène | **les deux** | 10/20 |
+  | caryophyllène | **les deux** | 10/20 |
+  | farnésène | **les deux** | 9/20 |
+  | isobutyrate | **les deux** | 12/20 |
+  | ketones | **les deux** | 13/20 |
+  | thiols | **les deux** | 13/20 |
+
+  **Ce que ça change vs. l'hypothèse de départ** : la couverture COMPOSITION
+  seule (nombre de houblons ayant une valeur mesurée) prédisait 5 composés
+  "toujours présents" (myrcène/humulène/caryophyllène/farnésène/linalol).
+  En combinant avec la survie au procédé (T119), **seuls 3 composés sont
+  réellement toujours "delivered" quel que soit le plan** : myrcène, linalol,
+  géraniol -- parce qu'un plan réaliste a presque toujours AU MOINS un
+  houblon à un stade whirlpool/afdh/pfdh, et ces 3 composés sont "kept" à
+  ces 3 stades (myrcène "partial" au whirlpool suffit aussi à livrer).
+  **Humulène/caryophyllène/farnésène ne discriminent PAS pour la raison
+  attendue (rareté de mesure) mais pour une AUTRE raison, plus intéressante** :
+  leur `state` T119 est "precursor" au boil ET au whirlpool, et "lost" en
+  AFDH -- ils ne sont réellement "delivered" QU'à un stade PFDH. Un plan
+  sans aucun houblon en PFDH ne les livre jamais, quelle que soit la
+  composition. C'est donc le CROISEMENT composé×stade (T119), pas la seule
+  rareté de mesure (T120's `comp`), qui pilote la discrimination pour ces
+  3-là. Beta-pinène discrimine bien pour la raison attendue (135/187 houblons
+  mesurés, ET son `state` T119 ne devient "kept" qu'en afdh/pfdh -- jamais
+  au boil/whirlpool). Isobutyrate/ketones/thiols discriminent comme prévu
+  (rareté BarthHaas). Sélinène ne discrimine jamais dans un plan réaliste
+  (2/187 houblons -- Ella, Topaz -- absents de l'échantillon) : toujours
+  `presumed_absent`, mais dans l'autre sens que les "toujours présents"
+  (c'est un composé "toujours absent en pratique", pas "toujours livré").
+
+  **Conséquence RÉVISÉE pour T121** (le risque de départ était réel, la
+  liste ne l'était pas) : mettre en avant **7 composés discriminants**
+  (beta-pinène, humulène, caryophyllène, farnésène, isobutyrate, ketones,
+  thiols) ; reléguer en section repliée « always present » **3 composés**
+  (myrcène, linalol, géraniol) ; traiter **sélinène** à part (« rarely
+  measured — 2/187 hops », jamais dans la même section que les "always
+  present", sens opposé). T121 doit lire ce tableau, pas la liste de départ
+  du ticket ci-dessus (gardée telle quelle comme trace de l'hypothèse
+  initiale, volontairement pas corrigée en place).
 
   C'est l'analyse qui manquait à `combine()` et qui a coûté son retrait.
 
