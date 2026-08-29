@@ -339,6 +339,37 @@ def hop_popularity(con) -> dict[str, int]:
     return out
 
 
+def hop_usage_breakdown_all(con) -> dict[str, dict[str, dict]]:
+    """{variety: {use_type: {"recipes_count", "share"}}} depuis
+    `hop_usage_stats` (T88, beer-analytics.com) pour TOUTES les variétés
+    couvertes, en un seul passage SQL -- `share` = part de `recipes_count`
+    de ce `use_type` sur le TOTAL des 5 `use_type` (Mash/First Wort/Boil/
+    Aroma/Dry Hop) de CE houblon. AUCUNE modélisation : un fait observé
+    directement, part réelle de recettes par étape du procédé (T99, couche
+    empirique). Variété sans ligne, ou dont le total vaut 0, absente du
+    dict -- jamais une répartition uniforme fabriquée pour un houblon non
+    couvert."""
+    by_variety: dict[str, list[tuple[str, int]]] = {}
+    for r in con.execute(
+        "SELECT variety, use_type, recipes_count FROM hop_usage_stats "
+        "WHERE recipes_count IS NOT NULL"):
+        by_variety.setdefault(r["variety"], []).append((r["use_type"], r["recipes_count"]))
+    out: dict[str, dict[str, dict]] = {}
+    for v, rows in by_variety.items():
+        total = sum(c for _, c in rows)
+        if total == 0:
+            continue
+        out[v] = {ut: {"recipes_count": c, "share": c / total} for ut, c in rows}
+    return out
+
+
+def hop_usage_breakdown(con, variety: str) -> dict[str, dict]:
+    """{use_type: {"recipes_count", "share"}} pour UN houblon -- voir
+    `hop_usage_breakdown_all` (T99). Dict vide si le houblon n'est pas
+    couvert par beer-analytics.com."""
+    return hop_usage_breakdown_all(con).get(variety, {})
+
+
 def style_observed_distribution(con, style_id: str) -> dict[str, list[dict]]:
     """{metric: [{"bin_low", "bin_high", "count"}, ...]} depuis
     `style_recipe_stats` (T85, beer-analytics.com) pour un `style_id` BJCP

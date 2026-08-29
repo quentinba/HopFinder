@@ -1267,7 +1267,7 @@ Elles sont écrites pour qu'aucune décision implicite ne reste à deviner.
 
 *Base de connaissance : `CLAUDE.md` §« Règles procédé & survivables ».*
 
-- [ ] **T99 — Panneau « Recommended usage » dans Browse — deux couches séparées**
+- [x] **T99 — Panneau « Recommended usage » dans Browse — deux couches séparées**
 
   **Emplacement** : mode `browse`, nouvelle carte `app._panel()`, après la
   roue d'arôme.
@@ -1300,6 +1300,47 @@ Elles sont écrites pour qu'aucune décision implicite ne reste à deviner.
   massivement utilisé en whirlpool est l'information la plus intéressante de
   la page — pas une erreur à masquer. Prévoir une phrase explicite quand
   l'écart est fort.
+
+  **Compte rendu (2026-08-29)** : `matching.hop_usage_breakdown(con,
+  variety)`/`hop_usage_breakdown_all(con)` (T88, `hop_usage_stats`) donnent
+  `{use_type: {"recipes_count","share"}}` — part réelle par étape, houblon
+  non couvert → dict vide, jamais une répartition fabriquée. Couche (b) :
+  `app._chemical_earliness_index_all(hops, comp)` — moyenne du rang
+  quantile (`app._normalize_quantile`, DB-wide, RÉUTILISÉ tel quel, pas
+  réécrit) sur linalool/géraniol/isobutyrate/thiols (`app.
+  _RECOMMENDED_USAGE_CHEMICAL_COMPOUNDS`), composé manquant simplement omis
+  de la moyenne d'UN houblon (jamais un 0 fabriqué), houblon sans aucun des
+  4 composés absent du dict. Étiqueté "Estimated from composition" partout
+  en GUI, jamais présenté au même niveau qu'une mesure ; méthyl géranate
+  explicitement cité comme trou connu dans la caption.
+
+  **Divergence** (livrable réel) : plutôt qu'un seuil absolu arbitraire,
+  compare le rang quantile DB-wide de l'indice chimique de CE houblon à
+  celui de sa part "Aroma" (whirlpool) empirique — sous la médiane de la
+  base pour l'un, au-dessus pour l'autre déclenche le bandeau (même logique
+  DB-relative que le reste de la normalisation du projet, pas un %
+  inventé). Vérifié en direct (Chrome, clair+sombre) sur Citra (68 %
+  indice, Boil 37,68 %/Aroma 25,83 %/Dry Hop 34,3 % — pas de divergence,
+  cohérent) et Willamette (36 % indice, Boil 81,63 %/Aroma 9,53 % — pas de
+  divergence non plus, cohérent avec l'exemple YCH du handbook qui cite
+  justement Willamette comme houblon "réservé au tardif").
+
+  ⚠ **T108 pinne les totaux `hop_usage_stats` de hopa/hopb dans les tests**
+  (`"Popularity: 10,000 recipes"`/`"5 recipes"`) — impossible d'ajouter des
+  lignes "Aroma"/"Dry Hop" à ces houblons jouets sans casser ces
+  assertions. Le composé chimique de test (`linalool`) a donc été ajouté à
+  hopa (n'affecte pas la popularité), et la branche « divergence » n'est
+  testée qu'au niveau unitaire direct (`app._chemical_earliness_index_all`/
+  `app._usage_share_db_values`, dicts synthétiques) plutôt qu'en AppTest —
+  la base jouet n'a pas assez de variété pour produire un vrai cas de
+  divergence sans re-toucher des chiffres pinnés par d'autres tickets.
+  ⚠ Ajouter `linalool` à hopa a fait basculer `test_compare_shows_no_
+  detailed_data_message_when_absent` (linalool est dans
+  `_COMPARE_DETAIL_OIL_COMPOUNDS`, "détaillé" pour Compare Hops) — corrigé
+  en changeant la paire testée de hopa/hopc à hopb/hopc (même invariant,
+  hopb/`moly` reste fictif et hors de cette liste).
+  347 tests passent. Aucune modification de `aromahops.db` (GUI seule) —
+  pas de push HopFinder-db nécessaire.
 
 - [ ] **T100 — Calibrer (b) contre (a) AVANT de parler de « modèle »**
 

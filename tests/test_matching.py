@@ -537,6 +537,24 @@ def test_hop_popularity_sums_recipes_count_across_use_types(db):
               "('_fixture_popular','_fixture_partial')")
     db.commit()
 
+def test_hop_usage_breakdown_computes_share_per_use_type(db):
+    db.executemany("INSERT INTO hop_usage_stats VALUES (?,?,?,?,?,?,?,?,?)", [
+        ("_fixture_usage", "Fixture Usage", "Boil", 75, None, None, None, "test", "2026"),
+        ("_fixture_usage", "Fixture Usage", "Dry Hop", 25, None, None, None, "test", "2026"),
+    ])
+    db.commit()
+    out = matching.hop_usage_breakdown(db, "_fixture_usage")
+    assert out == {
+        "Boil": {"recipes_count": 75, "share": 0.75},
+        "Dry Hop": {"recipes_count": 25, "share": 0.25},
+    }
+    # houblon non couvert -> dict vide, jamais une répartition fabriquée.
+    assert matching.hop_usage_breakdown(db, "_fixture_never_seen") == {}
+    all_breakdowns = matching.hop_usage_breakdown_all(db)
+    assert all_breakdowns["_fixture_usage"] == out
+    db.execute("DELETE FROM hop_usage_stats WHERE variety='_fixture_usage'")
+    db.commit()
+
 def test_style_observed_distribution_groups_bins_by_metric_sorted(db):
     db.executemany("INSERT INTO style_recipe_stats VALUES (?,?,?,?,?,?,?,?)", [
         ("_fixture_style", "american-ipa", "abv", 6.0, 6.5, 20, "test", "2026"),
