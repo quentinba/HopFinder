@@ -5805,41 +5805,68 @@ def _survivables(con) -> None:
         tooltip=["hop:N", "compound:N", alt.Tooltip("value:Q", format=".2f", title="Rank"),
                 "purpose_label:N"],
     )
-    # Triangle "flag" au-dessus de chaque colonne, coloré par purpose --
-    # MÊME palette que `_purpose_badge` ailleurs dans la GUI (aromatic=sauge,
-    # bittering=terracotta, both=gris neutre), résolue par thème comme les
-    # autres graphiques (Vega-Lite ne peut pas lire `light-dark()` CSS). Une
-    # ligne PAR HOUBLON (pas par composé, contrairement à `rows`) -- sinon un
-    # houblon à 4 composés porterait 4 triangles superposés pour rien.
-    dark = st.context.theme.type == "dark"
-    purpose_hex = {"aromatic": "#aebf92" if dark else "#7f9455",
-                  "bittering": "#f6a06b" if dark else "#c67139",
-                  "both": "#a39c8f" if dark else "#82796a"}
-    purpose_domain = ["Aromatic", "Bittering", "Both", "Inferred: Aromatic",
-                      "Inferred: Bittering", "Unknown"]
-    purpose_range = [purpose_hex["aromatic"], purpose_hex["bittering"], purpose_hex["both"],
-                     purpose_hex["aromatic"], purpose_hex["bittering"], "#00000000"]
-    flag_rows = [
-        {"hop": hops[v]["name"], "purpose_label": _purpose_label(*purpose_by_variety[v]),
-         "top": totals[v] + max(totals.values()) * 0.04}
-        for v in shown]
+    # Marqueur "flag" au-dessus de chaque colonne (2026-08-29, retour
+    # utilisateur en revue -- 3 corrections sur la 1ère version) :
+    # - FORME = aromatic/bittering (cercle/triangle), pas la couleur --
+    #   "both" (70/189 houblons réels, existe bel et bien malgré le doute de
+    #   l'utilisateur) FONDU dans "aromatic" pour cet affichage SEULEMENT
+    #   (raison donnée : un houblon dual-purpose est le plus souvent utilisé
+    #   pour l'arôme en pratique, trop cher pour de l'amérisation pure, ex.
+    #   Citra) -- purpose BRUT (`hops.purpose`) inchangé en base, la
+    #   distinction "Both" reste intacte partout ailleurs (badges, tableaux).
+    # - COULEUR = confiance (noir = purpose RÉEL BeerMaverick, gris = déduit
+    #   de l'acide alpha, `infer_purpose_from_alpha_acid`) -- jamais
+    #   "both"+inferred simultanément : l'inférence est binaire par
+    #   construction (seuil alpha acide), ne produit jamais "both".
+    # - Houblon à purpose INCONNU (ni réel ni inférable) : AUCUNE ligne dans
+    #   `flag_rows` -- pas de marqueur transparent comme le 1er essai, plus
+    #   simple et tout aussi honnête (rien à cacher, rien à afficher).
+    # Couleurs FIXES, PAS résolues par thème -- 3e correction (2026-08-29,
+    # retour utilisateur : "white and grey is not working... find two
+    # colors that contrast well with both beige and grey but that are not
+    # confusing with the barplot colors"). Les 4 composés occupent déjà
+    # denim/sauge/ochre/prune (`_SURVIVABLE_COMPOUND_COLORS`) -- brique et
+    # sarcelle (teal) sont les deux familles de teinte encore libres sur le
+    # cercle chromatique, assez saturées pour rester lisibles sur le crème
+    # ET le brun sombre (contrairement au blanc/gris clair du 2e essai,
+    # trop proches des deux fonds pour vraiment ressortir).
+    known_red = "#a4383a"
+    inferred_teal = "#2f7a78"
+    marker_stroke = "#3a352c"
+    flag_rows = []
+    for v in shown:
+        purpose, inferred = purpose_by_variety[v]
+        if purpose is None:
+            continue
+        flag_rows.append({
+            "hop": hops[v]["name"],
+            "purpose_kind": "Aromatic" if purpose in ("aromatic", "both") else "Bittering",
+            "confidence": "Inferred" if inferred else "Known",
+            "purpose_label": _purpose_label(purpose, inferred),
+            "top": totals[v] + max(totals.values()) * 0.04,
+        })
     flags = alt.Chart(alt.Data(values=flag_rows)).mark_point(
-        shape="triangle", size=70, filled=True, opacity=0.9,
+        size=70, filled=True, opacity=1.0, stroke=marker_stroke, strokeWidth=1,
     ).encode(
         x=alt.X("hop:N", sort=hop_order),
         y=alt.Y("top:Q"),
-        color=alt.Color("purpose_label:N", title="Purpose",
-                        scale=alt.Scale(domain=purpose_domain, range=purpose_range)),
+        shape=alt.Shape("purpose_kind:N", title="Purpose",
+                        scale=alt.Scale(domain=["Aromatic", "Bittering"],
+                                       range=["circle", "triangle"])),
+        color=alt.Color("confidence:N", title="Confidence",
+                        scale=alt.Scale(domain=["Known", "Inferred"],
+                                       range=[known_red, inferred_teal])),
         tooltip=["hop:N", "purpose_label:N"],
     )
-    chart = (bars + flags).resolve_scale(color="independent").properties(
+    chart = (bars + flags).resolve_scale(color="independent", shape="independent").properties(
         width=chart_width, height=440)
     with _panel():
         st.altair_chart(chart, width="content")
         st.caption(
-            "Triangle above each bar = purpose (BeerMaverick when known, otherwise "
-            "estimated from alpha acid — see the \"Purpose\" legend). No triangle = "
-            "unknown, not fabricated.")
+            "Marker above each bar = purpose: circle = aromatic (includes dual-"
+            "purpose hops — usually run for aroma in practice), triangle = "
+            "bittering. Red = real purpose (BeerMaverick), teal = estimated "
+            "from alpha acid. No marker = purpose unknown, not guessed.")
 
 
 def main():

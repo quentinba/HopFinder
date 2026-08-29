@@ -1267,11 +1267,16 @@ def test_survivables_mode_shows_purpose_flag_caption(toy_cwd):
     # 2026-08-29, retour utilisateur explicite : "it would be nice to see
     # if the hop is aromatic or bittering" -- hopa (seul houblon couvert
     # dans la fixture) a purpose="aromatic" réel (voir _build_toy_db), donc
-    # une couche triangle avec au moins 2 UnknownElement (barres + flags).
+    # une couche de marqueurs avec au moins 2 UnknownElement (barres + flags).
+    # Addendum (2026-08-29, 2e retour) : forme = aromatic/bittering (cercle/
+    # triangle), couleur = confiance (noir=connu, gris=inféré), "both" fondu
+    # dans "aromatic" pour cet affichage.
     from streamlit.testing.v1.element_tree import UnknownElement
     at = _app()
     at.run()
     at.sidebar.radio[0].set_value("survivables").run()
     assert not at.exception
-    assert any("Triangle above each bar" in c.value for c in at.caption)
+    assert any("Marker above each bar" in c.value for c in at.caption)
+    assert any("circle = aromatic" in c.value and "triangle = bittering" in c.value
+              for c in at.caption)
     assert len([n for n in at.main if isinstance(n, UnknownElement)]) >= 1
