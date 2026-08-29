@@ -306,11 +306,23 @@ publiée — attribution systématique, lecture seule, esprit non-commercial.
 
 ## Fonctionnalités clés (état actuel)
 
-- **Doublons de houblons audités** : 5 vrais doublons cross-source fusionnés
-  (`ingest.merge_hop_varieties`) ; 4 crops réellement distincts par région
-  (Amarillo, Perle, Saaz, Northern Brewer) désambiguïsés par affichage "Nom
-  (Région)" dès collision (`matching._disambiguate_hop_names`, appliqué partout,
-  pas seulement Browse).
+- **Doublons de houblons audités** : 7 vrais doublons cross-source fusionnés
+  (`ingest.merge_hop_varieties`) — 5 le 2026-08-19 (Challenger, Fuggle,
+  Hallertauer Tradition, Hersbrucker Spät, Target) + 2 trouvés le
+  2026-08-29 (Dolcita US, Perle Germany — signalés par l'utilisateur via
+  des barres mal ordonnées sur l'onglet Survivables, T117 : deux `variety`
+  distinctes partageant le MÊME nom ET la MÊME région, jamais fusionnées
+  par le garde-fou d'ingestion malgré une logique symétrique/correcte à la
+  lecture, root cause exacte non élucidée). `merge_hop_varieties` étendue
+  à cette occasion aux 4 tables T85-T88 (`hop_usage_stats`, `hop_beer_
+  styles`, `style_hop_usage`, `style_hop_pairings`) qui n'existaient pas
+  au premier passage — les laisser de côté aurait silencieusement perdu
+  des lignes référençant la `variety` supprimée. 4 crops réellement
+  distincts par région (Amarillo, Perle, Saaz, Northern Brewer)
+  désambiguïsés par affichage "Nom (Région)" dès collision
+  (`matching._disambiguate_hop_names`, appliqué partout, pas seulement
+  Browse) — Perle Germany reste dans ce groupe (Perle US existe
+  séparément), seul le doublon Germany/Germany a été fusionné.
 - **Symboles ®/™/© retirés du nom affiché** (`parsers.strip_trademark_symbols`).
 - **`by_descriptor`** : tri catégorique (recoupement `hop_descriptors`) PUIS
   quantitatif (intensité moyenne roue d'arôme). Pills roue = notation seule sauf

@@ -200,6 +200,47 @@ def test_merge_hop_varieties_redirects_relations_pointing_at_dropped_key(tmp_pat
     row = con.execute("SELECT similar_variety FROM hop_similar WHERE variety='citra'").fetchone()
     assert row["similar_variety"] == "wye-challenger"
 
+def test_merge_hop_varieties_migrates_beer_analytics_tables(tmp_path):
+    # T85-T88 (ajoutées après le premier passage de merge_hop_varieties,
+    # 2026-08-19) -- bug réel trouvé en direct (2026-08-29, retour
+    # utilisateur sur l'onglet Survivables : "Dolcita US"/"Perle Germany"
+    # mal ordonnés) : ces 4 tables n'étaient PAS migrées, laissant des
+    # lignes orphelines référençant `drop` après sa suppression de `hops`.
+    con = connect(str(tmp_path / "t.db"))
+    init_db(con)
+    ingest._ingest_variety(con, "dolcita-hops", "Dolcita", "United States", {}, [], "barthhaas")
+    ingest._ingest_variety(con, "dolcita", "Dolcita", "United States", {}, [], "yakima")
+    con.executemany("INSERT INTO hop_usage_stats VALUES (?,?,?,?,?,?,?,?,?)", [
+        ("dolcita-hops", "Dolcita", "Boil", 10, None, None, None, "test", "2026"),
+    ])
+    con.execute("INSERT INTO hop_beer_styles VALUES (?,?,?,?)",
+               ("dolcita", "Hazy IPA", "21A", "yakima"))
+    con.execute("INSERT INTO style_hop_usage VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+               ("hazy-ipa", "21A", "Dolcita", "dolcita", "any", 0.2, 0.2, None, None, None,
+                "test", "2026"))
+    con.execute("INSERT INTO style_hop_pairings VALUES (?,?,?,?,?,?,?,?,?,?)",
+               ("hazy-ipa", "21A", "Dolcita", "dolcita", 0.1, 0.2, 0.3, 0.2, "test", "2026"))
+    con.commit()
+    ingest.merge_hop_varieties(con, keep="dolcita-hops", drop="dolcita")
+    assert con.execute("SELECT 1 FROM hops WHERE variety='dolcita'").fetchone() is None
+    # hop_usage_stats : ligne de "dolcita-hops" conservée telle quelle (drop
+    # n'avait aucune ligne ici) -- pas d'insertion fabriquée.
+    assert [r["use_type"] for r in
+           con.execute("SELECT use_type FROM hop_usage_stats WHERE variety='dolcita-hops'")] == ["Boil"]
+    # hop_beer_styles : migrée de "dolcita" vers "dolcita-hops".
+    assert con.execute(
+        "SELECT 1 FROM hop_beer_styles WHERE variety='dolcita-hops' AND style_label='Hazy IPA'"
+    ).fetchone() is not None
+    assert con.execute("SELECT 1 FROM hop_beer_styles WHERE variety='dolcita'").fetchone() is None
+    # style_hop_usage/style_hop_pairings : UPDATE de la colonne variety (pas
+    # dans leur clé primaire), aucune ligne orpheline restante.
+    assert con.execute(
+        "SELECT variety FROM style_hop_usage WHERE hop_name='Dolcita'"
+    ).fetchone()["variety"] == "dolcita-hops"
+    assert con.execute(
+        "SELECT variety FROM style_hop_pairings WHERE hop_name='Dolcita'"
+    ).fetchone()["variety"] == "dolcita-hops"
+
 def test_merge_hop_varieties_idempotent_when_already_merged(tmp_path):
     con = connect(str(tmp_path / "t.db"))
     init_db(con)

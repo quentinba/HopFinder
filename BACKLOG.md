@@ -2246,6 +2246,40 @@ Mais la transparence doit être RÉELLE, pas un simple adverbe :
   excluant High). Aucune modification d'`aromahops.db` — pas de push
   HopFinder-db nécessaire.
 
+  **Addendum (2026-08-29, retours utilisateur)** :
+  - **Tous les noms de houblon sur l'axe X** : `alt.Axis(labelOverlap=
+    False)` -- Vega-Lite éclaircissait silencieusement les libellés d'un
+    axe nominal à ~170 catégories par défaut, masquant la plupart des noms
+    malgré la rotation -45°. `chart_width` (déjà dimensionné pour ~170
+    barres) laisse la place réelle nécessaire.
+  - **Bug réel trouvé en signalant "Dolcita US"/"Perle Germany" mal
+    ordonnés** : DEUX vraies paires de doublons cross-source non fusionnées
+    dans `hops` (`dolcita-hops`/`dolcita`, `perle`/`perle-per03` — même nom
+    ET même région, jamais attrapées par le garde-fou d'ingestion malgré
+    une logique symétrique et correcte à la lecture, root cause exacte non
+    élucidée). `ingest.merge_hop_varieties` (T60, 5 doublons fusionnés le
+    2026-08-19) étendue aux 4 tables T85-T88 qui n'existaient pas à
+    l'époque (`hop_usage_stats`, `hop_beer_styles`, `style_hop_usage`,
+    `style_hop_pairings` -- auraient été silencieusement orphelines sinon),
+    nouveau test `test_merge_hop_varieties_migrates_beer_analytics_tables`.
+    Fusion appliquée à `aromahops.db` réelle (189 → 187 houblons), vérifiée
+    lossless (comptages avant/après par table). **Push HopFinder-db
+    nécessaire** (seule modification de données de ce batch T100/T117/
+    T102/T129 -- voir CLAUDE.md "Doublons de houblons audités").
+  - **Indicateur de purpose (aromatic/bittering)** : triangle au-dessus de
+    chaque colonne, coloré par `matching.resolve_purpose` (même résolution
+    que `_purpose_badge` partout ailleurs, préfixe "Inferred:" si estimé
+    depuis l'acide alpha) -- MÊME palette sauge/terracotta/gris que les
+    badges de purpose existants, résolue par thème (Vega-Lite ne lit pas
+    `light-dark()` CSS). Houblon à purpose inconnu : triangle transparent
+    (`#00000000`), jamais un marqueur fabriqué. `purpose_label` ajouté
+    aussi au tooltip de chaque segment de barre (pas seulement le
+    triangle), pour rester visible même sans viser précisément le triangle.
+    Vérifié en direct (zoom) : triangles sauge/terracotta bien positionnés,
+    légende "Purpose" apparaît à droite du graphique (même comportement que
+    la légende "Compound" déjà existante, wide/défilant).
+  362 tests passent au total après ces 3 addenda.
+
 - [ ] **T119 — Matrice composé × stade de procédé**
 
   `matching.compound_survival(compound: str, stage: str) -> dict | None`
