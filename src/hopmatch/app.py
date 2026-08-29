@@ -5403,8 +5403,12 @@ def _style_hops(con) -> None:
     AROMATIQUE (`matching.by_descriptor` lancé sur les descripteurs
     typiques du style -- ce que dit la chimie/roue d'arôme). **Le
     livrable réel** : les houblons bien classés en (2) mais ABSENTS de (1)
-    -- pertinents aromatiquement, jamais mesurés dans ce style -- mis EN
-    AVANT (section dédiée, en tête), pas en annexe d'un tableau combiné.
+    -- pertinents aromatiquement, jamais mesurés dans ce style -- dans SA
+    PROPRE carte dédiée, jamais fondue en annexe d'un tableau combiné.
+    Placée SOUS les deux classements côte à côte (2026-08-29, retour
+    utilisateur en revue -- le lecteur voit d'abord les deux classements
+    bruts, puis le point de divergence qui en découle), les trois cartes
+    partageant le même fond opaque `_panel()`.
 
     Descripteurs typiques PRÉ-REMPLIS depuis le texte BJCP
     (`matching.style_typical_descriptors`) mais librement ÉDITABLES --
@@ -5464,12 +5468,46 @@ def _style_hops(con) -> None:
             st.write("No data (real frequency or aroma relevance) for this style/selection.")
         return
 
+    # Deux cartes DE MÊME NIVEAU côte à côte (2026-08-29, retour utilisateur
+    # en revue : même fond opaque `_panel()` que la section "rare &
+    # relevant" ci-dessous, pour la cohérence visuelle -- `_panel(cols[i])`,
+    # même mécanisme que les cartes de la page Home, voir son commentaire).
+    col_freq, col_rel = st.columns(2)
+    with _panel(col_freq):
+        st.write(f"**Real frequency ({usage_type_label.lower()} usage in this style)**")
+        st.caption("Share of this style's recipes using each hop (beer-analytics.com) "
+                  "-- observed, not modeled.")
+        if frequency:
+            freq_rows = sorted(frequency.items(), key=lambda kv: -(kv[1]["share_avg24m"] or 0))[:top]
+            st.dataframe(
+                [{"Hop": d["hop_name"], "Recipe share": d["share_avg24m"]} for _, d in freq_rows],
+                width="stretch", hide_index=True,
+                column_config={"Recipe share": st.column_config.NumberColumn(format="percent")})
+        else:
+            st.caption(f"No beer-analytics.com data for this style at the "
+                      f"'{usage_type_label}' stage.")
+    with _panel(col_rel):
+        st.write("**Aroma relevance (typical descriptors)**")
+        st.caption("Hops whose real aroma wheel/descriptors best match the typical "
+                  "descriptors selected above -- see \"From descriptors\" for the "
+                  "full method.")
+        if relevance_ranked:
+            st.dataframe(
+                [{"Hop": h["name"], "Matched descriptors": len(h["matched_descriptors"])}
+                 for h in relevance_ranked],
+                width="stretch", hide_index=True,
+                column_config={"Matched descriptors": st.column_config.NumberColumn()})
+        else:
+            st.caption("No hop matches the selected descriptors.")
+
     # Livrable réel du ticket : pertinent aromatiquement (dans le
-    # classement affiché) ET absent de la fréquence réelle mesurée --
+    # classement ci-dessus) ET absent de la fréquence réelle mesurée --
     # calculé SEULEMENT si `frequency` a au moins une ligne pour ce style/
     # usage_type (sinon "absent" ne voudrait rien dire : on n'a simplement
     # AUCUNE donnée beer-analytics pour ce style, pas la confirmation que
-    # ces houblons y sont rares -- honnêteté d'abord).
+    # ces houblons y sont rares -- honnêteté d'abord). Placée SOUS les deux
+    # classements (2026-08-29, retour utilisateur en revue) -- toujours sa
+    # propre carte, jamais fondue avec les deux ci-dessus.
     if frequency:
         rare_relevant = [h for h in relevance_ranked if h["variety"] not in frequency]
         if rare_relevant:
@@ -5488,34 +5526,6 @@ def _style_hops(con) -> None:
                      for h in rare_relevant],
                     width="stretch", hide_index=True,
                     column_config={"Matched descriptors": st.column_config.ListColumn()})
-
-    col_freq, col_rel = st.columns(2)
-    with col_freq:
-        st.write(f"**Real frequency ({usage_type_label.lower()} usage in this style)**")
-        st.caption("Share of this style's recipes using each hop (beer-analytics.com) "
-                  "-- observed, not modeled.")
-        if frequency:
-            freq_rows = sorted(frequency.items(), key=lambda kv: -(kv[1]["share_avg24m"] or 0))[:top]
-            st.dataframe(
-                [{"Hop": d["hop_name"], "Recipe share": d["share_avg24m"]} for _, d in freq_rows],
-                width="stretch", hide_index=True,
-                column_config={"Recipe share": st.column_config.NumberColumn(format="percent")})
-        else:
-            st.caption(f"No beer-analytics.com data for this style at the "
-                      f"'{usage_type_label}' stage.")
-    with col_rel:
-        st.write("**Aroma relevance (typical descriptors)**")
-        st.caption("Hops whose real aroma wheel/descriptors best match the typical "
-                  "descriptors selected above -- see \"From descriptors\" for the "
-                  "full method.")
-        if relevance_ranked:
-            st.dataframe(
-                [{"Hop": h["name"], "Matched descriptors": len(h["matched_descriptors"])}
-                 for h in relevance_ranked],
-                width="stretch", hide_index=True,
-                column_config={"Matched descriptors": st.column_config.NumberColumn()})
-        else:
-            st.caption("No hop matches the selected descriptors.")
 
 
 def main():
