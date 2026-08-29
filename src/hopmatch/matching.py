@@ -31,6 +31,7 @@ Voir `reference.py` pour le détail complet.
 """
 from __future__ import annotations
 import math
+import re
 import sqlite3
 
 from . import reference
@@ -387,6 +388,54 @@ def style_observed_distribution(con, style_id: str) -> dict[str, list[dict]]:
         out.setdefault(r["metric"], []).append(
             {"bin_low": r["bin_low"], "bin_high": r["bin_high"], "count": r["count"]})
     return out
+
+
+# T86 a résolu ~90,3% des `variety` de `style_hop_usage` vers un `variety`
+# de `hops` (le reste : houblons trop rares côté beer-analytics ou noms
+# ambigus non réconciliés, données réelles mais non exploitables ici) --
+# JOIN explicite plutôt qu'un filtre applicatif, jamais une variété
+# fabriquée pour combler le reste (T103, croisement avec `by_descriptor`
+# qui n'opère que sur `hops`).
+def style_hop_frequency(con, style_id: str, usage_type: str = "any") -> dict[str, dict]:
+    """{variety: {"hop_name", "share_latest", "share_avg24m"}} depuis
+    `style_hop_usage` (T86, beer-analytics.com) pour un `style_id` BJCP et
+    un `usage_type` donnés ("any"/"bittering"/"aroma"/"dry-hop") -- part de
+    recettes de CE STYLE utilisant ce houblon, PAS une pertinence
+    aromatique (voir `style_typical_descriptors`/`by_descriptor` pour ça,
+    T103). Dict vide si le style n'est pas couvert par beer-analytics pour
+    ce `usage_type`."""
+    out: dict[str, dict] = {}
+    for r in con.execute(
+        "SELECT s.variety, s.hop_name, s.recipes_pct_latest, s.recipes_pct_avg24m "
+        "FROM style_hop_usage s JOIN hops h ON s.variety = h.variety "
+        "WHERE s.style_id=? AND s.usage_type=?", (style_id, usage_type)):
+        out[r["variety"]] = {"hop_name": r["hop_name"], "share_latest": r["recipes_pct_latest"],
+                             "share_avg24m": r["recipes_pct_avg24m"]}
+    return out
+
+
+def style_typical_descriptors(con, style_id: str) -> list[str]:
+    """Pré-remplissage (T103) des descripteurs typiques d'un style : mots du
+    vocabulaire RÉEL `hop_descriptors` (138 termes) trouvés littéralement
+    dans le texte BJCP officiel du style (`aroma`/`flavor`/`ingredients`,
+    T81, curé et écrit par des humains) -- PAS une dérivation statistique/
+    co-occurrence comme les essais FooDB déjà rejetés deux fois (voir
+    CLAUDE.md, "Descripteurs auto-dérivés de FooDB testés et rejetés").
+    Recherche insensible à la casse, sur mot entier (`\\b...\\b`, pour que
+    "ale" ne matche pas dans "pale"). PRÉ-REMPLISSAGE ÉDITABLE côté GUI
+    (ticket : "la seconde [option], pré-remplie et éditable" plutôt qu'une
+    extraction automatique opaque) -- jamais un filtre imposé.
+
+    Liste vide si le style est inconnu, ou si aucun terme du vocabulaire
+    n'apparaît dans son texte -- jamais une liste fabriquée."""
+    row = con.execute(
+        "SELECT aroma, flavor, ingredients FROM beer_styles WHERE style_id=?",
+        (style_id,)).fetchone()
+    if row is None:
+        return []
+    text = " ".join(row[f] or "" for f in ("aroma", "flavor", "ingredients")).lower()
+    vocabulary = (r[0] for r in con.execute("SELECT DISTINCT descriptor FROM hop_descriptors"))
+    return sorted(d for d in vocabulary if re.search(rf"\b{re.escape(d)}\b", text))
 
 
 def _usable_aroma_readings(values: dict[str, float]) -> bool:

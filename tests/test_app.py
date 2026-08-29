@@ -101,7 +101,13 @@ def _build_toy_db(path):
          "og_min": 1.044, "og_max": 1.056, "fg_min": 1.008, "fg_max": 1.013,
          "abv_min": 4.5, "abv_max": 6.0, "ibu_min": 18.0, "ibu_max": 30.0,
          "srm_min": 3.0, "srm_max": 6.0,
-         "overall_impression": "A clean, crisp toy lager.", "aroma": "Light malt aroma.",
+         # T103 : "citrus"/"floral" ajoutés au texte "aroma" (vocabulaire
+         # jouet réel citrus/woody/floral/resinous, voir plus haut) --
+         # teste le pré-remplissage `matching.style_typical_descriptors`
+         # sans casser le texte affiché ailleurs (aucun test n'attendait le
+         # texte exact "Light malt aroma." seul).
+         "overall_impression": "A clean, crisp toy lager.",
+         "aroma": "Light malt aroma with a touch of citrus and floral hop character.",
          "appearance": None, "flavor": "Clean, balanced.", "mouthfeel": None,
          "comments": None, "history": None, "ingredients": None, "style_comparison": None,
          "examples": "Example One, Example Two", "category_description": None, "source": "bjcp-json"},
@@ -123,6 +129,18 @@ def _build_toy_db(path):
     con.executemany("INSERT INTO style_recipe_stats VALUES (?,?,?,?,?,?,?,?)", [
         ("2A", "test-lager-style", "abv", 4.5, 5.0, 30, "test", "2026"),
         ("2A", "test-lager-style", "abv", 5.0, 5.5, 70, "test", "2026"),
+    ])
+    # T103 : fréquence réelle (style_hop_usage) pour "2A"/"any" -- SEULEMENT
+    # hopa (descripteur "citrus", matche le texte "aroma" ci-dessus). hopb
+    # (descripteur "floral", matche AUSSI le texte "aroma") N'A AUCUNE ligne
+    # ici -- teste la section "aromatically relevant, rarely used"
+    # (app._style_hops) : hopb doit y apparaître, hopa non. hopc (descripteur
+    # "resinous", ne matche PAS le texte "aroma") reste hors des deux
+    # classements. "10A" reste sans AUCUNE ligne (teste le repli silencieux
+    # complet, aucune section "rare & relevant" fabriquée sans donnée réelle).
+    con.executemany("INSERT INTO style_hop_usage VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", [
+        ("test-lager-style", "2A", "Hopa", "hopa", "any", 0.4, 0.35, None, None, None,
+         "test", "2026"),
     ])
     # T106 : métadonnées d'identité -- hopa porte tout (cultivar/breeder/
     # release_year/pedigree + is_experimental=1), hopb seulement is_organic=1,
@@ -244,7 +262,7 @@ def test_app_loads_with_no_exception_default_home_mode(toy_cwd):
     # (h1, un seul par page, exigence de la spec).
     assert at.title[0].value == "Home"
     assert at.sidebar.radio[0].value == "home"
-    assert len(at.button) == 6  # T82 : "Beer styles" ajouté aux 5 outils existants
+    assert len(at.button) == 7  # T103 : "Hops for a style" ajouté aux 6 outils existants
 
 def test_home_open_button_switches_to_target_mode(toy_cwd):
     at = _app()
@@ -1087,3 +1105,40 @@ def test_styles_mode_shows_dash_and_shared_caption_when_no_vital_stats(toy_cwd):
     assert all(metrics[label] == "—"
               for label in ("ABV", "IBU", "OG (°P)", "FG (°P)", "EBC"))
     assert any("inherits" in c.value.lower() for c in at.caption)
+
+def test_style_hops_highlights_relevant_hop_absent_from_real_usage(toy_cwd):
+    # T103 : "2A" -- descripteurs pré-remplis ("citrus"/"floral", trouvés
+    # littéralement dans le texte "aroma" de la fixture) recoupent hopa
+    # (citrus) ET hopb (floral). Seul hopa a une ligne style_hop_usage/"any"
+    # -- hopb doit ressortir dans la section "aromatically relevant, rarely
+    # used", jamais hopa (qui a une vraie fréquence mesurée).
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("style-hops").run()
+    at.selectbox(key="style_hops_category").set_value(("2", "Test Lager")).run()
+    at.selectbox(key="style_hops_style").set_value(("2A", "Test Lager Style")).run()
+    assert not at.exception
+    prefill = at.multiselect(key="style_hops_descriptors_2A")
+    assert set(prefill.value) == {"citrus", "floral"}
+    assert any("rarely used in this style" in s.value for s in at.subheader)
+    dataframes = [df.value for df in at.dataframe]
+    rare_df = next(df for df in dataframes if "Matched descriptors" in df.columns
+                   and "Recipe share" not in df.columns and len(df) == 1)
+    assert rare_df["Hop"].tolist() == ["Hopb"]
+    freq_df = next(df for df in dataframes if "Recipe share" in df.columns)
+    assert freq_df["Hop"].tolist() == ["Hopa"]
+    assert freq_df["Recipe share"].tolist() == [0.35]
+
+def test_style_hops_falls_back_silently_without_typical_descriptors(toy_cwd):
+    # "10A" : aroma/flavor/ingredients tous None dans la fixture ->
+    # `style_typical_descriptors` renvoie [] -> message explicite plutôt
+    # qu'un classement vide ou une exception.
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("style-hops").run()
+    at.selectbox(key="style_hops_category").set_value(("10", "Test Wheat")).run()
+    at.selectbox(key="style_hops_style").set_value(("10A", "Test Wheat Style")).run()
+    assert not at.exception
+    assert at.multiselect(key="style_hops_descriptors_10A").value == []
+    assert any("Choose at least one typical descriptor" in m.value for m in at.markdown)
+    assert not any("rarely used in this style" in s.value for s in at.subheader)

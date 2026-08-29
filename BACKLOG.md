@@ -1395,7 +1395,7 @@ Elles sont écrites pour qu'aucune décision implicite ne reste à deviner.
 
 ## 7. Épique F — Le croisement qui n'existe dans aucun des deux outils
 
-- [ ] **T103 — Outil « Style → houblons » (recettes × arômes)**
+- [x] **T103 — Outil « Style → houblons » (recettes × arômes)**
   *La fonctionnalité la plus originale du backlog : aucun des deux outils
   étudiés ne fait ce croisement.*
 
@@ -1419,6 +1419,52 @@ Elles sont écrites pour qu'aucune décision implicite ne reste à deviner.
   dans ce style** » — les houblons bien classés en (2) et absents de (1).
   C'est le « pourquoi personne ne fait ça ? ». La mettre en avant, pas en
   annexe.
+
+  **Compte rendu (2026-08-29)** : `matching.style_hop_frequency(con,
+  style_id, usage_type)` (couche 1, `style_hop_usage`, T86, JOIN sur
+  `hops` — les ~10% de `variety` non résolues côté T86 sont réelles mais
+  non exploitables ici, exclues plutôt que fabriquées) et
+  `matching.style_typical_descriptors(con, style_id)` (pré-remplissage,
+  recherche MOT ENTIER du vocabulaire `hop_descriptors` dans le texte BJCP
+  `aroma`/`flavor`/`ingredients` — recommandation du ticket retenue telle
+  quelle : pré-remplissage éditable, PAS une extraction automatique
+  imposée, aucun rapport avec les essais FooDB déjà rejetés — ici une
+  simple présence littérale dans un texte curé humain, pas une
+  co-occurrence statistique). Nouveau mode `app._style_hops`
+  (`MODE_LABELS["style-hops"]` — tiret, pas underscore, pour rester
+  cohérent avec TOUTES les autres clés de mode existantes, ex.
+  "by-descriptor"). Sélecteur catégorie/style dupliqué de `_styles` (T82)
+  plutôt que factorisé, pour ne pas toucher un mode stable déjà testé.
+
+  Toggle `usage_type` (Any/Bittering/Aroma/Dry hop) ajouté sur la couche
+  fréquence réelle (pas prévu explicitement par le ticket, mais
+  `style_hop_usage` porte réellement cette ventilation depuis T86 et
+  n'était affichée NULLE PART ailleurs dans la GUI avant ce ticket —
+  masquer la ventilation aurait jeté une vraie donnée). La colonne
+  pertinence aromatique EST INDÉPENDANTE du stade (elle ne dépend pas du
+  procédé), vérifié en direct : bascule Any → Dry hop change bien la
+  fréquence (Citra 35,3 % → 21,5 %, Galaxy apparaît) sans toucher au
+  classement aromatique.
+
+  Section "Aromatically relevant, rarely used in this style" calculée
+  SEULEMENT si `style_hop_frequency` a au moins une ligne pour ce style/
+  usage_type (sinon "absent" ne voudrait rien dire — aucune donnée
+  beer-analytics du tout pour ce style, pas la confirmation que ces
+  houblons y sont rares). Placée EN TÊTE (avant les deux classements côte
+  à côte), conformément à "la mettre en avant, pas en annexe".
+
+  Vérifié en direct (Chrome, 21A American IPA, thème sombre) : descripteurs
+  pré-remplis réels (berry/caramel/citrus/floral/fruity/melon/pine/stone
+  fruit/tropical, trouvés littéralement dans le texte BJCP) ; section
+  "rarely used" affiche HBC 630/Idaho 7/Ekuanot/Talus/Falconer's Flight
+  Blend/Zythos — des houblons bien classés aromatiquement mais jamais
+  mesurés dans les vraies recettes American IPA de beer-analytics, alors
+  que Citra/Cascade/Simcoe/Mosaic dominent à la fois la fréquence réelle
+  ET le classement aromatique (cohérent, pas de bug).
+  351 tests passent (+4 : 2 fonctions `matching.py` testées, mode complet
+  testé en AppTest — cas positif avec section "rare & relevant" ET cas de
+  repli silencieux sans descripteur typique). Aucune modification
+  d'`aromahops.db` (GUI seule) — pas de push HopFinder-db nécessaire.
 
 - [ ] **T104 — Blends contraints par le style**
 
