@@ -1342,7 +1342,7 @@ Elles sont écrites pour qu'aucune décision implicite ne reste à deviner.
   347 tests passent. Aucune modification de `aromahops.db` (GUI seule) —
   pas de push HopFinder-db nécessaire.
 
-- [ ] **T100 — Calibrer (b) contre (a) AVANT de parler de « modèle »**
+- [x] **T100 — Calibrer (b) contre (a) AVANT de parler de « modèle »**
 
   **Mesure à produire, résultat écrit dans ce ticket** : sur les houblons
   ayant à la fois un indice chimique (b) et des stats d'usage (a), calculer
@@ -1359,7 +1359,44 @@ Elles sont écrites pour qu'aucune décision implicite ne reste à deviner.
   habillage statistique, et **T101 n'est pas ouvert**. Un résultat négatif est
   un résultat.
 
+  **Compte rendu (2026-08-29)** : mesure faite en direct sur `aromahops.db`
+  réelle, réutilisant tel quel `app._chemical_earliness_index_all` (indice
+  (b), T99) et `matching.hop_usage_breakdown_all` (part de Dry Hop
+  observée, (a), T88) — aucune nouvelle fonction de production nécessaire,
+  script d'analyse ponctuel non committé (le ticket demande un résultat
+  écrit ici, pas un outil persistant). 170 houblons avec un indice (b), 143
+  avec une donnée Dry Hop mesurée, **127 houblons ont les deux** (≥1 des 4
+  composés survivables + hop_usage_stats). Distribution du nombre de
+  composés contribuant à l'indice sur ces 127 : {2 composés: 95, 4: 16,
+  3: 11, 1: 5} — la plupart n'ont que linalol+géraniol mesurés (thiols/
+  isobutyrate bien plus rares dans `hop_composition`, cohérent avec les
+  couvertures connues : 31 houblons pour isobutyrate, 22 pour thiols, sur
+  189, voir T117 plus bas).
+
+  **Résultat : Spearman ρ = 0,1187, p = 0,184, n = 127 — corrélation
+  FAIBLE et NON significative** (nuage de points sans tendance visible,
+  envoyé à l'utilisateur). Le signe est même légèrement dans le sens
+  CONTRAIRE à l'intuition qualitative des règles YCH (indice haut =
+  "plutôt précoce" devrait plutôt corréler négativement avec la part de
+  dry hop ; on observe une corrélation positive, mais si faible et non
+  significative qu'aucune lecture directionnelle ne peut en être tirée).
+
+  ⇒ **Critère de sortie du ticket atteint : la couche (b) reste une règle
+  CITÉE (règles YCH 1/2/4, sourcées handbook 2022), jamais habillée d'une
+  validation statistique qu'elle n'a pas. T101 N'EST PAS OUVERT** — un
+  modèle entraîné sur ce signal apprendrait essentiellement du bruit (et,
+  comme le ticket T101 l'anticipait déjà, probablement le biais de
+  popularité plutôt qu'un vrai signal chimique). Aucun changement de code
+  production ; le libellé "Estimated from composition" de T99 reste
+  approprié et n'a besoin d'aucun renforcement/affaiblissement suite à
+  cette mesure.
+
 - [ ] **T101 — Régression, SEULEMENT si T100 le justifie**
+
+  **Fermé sans ouverture (2026-08-29) — voir le compte rendu de T100** : la
+  corrélation mesurée (ρ=0,12, p=0,18, n=127) est trop faible pour
+  justifier un modèle. Conservé ici tel quel comme trace du critère de
+  sortie explicite du backlog, pas comme travail à faire.
 
   Cible : part de dry hop, ou score ordinal boil/whirlpool/dry hop.
   Variables : composition normalisée par composé.
