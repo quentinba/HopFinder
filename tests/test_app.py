@@ -1424,3 +1424,58 @@ def test_coverage_explanatory_expander_shows_real_coverage_counts(toy_cwd):
     assert not at.exception
     assert any("Why \"a priori\"" in e.label for e in at.expander)
     assert any("Linalool 1/" in c.value for c in at.caption)
+
+# 2026-08-30, retour utilisateur direct après un test réel (Citra + Mosaic,
+# selinene manquant) : "I have no idea how to add this compound. Is it
+# possible to show examples of hops and the process of addition."
+# app._coverage_delivering_stages/app._coverage_source_suggestions
+# répondent -- lecture pure de données déjà chargées, jamais un solveur/une
+# proposition de blend (T120/T122 l'interdisent).
+
+def test_coverage_delivering_stages_excludes_precursor_and_lost():
+    # sélinène : precursor/precursor/lost/kept (T119) -- SEUL pfdh livre
+    # réellement le composé mesuré.
+    assert app._coverage_delivering_stages("selinene") == ["pfdh"]
+    # linalol : lost/kept/kept/kept -- tout sauf boil.
+    assert app._coverage_delivering_stages("linalool") == ["whirlpool", "afdh", "pfdh"]
+
+def test_coverage_delivering_stages_empty_for_a_compound_never_delivered():
+    # Composé hors périmètre T119 -- compound_survival renvoie None partout,
+    # jamais un stade fabriqué.
+    assert app._coverage_delivering_stages("limonene") == []
+
+def test_coverage_source_suggestions_already_in_plan_vs_real_examples(toy_cwd):
+    con = connect(os.path.join(os.getcwd(), "aromahops.db"))
+    hops, comp, _, _ = app.matching.load(con)
+    # hopa porte linalool=30 (seul houblon jouet avec un composé T119, voir
+    # _build_toy_db) -- déjà dans le plan mais au mauvais stade (boil=lost).
+    text = app._coverage_source_suggestions(hops, comp, "linalool", {"hopa"})
+    assert "already in your plan: Hopa" in text
+    assert "Whirlpool" in text and "AFDH" in text and "PFDH" in text
+    # 2026-08-30, retour utilisateur direct : "you should write where the
+    # source of this information [comes from]" -- provenance par houblon
+    # (source "toy" dans la fixture, voir _build_toy_db).
+    assert "Hopa (toy)" in text
+    # myrcène : jamais mesuré pour aucun houblon jouet -- ni "already in your
+    # plan" ni "real examples", repli honnête sur "no hop... has it measured".
+    text_myrcene = app._coverage_source_suggestions(hops, comp, "myrcene", {"hopa"})
+    assert "no hop in this database has it measured at all" in text_myrcene
+
+def test_coverage_source_suggestions_never_reaching_delivered_is_flagged_honestly():
+    # Composé synthétique hors T119 : _coverage_delivering_stages renvoie []
+    # -- phrase distincte, jamais une liste d'exemples fabriquée.
+    text = app._coverage_source_suggestions({}, {}, "limonene", set())
+    assert "never reaches \"Delivered\"" in text
+
+def test_coverage_shows_where_would_this_come_from_panel(toy_cwd):
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("coverage").run()
+    at.multiselect(key="coverage_hops").select("Hopa").run()
+    at.segmented_control(key="coverage_stage_hopa").set_value(["Boil"]).run()
+    assert not at.exception
+    assert any("Where would these come from" in m.value for m in at.markdown)
+    # linalol : mesuré chez hopa mais lost au boil -- doit apparaître comme
+    # "already in your plan", pas comme un composé sans piste.
+    assert any("Linalool" in c.value and "already in your plan: Hopa" in c.value
+              for c in at.caption)
