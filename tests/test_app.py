@@ -262,7 +262,7 @@ def test_app_loads_with_no_exception_default_home_mode(toy_cwd):
     # (h1, un seul par page, exigence de la spec).
     assert at.title[0].value == "Home"
     assert at.sidebar.radio[0].value == "home"
-    assert len(at.button) == 7  # T103 : "Hops for a style" ajouté aux 6 outils existants
+    assert len(at.button) == 8  # T117 : "Survivables" ajouté aux 7 outils existants
 
 def test_home_open_button_switches_to_target_mode(toy_cwd):
     at = _app()
@@ -918,6 +918,35 @@ def test_usage_share_db_values_collects_one_stage_across_varieties():
     assert app._usage_share_db_values(usage_all, "Aroma") == [0.6]
     assert sorted(app._usage_share_db_values(usage_all, "Boil")) == [0.4, 1.0]
 
+def test_survivable_compound_positions_all_matches_chemical_index_inputs():
+    # T117 : même socle que _chemical_earliness_index_all (T99), vérifié
+    # avec les mêmes chiffres que test_chemical_earliness_index_all_
+    # averages_quantile_rank_per_compound (0.75/1.0/0.25) pour garantir que
+    # le refactor n'a rien changé au calcul par composé.
+    comp = {
+        "hopx": {"linalool": {"mid": 10.0, "unit": "pct_oil"},
+                "geraniol": {"mid": 1.0, "unit": "pct_oil"}},
+        "hopy": {"linalool": {"mid": 2.0, "unit": "pct_oil"}},
+        "hopz": {},
+    }
+    hops = {"hopx": {}, "hopy": {}, "hopz": {}}
+    out = app._survivable_compound_positions_all(hops, comp)
+    assert set(out) == {"hopx", "hopy"}
+    assert out["hopx"] == {"linalool": pytest.approx(0.75), "geraniol": pytest.approx(1.0)}
+    assert out["hopy"] == {"linalool": pytest.approx(0.25)}
+
+def test_survivable_buckets_uses_terciles_among_covered_hops():
+    totals = {"a": 1.0, "b": 2.0, "c": 3.0, "d": 4.0, "e": 5.0, "f": 6.0}
+    out = app._survivable_buckets(totals)
+    assert out["a"] == "Low" and out["b"] == "Low"
+    assert out["c"] == "Medium" and out["d"] == "Medium"
+    assert out["e"] == "High" and out["f"] == "High"
+
+def test_survivable_buckets_degenerate_below_three_all_high():
+    # terciles n'ont pas de sens sous 3 valeurs -- tout le monde "High"
+    # plutôt qu'un tercile fabriqué sur trop peu de données.
+    assert app._survivable_buckets({"a": 1.0, "b": 2.0}) == {"a": "High", "b": "High"}
+
 def test_normalize_minmax_floors_the_true_database_minimum():
     # 2026-08-26, bug utilisateur : "if I enter Columbus and Nugget, without
     # normalization Columbus has a Thiol data, but with normalization we lose
@@ -1156,3 +1185,30 @@ def test_style_hops_falls_back_silently_without_typical_descriptors(toy_cwd):
     assert at.multiselect(key="style_hops_descriptors_10A").value == []
     assert any("Choose at least one typical descriptor" in m.value for m in at.markdown)
     assert not any("rarely used in this style" in s.value for s in at.subheader)
+
+def test_survivables_mode_shows_per_compound_coverage_and_only_covered_hops(toy_cwd):
+    # T117 : hopa (linalool=30, ajouté pour T99) est le SEUL houblon jouet
+    # avec un des 4 composés survivables -- 1/5 houblons couverts, le
+    # reste (hopb/hopc/twina/twinb) jamais compté comme 0.
+    from streamlit.testing.v1.element_tree import UnknownElement
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("survivables").run()
+    assert not at.exception
+    assert any("1 of 5 hops" in c.value for c in at.caption)
+    assert any("Linalool 1/5" in c.value and "Geraniol 0/5" in c.value
+              for c in at.caption)
+    # un seul houblon couvert -> cas dégénéré (< 3 valeurs), tercile
+    # impossible -> "High" par défaut (voir _survivable_buckets).
+    assert at.pills(key="survivables_bucket_filter").value == ["High", "Medium", "Low"]
+    assert len([n for n in at.main if isinstance(n, UnknownElement)]) >= 1
+
+def test_survivables_mode_filters_by_bucket(toy_cwd):
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("survivables").run()
+    at.pills(key="survivables_bucket_filter").set_value(["Low"]).run()
+    assert not at.exception
+    # hopa (seul houblon couvert) est en "High" (cas dégénéré) -> absent du
+    # filtre "Low" seul seulement -- message honnête, pas un graphique vide.
+    assert any("No hop in the selected bucket" in m.value for m in at.markdown)

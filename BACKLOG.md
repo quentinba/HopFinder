@@ -2145,7 +2145,7 @@ Mais la transparence doit être RÉELLE, pas un simple adverbe :
   actée en D2 — on abandonne comme socle systématique et on part sur l'indice
   dérivé. Ticket clos, conservé pour ne pas refaire l'exploration.
 
-- [ ] **T117 — Onglet « Survivables » sur indice dérivé** *(D2 tranchée)*
+- [x] **T117 — Onglet « Survivables » sur indice dérivé** *(D2 tranchée)*
   Repris de l'onglet SURVIVABLE du site russe, mais **sans aucune donnée
   reconstruite** : classement des houblons par un indice de survivabilité
   calculé sur **nos propres mesures** — linalol, géraniol, `isobutyrate`
@@ -2165,6 +2165,52 @@ Mais la transparence doit être RÉELLE, pas un simple adverbe :
   ⚠ Le **méthyl géranate**, pourtant le composé le plus abondant des
   survivables sur les 3 lots testés (346-689), n'est couvert par **aucun** de
   nos agrégats — l'indice a un trou connu, à afficher.
+
+  **Compte rendu (2026-08-29)** : nouveau mode `app._survivables`
+  (`MODE_LABELS["survivables"]`). Socle chimique FACTORISÉ avec T99 :
+  `app._chemical_earliness_index_all` (T99, MOYENNE par composé) a été
+  scindé pour extraire `app._survivable_compound_positions_all` (rang
+  quantile PAR composé, `{variety: {compound: rang}}`), réutilisé tel
+  quel par T99 (moyenne) et T117 (SOMME, barres empilées) -- même
+  normalisation calculée une seule fois, jamais deux implémentations
+  divergentes du même signal. Vérifié que le refactor ne change rien au
+  calcul (`test_survivable_compound_positions_all_matches_chemical_index_
+  inputs`, mêmes valeurs 0.75/1.0/0.25 que le test T99 existant).
+
+  Paliers Haute/Moyenne/Basse : **terciles du total (somme) PARMI les
+  houblons réellement couverts** (`app._survivable_buckets`), jamais un
+  seuil absolu inventé — même logique DB-relative que la divergence de T99.
+  Cas dégénéré (< 3 houblons couverts) : tout le monde "High" (un tercile
+  n'a pas de sens en dessous de 3 valeurs). Couverture réelle vérifiée en
+  direct sur `aromahops.db` : **170/189 houblons couverts** (au moins un
+  des 4 composés), détail par composé Linalool 169/189, Géraniol 160/189,
+  Isobutyrate 31/189, Thiols 22/189 — exactement les chiffres cités par le
+  ticket, jamais un houblon sans aucune des 4 mesures affiché.
+
+  ⚠ **Piège Vega-Lite réel trouvé en vérification live** (zoom sur le
+  graphique réel, capture montrant des barres PLUS HAUTES que leurs
+  voisines de GAUCHE malgré `sort=alt.SortField(field="total",
+  order="descending")`) : `rows` porte PLUSIEURS lignes par houblon (une
+  par composé mesuré), et Vega-Lite agrège le champ de tri par SOMME par
+  défaut quand aucun `op` n'est précisé — `alt.SortField` de cette version
+  d'Altair n'expose PAS de paramètre `op` (contrairement au schéma
+  Vega-Lite brut, vérifié par `SchemaValidationError` en direct) — un
+  houblon à 4 composés mesurés voyait donc son total sommé 4 fois contre 1x
+  pour un houblon à 1 seul composé, inversant l'ordre. Corrigé en passant
+  directement la liste PYTHON déjà triée comme domaine `sort` (`sort=
+  hop_order`) plutôt qu'un champ à agréger côté Vega-Lite — aucune
+  ambiguïté d'agrégation possible sur une liste explicite. Reverifié en
+  direct (zoom) : strictement décroissant de Mosaic (3.0) au reste.
+
+  Couleurs des 4 composés : 4 teintes de `_COMPARE_PALETTE` (denim/sauge/
+  ochre/prune), EN ÉVITANT la terracotta (réservée à "interaction/
+  cliquable" ailleurs dans la GUI). Largeur du graphique proportionnelle au
+  nombre de houblons affichés (jusqu'à ~170), même logique "délibérément
+  large/défilant" que le barplot détaillé de Compare Hops.
+  356 tests passent (+5). Vérifié en direct (Chrome, clair, base réelle) :
+  chart, filtre High/Medium/Low fonctionnel (rescale bien l'axe Y en
+  excluant High). Aucune modification d'`aromahops.db` — pas de push
+  HopFinder-db nécessaire.
 
 - [ ] **T119 — Matrice composé × stade de procédé**
 
