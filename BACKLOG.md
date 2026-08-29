@@ -2266,18 +2266,39 @@ Mais la transparence doit être RÉELLE, pas un simple adverbe :
     lossless (comptages avant/après par table). **Push HopFinder-db
     nécessaire** (seule modification de données de ce batch T100/T117/
     T102/T129 -- voir CLAUDE.md "Doublons de houblons audités").
-  - **Indicateur de purpose (aromatic/bittering)** : triangle au-dessus de
-    chaque colonne, coloré par `matching.resolve_purpose` (même résolution
-    que `_purpose_badge` partout ailleurs, préfixe "Inferred:" si estimé
-    depuis l'acide alpha) -- MÊME palette sauge/terracotta/gris que les
-    badges de purpose existants, résolue par thème (Vega-Lite ne lit pas
-    `light-dark()` CSS). Houblon à purpose inconnu : triangle transparent
-    (`#00000000`), jamais un marqueur fabriqué. `purpose_label` ajouté
-    aussi au tooltip de chaque segment de barre (pas seulement le
-    triangle), pour rester visible même sans viser précisément le triangle.
-    Vérifié en direct (zoom) : triangles sauge/terracotta bien positionnés,
-    légende "Purpose" apparaît à droite du graphique (même comportement que
-    la légende "Compound" déjà existante, wide/défilant).
+  - **Indicateur de purpose (aromatic/bittering)** : marqueur au-dessus de
+    chaque colonne, résolu par `matching.resolve_purpose` (même résolution
+    que `_purpose_badge` partout ailleurs). Design final après DEUX
+    itérations en direct sur retour utilisateur :
+    1. 1er essai : triangle unique, couleur = purpose (sauge/terracotta/
+       gris, palette `_purpose_badge`, résolue par thème).
+    2. **Retour** : "use a circle for aromatic and a triangle for
+       bittering. Use grey for infered and black for known... merge (only
+       for displaying) Both together with aromatic" -- refonte complète :
+       **FORME** = aromatic (cercle) / bittering (triangle), **COULEUR** =
+       confiance (connu vs inféré). "Both" (70/189 houblons réels -- existe
+       bel et bien, contrairement au doute de l'utilisateur) FONDU dans
+       "aromatic" pour CET AFFICHAGE seulement (raison donnée : un houblon
+       dual-purpose est en pratique le plus souvent utilisé pour l'arôme,
+       trop cher pour de l'amérisation pure, ex. Citra) -- `hops.purpose`
+       brut inchangé en base, "Both" reste intact partout ailleurs (badges,
+       tableaux). Houblon à purpose inconnu : AUCUNE ligne dans les données
+       du marqueur (pas de transparent fabriqué comme le 1er essai).
+    3. **2e retour, deux passes** : "black and grey" rendu comme encre
+       `light-dark()` du texte principal (noir clair / blanc sombre) --
+       correct par thème mais pas voulu ("I see white and grey... let's
+       manage the theme variable... white for known and lightgrey for
+       infered"). Blanc/gris clair fixes essayés, TOUJOURS insuffisant
+       ("white and grey is not working... find two colors that contrast
+       well with both beige and grey but that are not confusing with the
+       barplot colors") -- design **FINAL** : brique `#a4383a` (connu) /
+       sarcelle `#2f7a78` (inféré), les deux seules familles de teinte
+       encore libres sur le cercle chromatique Organic (les 4 composés
+       occupent déjà denim/sauge/ochre/prune), contour sombre fixe
+       (`stroke`) pour la netteté des formes. `purpose_label` ajouté aussi
+       au tooltip de chaque segment de barre (pas seulement le marqueur),
+       pour rester visible même sans viser précisément le marqueur.
+       Vérifié en direct (clair ET sombre) après chaque itération.
   362 tests passent au total après ces 3 addenda.
 
 - [ ] **T119 — Matrice composé × stade de procédé**
