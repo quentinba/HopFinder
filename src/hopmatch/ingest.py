@@ -168,21 +168,36 @@ def merge_hop_varieties(con, keep: str, drop: str) -> None:
     """Fusionne DEUX clés `variety` déjà présentes en base sous une seule
     (`keep`) -- réparation ponctuelle pour les houblons split AVANT ce
     correctif (`_find_variety_by_name_region` ne joue qu'à l'ingestion,
-    jamais rétroactivement sur des lignes déjà écrites). Utilisé une seule
-    fois (2026-08-19) pour les 5 paires réelles trouvées sur la base
-    existante : Challenger, Fuggle, Hallertauer Tradition, Hersbrucker Spät,
-    Target -- voir `tools/merge_duplicate_hops.py`.
+    jamais rétroactivement sur des lignes déjà écrites). Utilisé une
+    première fois (2026-08-19) pour les 5 paires trouvées à l'époque
+    (Challenger, Fuggle, Hallertauer Tradition, Hersbrucker Spät, Target --
+    voir `tools/merge_duplicate_hops.py`), puis étendue (2026-08-29,
+    signalé par l'utilisateur en direct sur l'onglet Survivables -- barres
+    "Dolcita"/"Perle Germany" mal ordonnées) aux 4 tables T85-T88 qui
+    n'existaient pas encore au premier passage (`hop_usage_stats`,
+    `hop_beer_styles`, `style_hop_usage`, `style_hop_pairings`) : 2
+    nouvelles paires réelles trouvées (Dolcita US, Perle Germany), toutes
+    deux avec des lignes orphelines dans au moins une de ces 4 tables que
+    l'ancienne version de cette fonction aurait silencieusement perdues
+    (ni migrées vers `keep`, ni supprimées avec `drop` -- restées
+    référencer une `variety` disparue de `hops`). Root cause de CES deux
+    paires spécifiques non élucidée avec certitude (le garde-fou
+    `_find_variety_by_name_region` est appelé symétriquement par les deux
+    crawlers et semble correct à la lecture) -- traité comme les 5
+    précédentes, en réparation rétroactive plutôt qu'en correctif
+    d'ingestion, faute d'avoir pu reproduire la séquence exacte
+    d'ingestion historique.
 
     Déplace TOUTES les tables référençant `variety` (composition,
     descripteurs, roue d'arôme, associations houblon<->houblon dans les DEUX
-    sens) vers `keep`, fusionne `sources` (union) et `purpose`
+    sens, usage par étape de procédé et par style, styles éditoriaux)
+    vers `keep`, fusionne `sources` (union) et `purpose`
     (`COALESCE(keep, drop)` -- un seul des deux avait une valeur réelle dans
     les 5 cas vérifiés, jamais un conflit à trancher), puis supprime la ligne
-    `drop`. `INSERT OR IGNORE` partout où la clé primaire inclut `variety`
-    (évite un conflit si `keep` a par hasard déjà une ligne pour le même
-    (compound/descriptor/source) que `drop` -- ne devrait pas arriver entre
-    deux sources différentes vu le schéma EAV par source, mais reste un
-    filet de sécurité plutôt qu'un crash)."""
+    `drop`. `INSERT OR IGNORE`/`UPDATE OR IGNORE` partout (évite un conflit
+    si `keep` a par hasard déjà une ligne pour la même clé que `drop` -- ne
+    devrait pas arriver entre deux sources différentes vu le schéma EAV par
+    source, mais reste un filet de sécurité plutôt qu'un crash)."""
     if keep == drop:
         return
     if not con.execute("SELECT 1 FROM hops WHERE variety=?", (drop,)).fetchone():
@@ -216,6 +231,24 @@ def merge_hop_varieties(con, keep: str, drop: str) -> None:
         "substitute_variety, source FROM hop_substitutions WHERE variety=?", (keep, drop))
     con.execute("UPDATE hop_substitutions SET substitute_variety=? WHERE substitute_variety=?",
                (keep, drop))
+    # T85-T88 (beer-analytics.com, épique B) : ajoutées après le premier
+    # passage de cette fonction (2026-08-19), voir docstring. `hop_usage_
+    # stats`/`hop_beer_styles` ont `variety` dans leur clé primaire (même
+    # schéma INSERT OR IGNORE + DELETE que les 6 tables ci-dessus).
+    # `style_hop_usage`/`style_hop_pairings` clés sur (style_slug, hop_name,
+    # ...) SANS `variety` -- un simple UPDATE suffit, `OR IGNORE` en filet
+    # de sécurité si jamais `keep` ET `drop` avaient chacun une ligne pour
+    # la même clé primaire (non observé sur les 2 paires réelles traitées
+    # ici, mais pas structurellement impossible).
+    con.execute(
+        "INSERT OR IGNORE INTO hop_usage_stats SELECT ?, hop_name, use_type, recipes_count, "
+        "amount_q1, amount_median, amount_q3, source, fetched_at "
+        "FROM hop_usage_stats WHERE variety=?", (keep, drop))
+    con.execute(
+        "INSERT OR IGNORE INTO hop_beer_styles SELECT ?, style_label, style_id, source "
+        "FROM hop_beer_styles WHERE variety=?", (keep, drop))
+    con.execute("UPDATE OR IGNORE style_hop_usage SET variety=? WHERE variety=?", (keep, drop))
+    con.execute("UPDATE OR IGNORE style_hop_pairings SET variety=? WHERE variety=?", (keep, drop))
 
     srcs = sorted(set(keep_row["sources"].split(",")) | set(drop_row["sources"].split(",")))
     purpose = keep_row["purpose"] if keep_row["purpose"] is not None else drop_row["purpose"]
@@ -223,9 +256,12 @@ def merge_hop_varieties(con, keep: str, drop: str) -> None:
                (",".join(srcs), purpose, keep))
 
     for table in ("hop_composition", "hop_descriptors", "hop_aroma_intensity",
-                  "hop_similar", "hop_pairings", "hop_substitutions"):
+                  "hop_similar", "hop_pairings", "hop_substitutions",
+                  "hop_usage_stats", "hop_beer_styles"):
         con.execute(f"DELETE FROM {table} WHERE variety=?", (drop,))
     con.execute("DELETE FROM hop_similar WHERE similar_variety=?", (drop,))
+    con.execute("DELETE FROM style_hop_usage WHERE variety=?", (drop,))
+    con.execute("DELETE FROM style_hop_pairings WHERE variety=?", (drop,))
     con.execute("DELETE FROM hops WHERE variety=?", (drop,))
 
 

@@ -224,6 +224,14 @@ _TOOL_SUMMARY_BY_MODE = {t["mode"]: t for t in _TOOL_SUMMARIES}
 # un `git log` en direct exigerait aussi que `.git` soit présent dans le
 # conteneur déployé, ce qui n'est pas garanti.
 _RECENT_UPDATES = [
+    ("2026-08-29", "Survivables now shows every hop name on the x-axis "
+                   "(no more silently thinned labels), and a small "
+                   "triangle above each bar flags whether the hop is "
+                   "aromatic or bittering (sage/terracotta, same colors "
+                   "as the purpose badge elsewhere) -- also in the "
+                   "tooltip, hidden entirely when purpose is unknown. "
+                   "Also fixed two real duplicate hop entries (Dolcita, "
+                   "Perle Germany) that were causing misordered bars."),
     ("2026-08-29", "Compare hops gained a \"Blend Explorer\" card (2+ hops "
                    "selected): stacks the same 4 survivable compounds as "
                    "Survivables/Recommended usage, one bar per compound, "
@@ -5748,8 +5756,18 @@ def _survivables(con) -> None:
         return
     shown.sort(key=lambda v: -totals[v])
 
+    # Purpose (2026-08-29, retour utilisateur explicite : "it would be nice
+    # to see if the hop is aromatic or bittering") -- MÊME résolution que
+    # partout ailleurs dans la GUI (`matching.resolve_purpose`, préfixe
+    # "Inferred:" si estimé depuis l'acide alpha, jamais présenté au même
+    # niveau qu'un purpose BeerMaverick réel). Ajouté au tooltip de CHAQUE
+    # segment (pas seulement le triangle ci-dessous) pour rester visible dès
+    # qu'on survole n'importe quelle barre.
+    purpose_by_variety = {v: matching.resolve_purpose(hops[v].get("purpose"), comp.get(v, {}))
+                          for v in shown}
     rows = [
-        {"hop": hops[v]["name"], "compound": _SURVIVABLE_COMPOUND_LABELS[c], "value": pos}
+        {"hop": hops[v]["name"], "compound": _SURVIVABLE_COMPOUND_LABELS[c], "value": pos,
+         "purpose_label": _purpose_label(*purpose_by_variety[v])}
         for v in shown for c, pos in positions_all[v].items()]
     # Largeur proportionnelle au nombre de houblons affichés (jusqu'à ~170) --
     # même logique "délibérément large/défilant" que le barplot détaillé de
@@ -5769,17 +5787,59 @@ def _survivables(con) -> None:
     # des noms (déjà triée en Python ci-dessus) comme domaine `sort` --
     # aucune agrégation Vega-Lite ambiguë possible sur une liste explicite.
     hop_order = [hops[v]["name"] for v in shown]
-    chart = alt.Chart(alt.Data(values=rows)).mark_bar().encode(
-        x=alt.X("hop:N", sort=hop_order,
-               title=None, axis=alt.Axis(labelAngle=_COMPARE_LABEL_ANGLE)),
+    # `labelOverlap=False` (2026-08-29, retour utilisateur explicite : "je
+    # voudrais que tu affiches TOUS LES NOMS DES HOUBLONS SUR L'AXE X") --
+    # Vega-Lite éclaircit silencieusement les libellés d'un axe nominal à
+    # forte cardinalité par défaut (`labelOverlap` implicite), masquant la
+    # plupart des ~170 noms malgré la rotation à -45°. `chart_width` déjà
+    # dimensionné pour ~170 barres (voir plus haut) laisse la place réelle
+    # nécessaire ; le graphique reste défiler horizontalement (`width=
+    # "content"`), pas de recouvrement au final.
+    bars = alt.Chart(alt.Data(values=rows)).mark_bar().encode(
+        x=alt.X("hop:N", sort=hop_order, title=None,
+               axis=alt.Axis(labelAngle=_COMPARE_LABEL_ANGLE, labelOverlap=False)),
         y=alt.Y("value:Q", title="Summed quantile rank (stacked)"),
         color=alt.Color("compound:N", title="Compound",
                         scale=alt.Scale(domain=list(_SURVIVABLE_COMPOUND_COLORS),
                                        range=list(_SURVIVABLE_COMPOUND_COLORS.values()))),
-        tooltip=["hop:N", "compound:N", alt.Tooltip("value:Q", format=".2f", title="Rank")],
-    ).properties(width=chart_width, height=420)
+        tooltip=["hop:N", "compound:N", alt.Tooltip("value:Q", format=".2f", title="Rank"),
+                "purpose_label:N"],
+    )
+    # Triangle "flag" au-dessus de chaque colonne, coloré par purpose --
+    # MÊME palette que `_purpose_badge` ailleurs dans la GUI (aromatic=sauge,
+    # bittering=terracotta, both=gris neutre), résolue par thème comme les
+    # autres graphiques (Vega-Lite ne peut pas lire `light-dark()` CSS). Une
+    # ligne PAR HOUBLON (pas par composé, contrairement à `rows`) -- sinon un
+    # houblon à 4 composés porterait 4 triangles superposés pour rien.
+    dark = st.context.theme.type == "dark"
+    purpose_hex = {"aromatic": "#aebf92" if dark else "#7f9455",
+                  "bittering": "#f6a06b" if dark else "#c67139",
+                  "both": "#a39c8f" if dark else "#82796a"}
+    purpose_domain = ["Aromatic", "Bittering", "Both", "Inferred: Aromatic",
+                      "Inferred: Bittering", "Unknown"]
+    purpose_range = [purpose_hex["aromatic"], purpose_hex["bittering"], purpose_hex["both"],
+                     purpose_hex["aromatic"], purpose_hex["bittering"], "#00000000"]
+    flag_rows = [
+        {"hop": hops[v]["name"], "purpose_label": _purpose_label(*purpose_by_variety[v]),
+         "top": totals[v] + max(totals.values()) * 0.04}
+        for v in shown]
+    flags = alt.Chart(alt.Data(values=flag_rows)).mark_point(
+        shape="triangle", size=70, filled=True, opacity=0.9,
+    ).encode(
+        x=alt.X("hop:N", sort=hop_order),
+        y=alt.Y("top:Q"),
+        color=alt.Color("purpose_label:N", title="Purpose",
+                        scale=alt.Scale(domain=purpose_domain, range=purpose_range)),
+        tooltip=["hop:N", "purpose_label:N"],
+    )
+    chart = (bars + flags).resolve_scale(color="independent").properties(
+        width=chart_width, height=440)
     with _panel():
         st.altair_chart(chart, width="content")
+        st.caption(
+            "Triangle above each bar = purpose (BeerMaverick when known, otherwise "
+            "estimated from alpha acid — see the \"Purpose\" legend). No triangle = "
+            "unknown, not fabricated.")
 
 
 def main():
