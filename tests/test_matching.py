@@ -1519,6 +1519,24 @@ def test_ingredient_descriptors_keys_and_terms_match_real_vocabulary(db):
             for t in terms:
                 assert t in real_desc_prod, (ingredient, t)
 
+def test_descriptor_families_keys_match_real_vocabulary(db):
+    # T129 (2026-08-29) : garde-fou explicitement demandé par le ticket --
+    # "toute clé de reference.DESCRIPTOR_FAMILIES existe réellement dans le
+    # vocabulaire hop_descriptors". Un seul sens (clés ⊆ vocabulaire), PAS
+    # l'inverse -- contrairement à INGREDIENT_DESCRIPTORS ci-dessus, le
+    # ticket ne demande pas une couverture à 100% obligatoire : un futur mot
+    # ingéré (nouveau crawl) doit rester utilisable dans le sélecteur plat
+    # existant sans faire échouer ce test avant d'être trié à la main.
+    assert all(isinstance(v, str) and v.strip() for v in reference.DESCRIPTOR_FAMILIES.values())
+    import os
+    real_db_path = os.path.join(os.path.dirname(__file__), "..", "aromahops.db")
+    if os.path.exists(real_db_path):
+        from hopmatch.schema import connect
+        real_con = connect(real_db_path)
+        real_desc_prod = {r[0] for r in real_con.execute("SELECT DISTINCT descriptor FROM hop_descriptors")}
+        for descriptor, family in reference.DESCRIPTOR_FAMILIES.items():
+            assert descriptor in real_desc_prod, (descriptor, family)
+
 def test_descriptor_sources_groups_by_variety_and_descriptor(db):
     # T77 (2026-08-22, demande utilisateur explicite -- confusion vérifiée
     # en direct sur "enigma" en production : "berry"/"raspberry" venaient

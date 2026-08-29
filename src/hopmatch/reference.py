@@ -176,6 +176,136 @@ DESCRIPTOR_ALIASES: dict[str, str] = {
     "pomme": "apple",
 }
 
+# T129 (2026-08-29) : familles d'arôme comme filtre facetté -- taxonomie
+# d'AFFICHAGE pour trier plus vite dans le sélecteur de descripteurs (`by-
+# descriptor`), RIEN côté données/scoring. Modèle librement adapté de
+# l'idée du Каталог (Catalog) de hop-finder.vercel.app (9 familles larges),
+# PAS recopié mot pour mot -- leur liste est en russe, sur leur propre
+# vocabulaire. Jugement direct de l'assistant (comme `INGREDIENT_
+# DESCRIPTORS`, T76) puis VALIDÉ par l'utilisateur après trois revues
+# externes contradictoires (voir historique du ticket) -- jamais dérivé
+# automatiquement (même règle que les descripteurs FooDB, déjà rejetés deux
+# fois : voir CLAUDE.md).
+#
+# Rejeté explicitement : un axe chimique/provenance (thiol, ester,
+# Maillard... + hop/levure/malt) proposé par une des trois revues. Ce
+# projet a déjà retiré `combine()` (NNLS) pour dégénérescence sur données
+# éparses -- un modèle de similarité chimique pondérée toucherait le même
+# mur. Et la "provenance" est une erreur de catégorie ici : `hop_
+# descriptors` dit à quoi un HOUBLON ressemble, par analogie -- "banana"
+# ou "butter" sur un houblon n'affirme pas que ce houblon a fermenté.
+#
+# `fruity`/`sweet aromatic` (37 et 12 houblons réels, vérifié) ne sont pas
+# des familles olfactives -- des hyperonymes génériques ("à quel point
+# c'est précis", pas "à quoi ça ressemble"). Rangés sous "Generic" plutôt
+# que retirés : un mot sans famille deviendrait invisible dès qu'un
+# sélecteur à deux niveaux (famille -> mot) remplace la liste plate
+# actuelle -- même principe que "jamais un houblon caché sans action
+# explicite" (T108).
+#
+# Couverture actuelle : les 138 termes réels de `hop_descriptors` ont
+# chacun une entrée (vérifié à l'écriture) -- mais le garde-fou ci-dessous
+# (`test_descriptor_families_keys_match_real_vocabulary`) ne vérifie QUE
+# les clés contre le vocabulaire, jamais l'inverse (le ticket ne demande
+# pas une couverture à 100% obligatoire) : un futur mot ingéré (nouveau
+# crawl BarthHaas/BeerMaverick) reste utilisable tel quel dans le
+# sélecteur plat existant sans faire échouer les tests, jusqu'à ce qu'il
+# soit trié ici à la main.
+DESCRIPTOR_FAMILIES: dict[str, str] = {
+    # -- Tropical (banana/coconut gardés ici par l'ODEUR qu'ils délivrent à
+    # un brasseur qui filtre par famille, pas par botanique/chimie -- une
+    # des trois revues voulait les déplacer vers "fermentation-derived",
+    # option écartée : voir la note sur la provenance ci-dessus) --
+    "banana": "Tropical", "coconut": "Tropical", "guava": "Tropical",
+    "kiwi": "Tropical", "lychee": "Tropical", "mango": "Tropical",
+    "papaya": "Tropical", "passion fruit": "Tropical", "pineapple": "Tropical",
+    "tropical": "Tropical",
+    # -- Melon (scindé de Tropical -- caractère cucurbitacée distinct,
+    # vocabulaire hop-marketing réel : Huell Melon, Hallertau Blanc) --
+    "honeydew": "Melon", "melon": "Melon", "watermelon": "Melon",
+    # -- Citrus (lemon balm/lemongrass/marmalade gardés ici par l'odeur --
+    # botaniquement des herbes/une préparation, mais sentent l'agrume) --
+    "bergamot": "Citrus", "citrus": "Citrus", "grapefruit": "Citrus",
+    "lemon": "Citrus", "lemon balm": "Citrus", "lemongrass": "Citrus",
+    "lime": "Citrus", "mandarin": "Citrus", "marmalade": "Citrus",
+    "orange": "Citrus", "pomelo": "Citrus", "tangerine": "Citrus",
+    # -- Berry (gardée en un seul bloc -- un découpage baie sombre/rouge a
+    # semblé plus granulaire qu'utile pour un sélecteur) --
+    "berry": "Berry", "black currant": "Berry", "blackberry": "Berry",
+    "blueberry": "Berry", "cranberry": "Berry", "elderberry": "Berry",
+    "gooseberry": "Berry", "loganberry": "Berry", "raspberry": "Berry",
+    "redberry": "Berry", "redcurrant": "Berry", "strawberry": "Berry",
+    # -- Stone fruit (10/10 dans les trois revues, inchangée) --
+    "apricot": "Stone fruit", "cherry": "Stone fruit", "peach": "Stone fruit",
+    "plum": "Stone fruit", "stone fruit": "Stone fruit",
+    # -- Pome fruit (NOUVELLE -- les trois revues ont signalé ce trou :
+    # apple/pear/quince n'avaient nulle part où aller) --
+    "apple": "Pome fruit", "pear": "Pome fruit", "quince": "Pome fruit",
+    # -- Floral (déjà solide selon les trois revues, inchangée) --
+    "apple blossom": "Floral", "blossom": "Floral", "camomile blossom": "Floral",
+    "carnation": "Floral", "chamomile": "Floral", "elderflower": "Floral",
+    "floral": "Floral", "geranium": "Floral", "hibiscus": "Floral",
+    "jasmine": "Floral", "lavender": "Floral", "lilac": "Floral",
+    "lily of the valley": "Floral", "magnolia": "Floral", "potpourri": "Floral",
+    "rose": "Floral",
+    # -- Herbal (herbes culinaires + thé + menthol/cooling gardés ensemble --
+    # les revues voulaient jusqu'à 3 familles séparées ici, jugé plus
+    # granulaire que ce qu'un sélecteur GUI apporte) --
+    "basil": "Herbal", "coriander": "Herbal", "dill": "Herbal",
+    "green tea": "Herbal", "hay": "Herbal", "herbal": "Herbal",
+    "lovage": "Herbal", "marjoram": "Herbal", "mate tea": "Herbal",
+    "menthol": "Herbal", "mint": "Herbal", "oregano": "Herbal",
+    "rosemary": "Herbal", "sage": "Herbal", "tarragon": "Herbal",
+    "tea": "Herbal", "thyme": "Herbal",
+    # -- Green / vegetal (NOUVELLE -- scindée de Herbal : caractère
+    # végétal/cru, pas assaisonnement culinaire) --
+    "artichoke": "Green / vegetal", "celeriac": "Green / vegetal",
+    "cucumber": "Green / vegetal", "grassy": "Green / vegetal",
+    "green pepper": "Green / vegetal", "leek": "Green / vegetal",
+    "nettle": "Green / vegetal", "tomato leaves": "Green / vegetal",
+    # -- Spicy (fennel déplacé depuis Herbal -- même caractère anéthole
+    # qu'anise/licorice) --
+    "anise": "Spicy", "black pepper": "Spicy", "chilli": "Spicy",
+    "cinnamon": "Spicy", "clove": "Spicy", "curry": "Spicy",
+    "fennel": "Spicy", "ginger": "Spicy", "licorice": "Spicy",
+    "nutmeg": "Spicy", "pepper": "Spicy", "spicy": "Spicy",
+    # -- Resinous / woody (dank/eucalyptus gardés ici -- usage hop-marketing
+    # standard, malgré une des revues qui voulait un découpage conifère/
+    # oxydatif/terreux à 3 familles) --
+    "cedar": "Resinous / woody", "dank": "Resinous / woody",
+    "earthy": "Resinous / woody", "eucalyptus": "Resinous / woody",
+    "incense": "Resinous / woody", "juniper": "Resinous / woody",
+    "leather": "Resinous / woody", "oak": "Resinous / woody",
+    "pine": "Resinous / woody", "resinous": "Resinous / woody",
+    "tobacco": "Resinous / woody", "woody": "Resinous / woody",
+    # -- Sweet / dessert (woodruff ajouté -- même famille coumarine que
+    # tonka bean ; dark fruit/dried fruit/fig gardés ici plutôt qu'une
+    # famille "fruit séché" à part, jugée trop mince à 3 mots) --
+    "bubblegum": "Sweet / dessert", "candied fruit": "Sweet / dessert",
+    "candy": "Sweet / dessert", "caramel": "Sweet / dessert",
+    "chocolate": "Sweet / dessert", "dark fruit": "Sweet / dessert",
+    "dried fruit": "Sweet / dessert", "fig": "Sweet / dessert",
+    "gingerbread": "Sweet / dessert", "honey": "Sweet / dessert",
+    "molasses": "Sweet / dessert", "nectar": "Sweet / dessert",
+    "toffee": "Sweet / dessert", "tonka bean": "Sweet / dessert",
+    "vanilla": "Sweet / dessert", "woodruff": "Sweet / dessert",
+    # -- Vinous / wine (NOUVELLE -- unanime dans les trois revues :
+    # vocabulaire Nelson Sauvin/Hallertau Blanc, n'avait nulle part où
+    # aller) --
+    "cognac": "Vinous / wine", "grapes": "Vinous / wine",
+    "sauvignon blanc": "Vinous / wine", "white wine": "Vinous / wine",
+    "wine": "Vinous / wine",
+    # -- Alliaceous / sulfur (NOUVELLE -- seulement 2 mots mais caractère
+    # chimique/sensoriel réellement distinct, propre au houblon) --
+    "garlic": "Alliaceous / sulfur", "onion": "Alliaceous / sulfur",
+    # -- Dairy / creamy (NOUVELLE -- signalée par les trois revues) --
+    "butter": "Dairy / creamy", "cream": "Dairy / creamy",
+    "yoghurt": "Dairy / creamy",
+    # -- Generic (hyperonymes, pas des familles olfactives -- voir
+    # commentaire au-dessus du dict) --
+    "fruity": "Generic", "sweet aromatic": "Generic",
+}
+
 # Définitions des 15 catégories (+1, "menthol", ajoutée en T79 -- voir plus
 # bas) de la roue d'arôme quantitative Yakima
 # (`hop_aroma_intensity`, T26) -- demande utilisateur explicite (2026-08-19) :

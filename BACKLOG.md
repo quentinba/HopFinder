@@ -2494,6 +2494,54 @@ Mais la transparence doit être RÉELLE, pas un simple adverbe :
   `hop_descriptors` — même principe que
   `test_ingredient_descriptors_keys_and_terms_match_real_vocabulary`.
 
+  **Compte rendu partiel (2026-08-29) — `reference.py` câblé, GUI PAS
+  encore faite.** Répartition initiale (9 familles, ~8-10 cible) présentée
+  à l'utilisateur, puis soumise à TROIS revues externes contradictoires
+  demandées par l'utilisateur avant validation. Arbitrage explicite :
+  - **Rejeté** l'axe chimique/provenance proposé par une revue (tag
+    thiol/ester/Maillard + source hop/levure/malt/bois, similarité
+    pondérée) — système différent et plus large qu'une taxonomie
+    d'affichage, retombe sur les mêmes murs déjà rencontrés par ce projet
+    (`combine()`/NNLS retiré pour dégénérescence sur données éparses ;
+    dérivation FooDB rejetée deux fois) et une erreur de catégorie pour un
+    vocabulaire houblon-only (`hop_descriptors` dit à quoi un HOUBLON
+    ressemble par analogie, pas ce qui l'a produit).
+  - **Accepté** les corrections de frontière convergentes (2-3/3 revues) :
+    nouvelles familles Pome fruit, Melon, Vinous/wine, Alliaceous/sulfur,
+    Dairy/creamy ; Herbal (26 mots, "dumping ground" unanime) scindée en
+    Herbal + Green/vegetal ; fennel → Spicy ; woodruff → Sweet/dessert.
+  - **Arbitrages gardés contre les revues**, signalés à l'utilisateur :
+    banana/coconut restent Tropical, lemon balm/lemongrass/marmalade
+    restent Citrus (ce sont ce que ces mots SENTENT pour un sélecteur GUI,
+    pas leur botanique/chimie) ; pas de famille "dried/dark fruit" séparée
+    (3 mots, jugé trop mince) ; Herbal pas subdivisée davantage
+    (tea/mint/cooling).
+  - **`fruity`/`sweet aromatic`** (37 et 12 houblons réels — vérifié, pas
+    théorique) : question explicite de l'utilisateur après la 1ère revue
+    de l'artefact ("dropping them or single category?"). Décision : ni
+    l'un ni l'autre — nouvelle famille **Generic** (hyperonymes, pas des
+    familles olfactives) plutôt que retirés, pour ne jamais devenir
+    invisibles le jour où le sélecteur passe à deux niveaux.
+
+  Revue faite via un artefact HTML dédié (16 cartes-familles, mots
+  "contestés" marqués en pointillés, republié 2 fois pendant l'itération)
+  plutôt qu'un mur de texte — validé par l'utilisateur ("go ahead and wire
+  it in reference.py").
+
+  **`reference.DESCRIPTOR_FAMILIES` écrit** : 138/138 clés (couverture
+  complète vérifiée en direct sur `aromahops.db`, bien que le garde-fou
+  n'exige que clés ⊆ vocabulaire, jamais l'inverse — un futur mot ingéré
+  reste utilisable dans le sélecteur plat existant sans faire échouer le
+  test). 16 familles au total (15 olfactives + Generic). 363 tests
+  passent (+1, `test_descriptor_families_keys_match_real_vocabulary`).
+
+  ⚠ **Reste à faire** : câblage GUI (`by-descriptor`, premier niveau par
+  famille avant les pills existantes) — pas fait dans cette passe, la
+  demande utilisateur portait explicitement sur `reference.py` seul. Le
+  point Browse (liste filtrable) reste conditionné à la question déjà
+  posée par le ticket : Browse n'a aujourd'hui qu'un `st.selectbox` à un
+  houblon, pas de vue liste à filtrer.
+
 - [ ] **T130 — Recherche de style BJCP par alias (Beer styles)**
 
   **Origine** : discussion T85 (2026-08-27). beer-analytics.com a des noms
