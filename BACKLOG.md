@@ -1357,6 +1357,25 @@ Elles sont écrites pour qu'aucune décision implicite ne reste à deviner.
   tardif mais massivement utilisé en whirlpool, cohérent). 365 tests
   passent (2 tests existants adaptés au nouveau libellé/`delta`).
 
+  **2e addendum (2026-08-29, même jour, retour utilisateur explicite)** :
+  "you are now mentioning the rules of YCH but these are not described on
+  this page" — la caption citait "rules 1, 2 & 4" sans jamais les ÉNONCER
+  sur Browse (contrairement à Survivables, T117, qui a sa propre infobox).
+  Corrigé par `help=` sur le `st.metric` (tooltip au survol du (?), demande
+  explicite : "add a tooltip or smthg"), reprenant les 3 règles pertinentes
+  ici au mot près de l'infobox Survivables (pas la règle 3, sur les
+  blends, hors sujet pour un indice à un seul houblon).
+
+  ⚠ **Piège Markdown réel trouvé en vérification live** (zoom sur le
+  tooltip réel) : une vraie liste ordonnée Markdown (`1. .../2. .../4.
+  ...`) est RENUMÉROTÉE séquentiellement par le moteur de rendu quel que
+  soit le chiffre littéral écrit dans la source — "1./2./4." s'affichait
+  "1./2./3.", laissant croire à une règle 3 inexistante et masquant le
+  vrai numéro de la règle 4. Corrigé en utilisant `**1.**`/`**2.**`/`**4.**`
+  comme texte gras littéral plutôt qu'une syntaxe de liste ordonnée —
+  reverifié en direct (hover sur le (?) de Cascade, thème sombre) :
+  numéros corrects.
+
 - [x] **T100 — Calibrer (b) contre (a) AVANT de parler de « modèle »**
 
   **Mesure à produire, résultat écrit dans ce ticket** : sur les houblons

@@ -3523,15 +3523,46 @@ def _recommended_usage_panel(con, hops: dict, comp: dict, variety: str) -> None:
                              "Medium": "Middle of the range",
                              "Low": "Leans late (post-fermentation dry hop)"}
             bucket = _survivable_buckets({v: c["index"] for v, c in chem_all.items()})[variety]
+            # `help=` (2026-08-29, retour utilisateur explicite : "you are
+            # now mentioning the rules of YCH but these are not described
+            # on this page") -- la caption ci-dessous cite "rules 1, 2 & 4"
+            # sans jamais les ÉNONCER sur CETTE page (contrairement à
+            # Survivables, T117, qui a sa propre infobox) : un lecteur
+            # arrivant directement sur Browse n'a aucun moyen de savoir ce
+            # que "rule 1" veut dire. Reprend les 3 règles pertinentes ici
+            # (pas la règle 3, sur les blends -- hors sujet pour un indice
+            # à un seul houblon) au mot près de l'infobox Survivables,
+            # jamais une reformulation divergente.
+            # `**1.**` en texte, PAS une vraie liste ordonnée Markdown
+            # (`1. ...`/`2. ...`) -- piège trouvé en vérification live
+            # (zoom sur le tooltip réel) : Markdown RENUMÉROTE une liste
+            # ordonnée séquentiellement (1, 2, 3...) quel que soit le
+            # chiffre littéral écrit dans la source, donc "1./2./4." (règle
+            # 3, sur les blends, volontairement omise ici -- hors sujet
+            # pour un indice à un seul houblon) se serait affiché "1./2./3."
+            # -- laissant croire à une règle 3 inexistante et masquant le
+            # vrai numéro de la règle 4, incohérent avec l'infobox
+            # Survivables (T117) qui affiche les 4 règles au complet.
+            rules_tooltip = (
+                "YCH handbook rules (2022) — see the Survivables page for all 4:\n\n"
+                "**1.** High survivables → usable early (late kettle, whirlpool, dry "
+                "hop in active fermentation).\n\n"
+                "**2.** Low survivables → reserve for late (post-fermentation dry "
+                "hop).\n\n"
+                "**4.** Loading the wort early with survivables favors "
+                "biotransformation (yeast converts geraniol into β-citronellol, "
+                "amplifying the citrus/floral profile).")
             st.metric("Early-use index", f"{chem['index']:.0%}",
-                      delta=chem_tendency[bucket], delta_color="off")
+                      delta=chem_tendency[bucket], delta_color="off",
+                      help=rules_tooltip)
             st.caption("0% = chemistry leans toward reserving this hop for late "
                       "(post-fermentation) dry hop; 100% = chemistry favors whirlpool "
                       "or active-fermentation dry hop. Quantile rank of " +
                       ", ".join(chem["compounds"]) + " vs. every hop in the database "
-                      "(rules 1, 2 & 4). Estimated from composition, not a lab "
-                      "measurement -- methyl geranate (the most abundant survivable "
-                      "on tested YCH lots) is not covered by any of our aggregates.")
+                      "(rules 1, 2 & 4 — hover the number above for what they say). "
+                      "Estimated from composition, not a lab measurement -- methyl "
+                      "geranate (the most abundant survivable on tested YCH lots) is "
+                      "not covered by any of our aggregates.")
         else:
             st.caption("No linalool/geraniol/isobutyrate/thiols measurement for this variety.")
 

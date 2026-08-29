@@ -714,6 +714,12 @@ def test_browse_recommended_usage_shows_both_layers_when_available(toy_cwd):
     # lisible sans lire la caption méthodologique -- cas dégénéré (seul
     # houblon couvert, _survivable_buckets renvoie "High") -> "Leans early".
     assert "Leans early" in metrics["Early-use index"].delta
+    # 2026-08-29, retour utilisateur : "you are now mentioning the rules
+    # of YCH but these are not described on this page" -- les règles
+    # citées par la caption doivent être ÉNONCÉES quelque part sur Browse,
+    # pas seulement sur Survivables (T117).
+    assert "High survivables" in metrics["Early-use index"].help
+    assert "Low survivables" in metrics["Early-use index"].help
     assert any("linalool" in c.value for c in at.caption)
     # table empirique : la seule étape connue pour hopa est "Boil" -- repérée
     # par sa colonne "Stage" (unique à cette table) plutôt qu'un index
