@@ -2440,7 +2440,7 @@ Mais la transparence doit être RÉELLE, pas un simple adverbe :
 
 ## 10bis. Idée hors épique (trouvée en auditant un concurrent)
 
-- [ ] **T129 — Familles d'arôme comme filtre facetté (Browse / By-descriptor)**
+- [x] **T129 — Familles d'arôme comme filtre facetté (Browse / By-descriptor)**
 
   **Origine** : audit demandé par l'utilisateur (2026-08-27) du Каталог
   (Catalog) de hop-finder.vercel.app pour voir s'il apporte quelque chose
@@ -2535,12 +2535,32 @@ Mais la transparence doit être RÉELLE, pas un simple adverbe :
   test). 16 familles au total (15 olfactives + Generic). 363 tests
   passent (+1, `test_descriptor_families_keys_match_real_vocabulary`).
 
-  ⚠ **Reste à faire** : câblage GUI (`by-descriptor`, premier niveau par
-  famille avant les pills existantes) — pas fait dans cette passe, la
-  demande utilisateur portait explicitement sur `reference.py` seul. Le
-  point Browse (liste filtrable) reste conditionné à la question déjà
-  posée par le ticket : Browse n'a aujourd'hui qu'un `st.selectbox` à un
-  houblon, pas de vue liste à filtrer.
+  **Câblage GUI `by-descriptor` (2026-08-29, même jour)** : `st.pills`
+  "Family" (16 options) juste au-dessus du multiselect "Descriptors" —
+  NARROWING pur sur les `options` du multiselect, jamais un second filtre
+  appliqué au résultat (aucune famille cochée = liste plate complète
+  inchangée, comportement par défaut identique à avant). Piège réel évité
+  AVANT vérification live (pas trouvé en bogue, anticipé en écrivant le
+  code) : changer `options` d'un `st.multiselect` d'un rerun à l'autre
+  fait planter Streamlit (`StreamlitAPIException`) si une valeur déjà
+  choisie sort de la nouvelle liste — corrigé en passant `options =
+  narrowed ∪ déjà_sélectionné` (lu depuis `st.session_state` AVANT de
+  reconstruire le widget, clé fixe `by_descriptor_text_multiselect`), donc
+  un mot déjà choisi reste toujours valide même en changeant de famille
+  ensuite. Un mot du vocabulaire réel absent de `DESCRIPTOR_FAMILIES`
+  (aucun cas aujourd'hui, mais le garde-fou ne l'exclut pas pour l'avenir)
+  reste choisissable tant qu'aucune famille n'est cochée. Point Browse
+  (liste filtrable) laissé de côté, comme prévu par le ticket : Browse n'a
+  aujourd'hui qu'un `st.selectbox` à un houblon, pas de vue liste.
+
+  2 nouveaux tests (narrowing par famille sur le vocabulaire jouet
+  citrus/woody/floral/resinous ; garde-fou anti-crash sur changement de
+  famille après sélection). 2 tests existants adaptés (`at.pills[0]`
+  positionnel → `at.pills(key=...)`, un 2e widget pills s'étant intercalé
+  avant celui de la roue d'arôme). 365 tests passent. Vérifié en direct
+  (Chrome, base réelle) : 16 familles affichées, narrowing sur "Berry"
+  confirmé (liste restreinte à berry/black currant/blackberry/blueberry/
+  cranberry/gooseberry...).
 
 - [ ] **T130 — Recherche de style BJCP par alias (Beer styles)**
 
