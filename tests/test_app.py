@@ -55,6 +55,11 @@ def _build_toy_db(path):
     rows = [
         ("hopa", "molx", 50, 50, "pct_oil", "toy", "ok", ""),
         ("hopa", "total_oil", 1.0, 1.0, "ml_100g", "toy", "ok", ""),
+        # T99 : composé "survivable" (linalool) uniquement sur hopa -- teste
+        # la couche chimique du panneau "Recommended usage" sans toucher au
+        # nombre total de recettes hop_usage_stats des autres tests (T108,
+        # valeurs 10,000/5 pinnées ailleurs -- voir plus bas dans ce fichier).
+        ("hopa", "linalool", 30, 30, "pct_oil", "toy", "ok", ""),
         ("hopb", "moly", 50, 50, "pct_oil", "toy", "ok", ""),
         ("hopb", "total_oil", 1.0, 1.0, "ml_100g", "toy", "ok", ""),
         # 14.5% > seuil 7.0% -> inféré "bittering" pour hopc (pas de purpose
@@ -631,6 +636,46 @@ def test_browse_mode_shows_hop_composition_and_descriptors(toy_cwd):
     assert any("citrus" in m.value and "woody" in m.value for m in at.markdown)
     assert len(at.dataframe) >= 1
 
+def test_browse_recommended_usage_shows_both_layers_when_available(toy_cwd):
+    # T99 : hopa a à la fois une donnée empirique (hop_usage_stats, "Boil"
+    # 10000 recettes, voir _build_toy_db/T108) ET une donnée chimique
+    # (linalool, ajouté pour ce ticket) -- les deux couches doivent
+    # s'afficher, jamais fusionnées.
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("browse").run()
+    at.selectbox[0].set_value("hopa").run()
+    assert not at.exception
+    assert any(s.value == "Recommended usage" for s in at.subheader)
+    assert any("Where brewers actually use it" in m.value for m in at.markdown)
+    assert any("Estimated from composition" in m.value for m in at.markdown)
+    # seul composé chimique connu pour hopa dans la fixture (T99) -- seul
+    # houblon à le porter, donc rang quantile dégénéré (n=1) -> 100%.
+    metrics = {m.label: m.value for m in at.metric}
+    assert metrics["Early-use index (whirlpool / active dry hop)"] == "100%"
+    assert any("linalool" in c.value for c in at.caption)
+    # table empirique : la seule étape connue pour hopa est "Boil" -- repérée
+    # par sa colonne "Stage" (unique à cette table) plutôt qu'un index
+    # positionnel, fragile face aux autres tableaux de la page (composition,
+    # similar hops...).
+    usage_df = next(df.value for df in at.dataframe if "Stage" in df.value.columns)
+    assert "Boil" in usage_df["Stage"].tolist()
+
+def test_browse_recommended_usage_falls_back_silently_without_any_data(toy_cwd):
+    # hopc : aucune ligne hop_usage_stats (voir _build_toy_db/T108) ET aucun
+    # des 4 composés chimiques T99 (alpha_acid/beta_acid/co_humulone/
+    # total_oil seulement) -- message honnête unique, pas un tableau vide
+    # fabriqué ni un indice inventé.
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("browse").run()
+    at.selectbox[0].set_value("hopc").run()
+    assert not at.exception
+    assert any(s.value == "Recommended usage" for s in at.subheader)
+    assert any("No usage data (empirical or chemical) for this variety." in c.value
+              for c in at.caption)
+    assert "Early-use index (whirlpool / active dry hop)" not in {m.label for m in at.metric}
+
 def test_browse_shows_purpose_badge_as_top_info(toy_cwd):
     # T-purpose backlog (demande utilisateur explicite : "should appear in
     # the browser information as a main/top information") -- badge juste
@@ -796,14 +841,50 @@ def test_compare_renders_principal_barplot_when_data_present(toy_cwd):
     assert len([n for n in at.main if isinstance(n, UnknownElement)]) >= 1
 
 def test_compare_shows_no_detailed_data_message_when_absent(toy_cwd):
-    # hopa/hopc n'ont aucun composé de la liste "détaillée" (myrcène...) dans
-    # la fixture -- message honnête plutôt qu'un graphique vide.
+    # hopb/hopc n'ont aucun composé de la liste "détaillée" (myrcène...) dans
+    # la fixture -- message honnête plutôt qu'un graphique vide. hopa écarté
+    # ici depuis T99 (2026-08-29) : porte désormais "linalool" (composé
+    # "survivable" réel, dans `_COMPARE_DETAIL_OIL_COMPOUNDS`) pour tester
+    # la couche chimique du panneau "Recommended usage" -- hopb/moly reste
+    # fictif, hors de la liste "détaillée", même invariant que hopa/hopc
+    # avant ce ticket.
     at = _app()
     at.run()
     at.sidebar.radio[0].set_value("compare").run()
-    at.multiselect[0].select("Hopa").select("Hopc").run()
+    at.multiselect[0].select("Hopb").select("Hopc").run()
     assert not at.exception
     assert any("No detailed composition data" in m.value for m in at.markdown)
+
+def test_chemical_earliness_index_all_averages_quantile_rank_per_compound():
+    # T99, couche chimique : moyenne du rang quantile PAR COMPOSÉ sur toute
+    # la base (réutilise _normalize_quantile, jamais une normalisation
+    # ad hoc réécrite pour l'occasion).
+    comp = {
+        "hopx": {"linalool": {"mid": 10.0, "unit": "pct_oil"},
+                "geraniol": {"mid": 1.0, "unit": "pct_oil"}},
+        "hopy": {"linalool": {"mid": 2.0, "unit": "pct_oil"}},
+        "hopz": {},
+    }
+    hops = {"hopx": {}, "hopy": {}, "hopz": {}}
+    out = app._chemical_earliness_index_all(hops, comp)
+    # hopz n'a aucun des 4 composés -> absent, jamais un indice fabriqué.
+    assert set(out) == {"hopx", "hopy"}
+    assert out["hopx"]["compounds"] == ["linalool", "geraniol"]
+    # linalool : hopx (10.0) > hopy (2.0) dans la base [10.0, 2.0] -> rang
+    # (bisect_left=1 + bisect_right=2)/(2*2) = 0.75 pour hopx.
+    # geraniol : SEUL connu (hopx) -> cas dégénéré n=1 -> 1.0.
+    assert out["hopx"]["index"] == pytest.approx((0.75 + 1.0) / 2)
+    assert out["hopy"]["compounds"] == ["linalool"]
+    assert out["hopy"]["index"] == pytest.approx(0.25)
+
+def test_usage_share_db_values_collects_one_stage_across_varieties():
+    usage_all = {
+        "hopx": {"Aroma": {"share": 0.6, "recipes_count": 60},
+                "Boil": {"share": 0.4, "recipes_count": 40}},
+        "hopy": {"Boil": {"share": 1.0, "recipes_count": 10}},
+    }
+    assert app._usage_share_db_values(usage_all, "Aroma") == [0.6]
+    assert sorted(app._usage_share_db_values(usage_all, "Boil")) == [0.4, 1.0]
 
 def test_normalize_minmax_floors_the_true_database_minimum():
     # 2026-08-26, bug utilisateur : "if I enter Columbus and Nugget, without

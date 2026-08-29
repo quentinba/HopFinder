@@ -193,6 +193,13 @@ _TOOL_SUMMARY_BY_MODE = {t["mode"]: t for t in _TOOL_SUMMARIES}
 # un `git log` en direct exigerait aussi que `.git` soit présent dans le
 # conteneur déployé, ce qui n'est pas garanti.
 _RECENT_UPDATES = [
+    ("2026-08-29", "Browse a hop now has a \"Recommended usage\" card, right "
+                   "after the aroma wheel: where brewers actually use this "
+                   "hop by process stage (real recipe share from beer-"
+                   "analytics.com) side by side with an early-use index "
+                   "estimated from its composition (YCH \"survivable "
+                   "compounds\" rules) -- two separate layers, never "
+                   "blended, with a note when they genuinely diverge."),
     ("2026-08-29", "Beer styles now overlays the official BJCP range with "
                    "the observed distribution from real published recipes "
                    "(beer-analytics.com) on the same chart for ABV, IBU, "
@@ -2460,6 +2467,11 @@ def _browse(con):
         else:
             _aroma_wheel_missing_warning([h["name"]], source)
 
+    # T99 : "Recommended usage", après la roue d'arôme (ticket : "nouvelle
+    # carte app._panel(), après la roue d'arôme").
+    with _panel():
+        _recommended_usage_panel(con, hops, comp, selected)
+
     # T77 (2026-08-22, demande utilisateur explicite -- confusion vérifiée en
     # direct sur "enigma" : "the source is barthhaas... does berry come from
     # this only?") : jamais juxtaposer la provenance de COMPOSITION à celle
@@ -3250,6 +3262,145 @@ def _normalize_quantile(value: float, db_values: list[float]) -> float:
     lo = bisect.bisect_left(sorted_values, value)
     hi = bisect.bisect_right(sorted_values, value)
     return max((lo + hi) / (2 * n), _COMPARE_MIN_NORMALIZED_POSITION)
+
+
+# T99 : les 4 agrégats "survivables" YCH réellement présents dans
+# `hop_composition` (voir CLAUDE.md "Ce que les agrégats BarthHaas
+# contiennent" -- `isobutyrate` recouvre 3 des 8 survivables Yakima Chief,
+# `thiols` en recouvre 3 aussi, `linalool`/`geraniol` sont chacun un
+# composé unique). Le méthyl géranate (composé le plus abondant des
+# survivables sur les lots YCH testés, voir CLAUDE.md) N'EST couvert par
+# AUCUN de nos agrégats -- absent de cette liste, trou documenté, jamais
+# comblé par une estimation.
+_RECOMMENDED_USAGE_CHEMICAL_COMPOUNDS = ["linalool", "geraniol", "isobutyrate", "thiols"]
+
+# Ordre d'affichage des 5 étapes réelles de `hop_usage_stats` (T88,
+# beer-analytics.com) -- vérifié en direct (`SELECT DISTINCT use_type`),
+# procédé chaud -> froid.
+_USAGE_STAGE_ORDER = ["Mash", "First Wort", "Boil", "Aroma", "Dry Hop"]
+
+
+def _chemical_earliness_index_all(hops: dict, comp: dict) -> dict[str, dict]:
+    """T99, couche (b) CHIMIQUE : pour chaque houblon de la base, indice
+    dérivé des règles 1/2 du handbook YCH 2022 (voir CLAUDE.md) appliquées
+    à NOS mesures -- PAS une mesure directe des survivables (l'API de lot
+    YCH a été explicitement écartée comme socle, voir CLAUDE.md : "source
+    ABANDONNÉE comme socle systématique"). Moyenne du rang quantile PAR
+    COMPOSÉ (`_RECOMMENDED_USAGE_CHEMICAL_COMPOUNDS`) sur TOUTE la base --
+    réutilise `_normalize_quantile`/`_compare_field_db_values`/
+    `_compare_detail_value` déjà écrits pour Compare Hops (ticket : "ne pas
+    en réécrire un"), jamais une normalisation ad hoc. Indice élevé ->
+    plutôt whirlpool/dry hop en fermentation active (règles 1 et 4) ; bas ->
+    plutôt réservé au dry hop post-fermentation (règle 2).
+
+    Composé sans mesure pour un houblon donné -> simplement omis de SA
+    moyenne (jamais un 0 fabriqué qui tirerait l'indice vers le bas
+    artificiellement). Houblon sans AUCUN des 4 composés mesurés -> absent
+    du dict, jamais un indice fabriqué à partir de rien.
+
+    Calcule les valeurs DB-wide de chaque composé UNE SEULE FOIS
+    (`_compare_field_db_values`) puis les réutilise pour chaque houblon,
+    plutôt que de les recalculer pour chacun des n houblons (O(n) au lieu
+    de O(n^2))."""
+    db_values = {c: _compare_field_db_values(comp, c, absolute=False)
+                for c in _RECOMMENDED_USAGE_CHEMICAL_COMPOUNDS}
+    out: dict[str, dict] = {}
+    for v in hops:
+        hcomp = comp.get(v, {})
+        positions, used = [], []
+        for c in _RECOMMENDED_USAGE_CHEMICAL_COMPOUNDS:
+            value = _compare_detail_value(hcomp, c, absolute=False)
+            if value is None:
+                continue
+            positions.append(_normalize_quantile(value, db_values[c]))
+            used.append(c)
+        if positions:
+            out[v] = {"index": sum(positions) / len(positions), "compounds": used}
+    return out
+
+
+def _usage_share_db_values(usage_all: dict[str, dict], use_type: str) -> list[float]:
+    """Toutes les parts (`share`) connues d'UNE étape (`use_type`) à travers
+    TOUS les houblons de `hop_usage_breakdown_all` -- socle du rang
+    quantile de "à quel point CE houblon est-il plus/moins utilisé en
+    whirlpool que la moyenne de la base", même mécanisme que
+    `_compare_field_db_values` côté composés (T99, divergence)."""
+    return [rec[use_type]["share"] for rec in usage_all.values() if use_type in rec]
+
+
+def _recommended_usage_panel(con, hops: dict, comp: dict, variety: str) -> None:
+    """T99 : panneau "Recommended usage" dans Browse, DEUX couches jamais
+    fusionnées :
+    (a) EMPIRIQUE -- `hop_usage_stats` (T88), ce que font réellement les
+        brasseurs, aucune modélisation.
+    (b) CHIMIQUE -- indice dérivé des règles YCH appliqué à nos mesures,
+        étiqueté "estimated from composition" partout, jamais présenté au
+        même niveau qu'une donnée mesurée (même traitement que le préfixe
+        `Inferred:` de `infer_purpose_from_alpha_acid`).
+
+    **Livrable réel du ticket** : les signaler CÔTE À CÔTE et pointer les
+    divergences plutôt que les cacher -- "un houblon chimiquement 'tardif'
+    mais massivement utilisé en whirlpool est l'information la plus
+    intéressante de la page". Détecté ici en comparant le rang quantile
+    DB-wide de l'indice chimique de ce houblon à celui de sa part
+    "Aroma" (whirlpool) empirique -- sous la médiane de la base pour l'un,
+    au-dessus pour l'autre -- plutôt qu'un seuil absolu arbitraire (même
+    logique DB-relative que le reste de cette normalisation)."""
+    st.subheader("Recommended usage")
+    breakdown = matching.hop_usage_breakdown(con, variety)
+    chem_all = _chemical_earliness_index_all(hops, comp)
+    chem = chem_all.get(variety)
+    if not breakdown and chem is None:
+        st.caption("No usage data (empirical or chemical) for this variety.")
+        return
+
+    col_a, col_b = st.columns(2)
+    with col_a:
+        st.write("**Where brewers actually use it**")
+        st.caption("Share of recipes by process stage (beer-analytics.com) -- observed, not modeled.")
+        if breakdown:
+            rows = [{"Stage": stage, "Share": breakdown[stage]["share"],
+                    "Recipes": breakdown[stage]["recipes_count"]}
+                   for stage in _USAGE_STAGE_ORDER if stage in breakdown]
+            st.dataframe(rows, width="stretch", hide_index=True, column_config={
+                "Share": st.column_config.NumberColumn(format="percent"),
+                "Recipes": st.column_config.NumberColumn(format="%d"),
+            })
+        else:
+            st.caption("No beer-analytics.com data for this variety.")
+    with col_b:
+        st.write("**Estimated from composition**")
+        st.caption("YCH \"survivable compounds\" rules applied to our own measurements "
+                  "-- not a lab measurement of this hop.")
+        if chem is not None:
+            st.metric("Early-use index (whirlpool / active dry hop)", f"{chem['index']:.0%}")
+            st.caption("Quantile rank of " + ", ".join(chem["compounds"]) +
+                      " vs. every hop in the database. High = favors whirlpool/active "
+                      "fermentation dry hop (rules 1 & 4); low = better reserved for "
+                      "post-fermentation dry hop (rule 2). Estimated from composition, "
+                      "not a lab measurement -- methyl geranate (the most abundant "
+                      "survivable on tested YCH lots) is not covered by any of our "
+                      "aggregates.")
+        else:
+            st.caption("No linalool/geraniol/isobutyrate/thiols measurement for this variety.")
+
+    if chem is not None and "Aroma" in breakdown:
+        chem_db_values = [c["index"] for c in chem_all.values()]
+        usage_all = matching.hop_usage_breakdown_all(con)
+        aroma_db_values = _usage_share_db_values(usage_all, "Aroma")
+        chem_rank = _normalize_quantile(chem["index"], chem_db_values)
+        aroma_rank = _normalize_quantile(breakdown["Aroma"]["share"], aroma_db_values)
+        if chem_rank < 0.5 and aroma_rank >= 0.5:
+            st.info(":material/priority_high: Divergence: this hop's composition leans "
+                   "toward late (post-fermentation) dry hop, yet it's used in whirlpool/"
+                   "aroma additions more than most hops in the database. Not an error -- "
+                   "brewers may be using it that way on purpose (or for reasons this "
+                   "index doesn't capture, e.g. bittering contribution, cost, tradition).")
+        elif chem_rank >= 0.5 and aroma_rank < 0.5:
+            st.info(":material/priority_high: Divergence: this hop's composition leans "
+                   "toward early use (whirlpool/active fermentation dry hop), yet it's "
+                   "used in whirlpool/aroma additions less than most hops in the "
+                   "database -- brewers may be favoring straight dry hop instead.")
 
 
 _COMPARE_LABEL_ANGLE = -45
