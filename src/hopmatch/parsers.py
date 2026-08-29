@@ -913,6 +913,18 @@ def parse_beer_analytics_style_name(html: str) -> str | None:
     return m.group(1).strip() if m else None
 
 
+def parse_beer_analytics_hop_name(html: str) -> str | None:
+    """Nom affiché d'une page houblon beer-analytics.com (`<h1>`), suffixe
+    " Hops" marketing retiré (T88, réutilise `strip_bare_hops_suffix` --
+    même piège que T123 sur BarthHaas, vérifié en direct : "Citra Hops" ->
+    "Citra"). Utilisé pour `hop_usage_stats.hop_name` et la résolution
+    `variety` (`ingest._resolve_hop_variety` normalise déjà "hop(s)" comme
+    stopword, mais autant garder le nom stocké propre plutôt que d'en
+    dépendre)."""
+    m = _BA_H1_RE.search(html)
+    return strip_bare_hops_suffix(m.group(1).strip()) if m else None
+
+
 def plotly_traces(payload: dict) -> list[dict]:
     """`payload["data"]` uniquement -- un chart JSON beer-analytics est un
     objet Plotly complet, `payload["layout"]["template"]` fait à lui seul

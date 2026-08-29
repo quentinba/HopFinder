@@ -337,6 +337,65 @@ même livre, utilisées pour deux besoins différents, **jamais confondues** :
   **plus nécessaire pour les styles eux-mêmes** — seuls ses `alt_names`/`alt_names_extra`
   restent utiles (réconciliation d'un nom de style libre vers un `style_id`, T84/T91-T92).
 
+## Statistiques de recettes (beer-analytics.com)
+
+**beer-analytics.com** (Christian Scheb, GPLv3) — https://www.beer-analytics.com
+- **Ce que c'est** : agrégateur de recettes homebrew publiées (charts Plotly générés
+  côté serveur depuis leur propre base de recettes importées). **PAS du BJCP**
+  (`beer_styles`, styleguide officiel) et **PAS une mesure de labo** (`hop_composition`,
+  BarthHaas/Yakima) — une distribution empirique observée dans des recettes réelles,
+  potentiellement biaisée par la population de recettes publiées qu'ils agrègent.
+- **Attribution obligatoire partout où cette donnée apparaît en GUI** : « Recipe
+  statistics: beer-analytics.com — aggregated from public homebrew recipes ». Aucune
+  vue GUI ne consomme encore ces tables à ce jour (T85-T88 sont des tickets
+  d'ingestion pure, sans wiring GUI) — cette règle s'applique à la première GUI qui
+  les affichera.
+- Accès : HTML statique (chart JSON linké par `data-chart="…"` dans la page), cache
+  disque **obligatoire** sous `data/cache/beer_analytics/` (`ingest._beer_analytics_
+  fetch`/`_get`, écriture atomique), `User-Agent: hopmatch/0.1 (research)`, 1 requête/s,
+  une seule passe complète prévue (voir T89 ci-dessous pour la prise de contact).
+  `robots.txt` : `Disallow: /wa/` uniquement, reste ouvert.
+- ⚠ **Fiabilité réseau irrégulière, constatée en direct (2026-08-27/29)** : plusieurs
+  crawls complets ont montré soit un ralentissement serveur progressif (T85, premier
+  essai : ~13 req/min → ~0,1 req/min après ~500 requêtes/1h30), soit des blocages nets
+  sans erreur explicite pendant 15-40 min (T86-T88, `curl` direct restant rapide entre
+  deux incidents, un incident isolé ayant même fait échouer `curl` lui-même pendant
+  60s) — probablement une combinaison de rate-limiting informel côté serveur ET de
+  flakiness réseau ponctuelle, jamais isolée avec certitude à une seule cause. Le
+  cache disque rend une reprise bon marché (ne refetch que le manquant) : la réponse
+  qui a marché à chaque fois est de tuer le process bloqué et de relancer tel quel,
+  jamais forcer indéfiniment.
+- Statut par table (dates de fetch réelles, 2026-08-27 à 2026-08-29) :
+  - `style_recipe_stats` (T85) : distributions ABV/IBU/OG/FG/SRM par style, pré-binnées
+    (outliers déjà retirés côté source — jamais de percentile dérivable, afficher
+    « observed distribution », jamais « P5-P95 »). **123/123 styles, 6577 bins,
+    112/123 `style_id` résolus vers BJCP** (`data/mappings/beer_style_aliases.yaml`).
+  - `style_hop_usage` (T86) : quels houblons pour un style, ventilé par usage réel
+    (`any`/`bittering`/`aroma`/`dry-hop`, vérifié par reverse engineering du bundle JS
+    que ce sont de vraies requêtes `?filter=…`, pas un filtrage client). **123/123
+    styles, 3997 lignes, 3611/3997 (90%) houblons résolus vers une `variety`.**
+  - `style_hop_pairings` (T87) : paires de houblons réellement co-utilisées par style
+    (PAIRES uniquement, jamais de triplet dérivé). **123/123 styles, 1182 lignes,
+    1055/1182 (89%) houblons résolus.**
+  - `hop_usage_stats` (T88) : où un houblon est utilisé dans le procédé
+    (Mash/First Wort/Boil/Aroma/Dry Hop, vocabulaire brut de la source — leur « Aroma »
+    ≠ whirlpool, couvre les additions tardives fin d'ébullition/flameout, jamais
+    renommé, jamais fusionné avec le `Whirlpool` de MMuM/T126). Pages énumérées
+    `/hops/<purpose>/<slug>/` (`aroma`/`bittering`/`dual-purpose` — une 4e catégorie
+    `/hops/flavors/<terme>/` existe mais ce sont des pages de DESCRIPTEUR D'ARÔME, pas
+    des houblons, exclue). **401/435 (92%) pages houblon couvertes, 2837 lignes,
+    143/435 houblons résolus vers une `variety`** (beaucoup de houblons rares/
+    expérimentaux hors de notre catalogue à 203 variétés).
+- **Chart listé par le ticket mais non capturé** : `typical-styles-relative.json`
+  (styles typiques d'un houblon donné) n'a nulle part où aller dans le schéma T88 tel
+  qu'écrit (indexé par `use_type`, pas par style) — donnée réelle et vérifiée, voir
+  **T131** (nouveau ticket backlog) pour une table dédiée.
+- **Prise de contact** (T89, PAS encore envoyée au moment de la rédaction) : message
+  rédigé dans `docs/OUTREACH_beer-analytics.md` — prévient avant une lecture régulière
+  de leurs endpoints et demande un agrégat de co-occurrence n-aire (triplets/
+  quadruplets, cf. épique C/D3). Action **utilisateur**, jamais envoyée par l'assistant
+  (message à un tiers réel, hors du périmètre d'une action autonome).
+
 ## Liant
 
 **PubChem (PUG-REST)** — https://pubchem.ncbi.nlm.nih.gov

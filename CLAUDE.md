@@ -275,24 +275,30 @@ affiché, ex. page `/styles/india-pale-ale/american-ipa/` mais charts sous
   `_beer_analytics_cache_filename` doit gérer les query strings (sanitisées
   en suffixe de nom de fichier, jamais tronquées -- sinon collision entre
   deux filtres du même chart, bug réel trouvé et corrigé).
-- **Échecs réseau LOCAUX pendant un crawl (T86 puis T87, 2026-08-28) :
-  RÉCURRENT, pas un incident isolé, et pas le même symptôme que le
-  rate-limiting T85.** Sur T86 : un crawl complet a essuyé ~291
-  `NameResolutionError` groupés puis, sur reprise, deux blocages silencieux
-  (aucune progression pendant 15-20 min, CPU quasi nul), passé à la 3e
-  tentative. Sur T87 (même session, quelques heures plus tard) : RE-touché,
-  3 tentatives de suite bloquées net après quelques minutes, passé à la 4e.
-  Signature constante à chaque incident : `curl` direct restait rapide
-  PENDANT le blocage -- jamais un problème serveur beer-analytics.com,
-  presque certainement quelque chose de propre à cette session/machine
-  (état réseau local qui se dégrade après un usage prolongé de la session ?
-  pas isolé plus précisément). Réponse qui a marché à chaque fois : tuer le
-  process bloqué et relancer tel quel (cache-first, ne refetch que le
-  manquant, jamais de perte de progression) -- jamais eu besoin d'autre
-  chose qu'un retry brut. Si un futur crawl (T88/T89 ou un re-crawl) touche
-  encore ce symptôme (blocage net, CPU quasi nul, `curl` direct qui reste
-  rapide), même traitement : tuer + relancer, pas la peine de diagnostiquer
-  plus loin avant d'essayer.
+- **Échecs réseau RÉCURRENTS pendant un crawl (T86/T87/T88, 2026-08-28/29) :
+  cause probablement MIXTE, pas isolée avec certitude à une seule source.**
+  Sur T86 : ~291 `NameResolutionError` groupés puis deux blocages
+  silencieux (15-20 min, CPU quasi nul), passé à la 3e tentative. Sur T87 :
+  3 tentatives bloquées net, passé à la 4e. Sur T88 (le pire des trois,
+  ~10h étalées sur une nuit, une dizaine de cycles arrêt/reprise) : PENDANT
+  un de ces incidents, un `curl` DIRECT vers beer-analytics.com a lui-même
+  timeout 60s, alors qu'un `curl` simultané vers google.com répondait
+  normalement en 0,2s -- ce point unique change la lecture : les incidents
+  précédents (où `curl` restait rapide pendant le blocage Python) pointaient
+  vers une cause locale, mais celui-ci pointe vers le serveur beer-
+  analytics.com lui-même. **Conclusion révisée : combinaison probable de
+  flakiness locale ET de ralentissements ponctuels réels côté serveur,
+  jamais isolée avec certitude à une seule cause unique** -- ne plus
+  affirmer "jamais un problème serveur" comme la version précédente de
+  cette note le faisait. Réponse qui a marché à chaque fois, quelle que
+  soit la cause exacte : tuer le process bloqué et relancer tel quel
+  (cache-first, ne refetch que le manquant, jamais de perte de progression)
+  -- si la reprise progresse lentement mais JAMAIS à zéro, la laisser tourner
+  plutôt que de tuer prématurément (T88 a fini par passer à 92% en laissant
+  tourner une reprise pendant plusieurs heures sans re-tuer). Si un futur
+  crawl (T89+ ou un re-crawl) touche encore ce symptôme, même traitement :
+  tuer + relancer si zéro progression, laisser tourner si lente mais non
+  nulle, pas la peine de diagnostiquer plus loin avant d'essayer.
 
 ### Licence
 Code MIT. FooDB/FlavorDB2 non commerciales. BeerMaverick sans licence de données
