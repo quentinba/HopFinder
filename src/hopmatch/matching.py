@@ -646,6 +646,26 @@ def process_survival(compound: str) -> dict[str, str] | None:
     return reference.PROCESS_SURVIVAL.get(compound)
 
 
+def compound_survival(compound: str, stage: str) -> dict[str, str] | None:
+    """T119 (2026-08-29) : survie de `compound` à un `stage` de procédé
+    donné (`stage` in {"boil", "whirlpool", "afdh", "pfdh"}) -- question
+    PLUS FINE que `process_survival` ci-dessus (qui donne une annotation
+    par CLASSE de composé, pas par stade). Lecture pure de
+    `reference.PROCESS_STAGE_SURVIVAL`, aucune requête DB -- même
+    justification que `process_survival` : c'est une propriété de la
+    molécule/du procédé, pas du houblon qui la porte.
+
+    Retourne `{"state", "source", "note"}` -- `state` in {"kept", "partial",
+    "lost", "precursor"}, ordinal QUALITATIF, jamais un pourcentage inventé
+    (aucune source ne donne de facteur de survie chiffré réel). Retourne
+    `None` si `compound` n'est pas dans la matrice (composé hors du
+    périmètre des 11 de `reference.PROCESS_SURVIVAL`) OU si `stage` n'est
+    pas l'un des 4 stades reconnus -- JAMAIS une valeur par défaut
+    fabriquée, même contrainte que `process_survival`. Purement informatif
+    -- n'est appelé par AUCUN chemin de scoring, uniquement par la GUI."""
+    return reference.PROCESS_STAGE_SURVIVAL.get(compound, {}).get(stage)
+
+
 def hop_similar_varieties(con, variety: str) -> list[str]:
     """Variétés similaires/substituts curées par Yakima (T25 backlog,
     `hop_similar`) — toujours une `variety` de notre propre catalogue (résolue

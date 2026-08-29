@@ -523,6 +523,18 @@ Takoi et al. :
 classification sourcée Janish) est la structure existante à étendre — jamais une
 valeur numérique inventée, cf. la vérification programmatique déjà en place.
 
+**T119 (2026-08-29, FAIT) : `reference.PROCESS_STAGE_SURVIVAL` +
+`matching.compound_survival(compound, stage)`** — matrice composé × stade
+(boil/whirlpool/afdh/pfdh), 11 composés × 4 stades, chaque entrée
+`{state, source, note}` (state ordinal kept/partial/lost/precursor, jamais
+un pourcentage). Sesquiterpènes bruts (humulène/caryophyllène/farnésène/
+sélinène) : `precursor` au boil/whirlpool (oxydation), `lost` en AFDH
+(CO2-stripping pendant la fermentation active, sourcé des notes de séminaire
+BarthHaas de Christian Scheb — mémoire `barthhaas_hop_flavorist_seminar_
+notes`), `kept` en PFDH. Purement informatif (jamais consulté par un chemin
+de scoring, testé). Pas encore câblé en GUI ni de surcharge utilisateur —
+voir T120/T121.
+
 ⚠ **Homonymie « 2-MIB », piège corrigé le 2026-08-27.** Le sigle désigne DEUX
 molécules sans rapport : le **2-méthylbutyl isobutyrate** (ESTER, pomme verte/
 abricot, l'un des 8 survivables Yakima, champ `twoMethylbutylIsobutyrate`) et le

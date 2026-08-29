@@ -2335,7 +2335,7 @@ Mais la transparence doit être RÉELLE, pas un simple adverbe :
        Vérifié en direct (clair ET sombre) après chaque itération.
   362 tests passent au total après ces 3 addenda.
 
-- [ ] **T119 — Matrice composé × stade de procédé**
+- [x] **T119 — Matrice composé × stade de procédé**
 
   `matching.compound_survival(compound: str, stage: str) -> dict | None`
   retournant `{"state": …, "source": …, "note": …}` ou `None` si le composé
@@ -2386,6 +2386,38 @@ Mais la transparence doit être RÉELLE, pas un simple adverbe :
   **Test** : vérifier que les 4 états sont les seuls produits, qu'un composé
   hors matrice retourne `None` (pas un état par défaut), et que chaque entrée
   porte une `source` non vide.
+
+  **FAIT (2026-08-29).** `reference.PROCESS_STAGE_SURVIVAL` (44 entrées : 11
+  composés × 4 stades, `{state, source, note}`) + `matching.compound_
+  survival(compound, stage)`, lecture pure, aucune requête DB (même
+  justification que `process_survival` existant : propriété de la molécule/
+  du procédé, pas du houblon). 8 tests (états valides, périmètre complet,
+  `None` sur composé/stade hors matrice, source/note non vides, sesquiterpènes
+  precursor côté chaud puis kept côté froid, garde-fou structurel "jamais
+  appelé par un chemin de score" identique à celui de `process_survival`).
+  Correction vs. la proposition de départ du ticket : linalol passé de
+  "partial" à "lost" au boil -- la source citée par le ticket lui-même
+  (`PROCESS_SURVIVAL_EXPLANATIONS["boil-sensitive, survives whirlpool"]`)
+  documente le MÊME ordre de perte pour myrcène et linalol ("essentially
+  gone" à 60 min) ; myrcène étant "lost", linalol devait l'être aussi pour
+  rester cohérent avec sa propre source. Composés non tranchés par la
+  proposition de départ (beta-pinène, farnésène, sélinène, ketones)
+  tranchés : beta-pinène reste sur "dry hop / late additions" (jamais
+  "survives whirlpool", contrairement au myrcène -- aucune source ne
+  documente sa survie au whirlpool) ; farnésène/sélinène suivent le
+  comportement de classe humulène/caryophyllène (déjà groupés sous la même
+  annotation `PROCESS_SURVIVAL`, pas de citation spécifique trouvée) ;
+  ketones traité comme isobutyrate (2-nonanone = survivable YCH officiel,
+  champ `twoNonanone`) mais avec la même réserve de confiance basse que
+  `PROCESS_SURVIVAL["ketones"]` (agrégat BarthHaas mélangeant aussi le
+  2-undécanone, non documenté). AFDH="lost" pour les sesquiterpènes bruts
+  (humulène/caryophyllène/farnésène/sélinène) sourcé par le mécanisme de
+  CO2-stripping des notes de séminaire BarthHaas de Christian Scheb (mémoire
+  `barthhaas_hop_flavorist_seminar_notes`, reçues le jour même) -- première
+  utilisation concrète de ces notes dans le code. Pas de câblage GUI (hors
+  périmètre de ce ticket, voir T121) ni de surcharge utilisateur (dépend de
+  cette matrice, également T121) -- `_RECENT_UPDATES` non touché (aucun
+  changement visible utilisateur final pour l'instant).
 
 - [ ] **T120 — Calcul de couverture d'un plan de houblonnage**
 

@@ -707,6 +707,249 @@ PROCESS_SURVIVAL_EXPLANATIONS: dict[str, str] = {
         "most of it; aroma impact depends on avoiding prolonged heat exposure altogether.",
 }
 
+# T119 (2026-08-29) : matrice composé x stade de procédé -- répond à la
+# question "qu'advient-il de CE composé à CE stade", distincte de
+# PROCESS_SURVIVAL ci-dessus (annotation qualitative PAR CLASSE de composé,
+# "ce composé survit-il au procédé en général"). Périmètre EXACT : les 11
+# composés de PROCESS_SURVIVAL (app._COMPARE_DETAIL_OIL_COMPOUNDS + thiols)
+# -- un composé hors de cette liste retourne None depuis
+# `matching.compound_survival`, jamais une valeur par défaut fabriquée.
+#
+# state in {"kept", "partial", "lost", "precursor"} -- ordinal QUALITATIF,
+# JAMAIS un facteur de survie chiffré : aucune source ne donne de facteur
+# quantitatif réel par houblon/composé/stade, en inventer un serait
+# exactement ce que ce projet s'interdit (même principe que "pas de seuil
+# OAV codé en dur", CLAUDE.md). "precursor" n'est pas cosmétique : le
+# composé mesuré s'évapore tel quel à ce stade mais génère un dérivé
+# d'oxydation chimiquement différent (sesquiterpènes -> époxydes/oxyde,
+# côté chaud uniquement) -- c'est la demande utilisateur d'origine (T74/
+# T115) sur l'oxydation des sesquiterpènes.
+#
+# stage in {"boil", "whirlpool", "afdh", "pfdh"} (afdh = active fermentation
+# dry hop, pfdh = post-fermentation dry hop) -- même distinction que
+# CLAUDE.md "Règles procédé & survivables" (4 règles YCH, handbook 2022).
+# Les notes de séminaire BarthHaas (mémoire persistante
+# `barthhaas_hop_flavorist_seminar_notes`, partagées par Christian Scheb le
+# 2026-08-29) affinent encore le AFDH en 3 sous-stades (fermentation
+# active/maturation/garde) -- volontairement HORS PÉRIMÈTRE ici, la matrice
+# reste aux 4 stades explicitement demandés par le ticket.
+#
+# Sources combinées, CHACUNE citée par ligne (jamais une affirmation sans
+# provenance) : PROCESS_SURVIVAL_EXPLANATIONS ci-dessus (Janish, The New
+# IPA -- ordres de perte quantifiés au boil pour myrcène/linalol, résistance
+# relative du géraniol/sesquiterpènes), les 4 règles YCH (CLAUDE.md
+# §"Règles procédé & survivables"), docs/mapping_compounds.txt (notes
+# brassicoles croisées avec l'utilisateur le 2026-08-27), et les notes de
+# séminaire BarthHaas pour le mécanisme de "CO2-stripping" en fermentation
+# active (raison du seul écart hydrocarbure-brut/AFDH ci-dessous).
+#
+# Correction (2026-08-29) vs. la PROPOSITION de départ du ticket : le
+# linalol y était provisoirement à "partial" au boil -- mais la source que
+# le ticket cite lui-même (PROCESS_SURVIVAL_EXPLANATIONS "boil-sensitive,
+# survives whirlpool") dit explicitement que linalol et myrcène ont le
+# MÊME ordre de perte au boil ("essentially gone" à 60 min) ; myrcène est
+# "lost" au boil, donc linalol doit l'être aussi pour rester cohérent avec
+# sa propre source citée -- corrigé ici (le tableau du ticket, dans
+# BACKLOG.md, reste une trace historique de la proposition de départ, pas
+# la valeur retenue).
+#
+# beta-pinène, farnésène, sélinène, ketones : non tranchés par la
+# proposition de départ du ticket ("n'ont pas encore de position tranchée"),
+# tranchés ici : beta-pinène reste sur l'annotation PROCESS_SURVIVAL "dry
+# hop / late additions" (pas "survives whirlpool" comme myrcène -- aucune
+# source ne documente sa survie au whirlpool spécifiquement, contrairement
+# au myrcène) ; farnésène/sélinène suivent le même comportement de classe
+# que humulène/caryophyllène (PROCESS_SURVIVAL les groupe déjà sous la même
+# annotation "direct traces, contributes via oxidation", aucune citation
+# spécifique à chacun trouvée séparément) ; ketones reste "partial"/"kept"
+# comme isobutyrate (2-nonanone est un survivable YCH officiellement publié,
+# champ `twoNonanone` -- CLAUDE.md) mais la citation du composé reste
+# associée à l'agrégat BarthHaas complet ("ketones" inclut aussi le
+# 2-undécanone, non documenté comme survivable -- même réserve que
+# PROCESS_SURVIVAL["ketones"]["confidence"]="low").
+PROCESS_STAGE_SURVIVAL: dict[str, dict[str, dict[str, str]]] = {
+    "myrcene": {
+        "boil": {"state": "lost", "source": "Janish, The New IPA / OSU Hop Lab",
+                 "note": "~50% loss after 10 minutes of active boil, essentially gone "
+                         "by the end of a full 60-minute boil."},
+        "whirlpool": {"state": "partial", "source": "docs/mapping_compounds.txt",
+                      "note": "Past active boiling, exposure is lower -- a meaningful "
+                              "aromatic contributor at whirlpool, but not the full "
+                              "measured amount."},
+        "afdh": {"state": "kept", "source": "docs/mapping_compounds.txt",
+                 "note": "Major dry-hop aromatic contributor -- added cold, not carried "
+                         "over from a boil."},
+        "pfdh": {"state": "kept", "source": "docs/mapping_compounds.txt",
+                 "note": "Same cold-side dry-hop contribution as an active-fermentation "
+                         "addition."},
+    },
+    "beta-pinene": {
+        "boil": {"state": "lost",
+                 "source": "reference.PROCESS_SURVIVAL_EXPLANATIONS['dry hop / late additions']",
+                 "note": "Volatile monoterpene hydrocarbon, stripped by evaporation during "
+                         "a boil -- same subclass as myrcene, but without a specifically "
+                         "quantified boil-time figure of its own."},
+        "whirlpool": {"state": "lost",
+                      "source": "reference.PROCESS_SURVIVAL_EXPLANATIONS['dry hop / late additions']",
+                      "note": "Unlike myrcene, no source documents whirlpool survival for "
+                              "beta-pinene specifically -- its annotation is 'dry hop / "
+                              "late additions' only, never 'survives whirlpool'."},
+        "afdh": {"state": "kept",
+                 "source": "reference.PROCESS_SURVIVAL_EXPLANATIONS['dry hop / late additions']",
+                 "note": "Only additions with little or no boil exposure keep it close to "
+                         "the measured amount."},
+        "pfdh": {"state": "kept",
+                 "source": "reference.PROCESS_SURVIVAL_EXPLANATIONS['dry hop / late additions']",
+                 "note": "Same cold-side reasoning as an active-fermentation addition."},
+    },
+    "humulene": {
+        "boil": {"state": "precursor", "source": "Janish, The New IPA / JAFC",
+                 "note": "The raw hydrocarbon evaporates as-is, but a long boil (a Saaz "
+                         "study puts it over ~20 minutes) oxidizes it into humulene "
+                         "epoxides I/II/III -- the noble, spicy character comes from "
+                         "these derivatives, not the measured compound itself."},
+        "whirlpool": {"state": "precursor", "source": "docs/mapping_compounds.txt",
+                      "note": "The same oxidation continues at kettle/whirlpool "
+                              "temperature (wort stays above the ~79°C isomerization "
+                              "threshold)."},
+        "afdh": {"state": "lost",
+                 "source": "barthhaas_hop_flavorist_seminar_notes (Christian Scheb, BarthHaas Academy)",
+                 "note": "As a raw, non-polar hydrocarbon it isn't produced by a cold dry "
+                         "hop addition, and active fermentation strips volatiles via "
+                         "CO2 off-gassing and yeast adsorption."},
+        "pfdh": {"state": "kept", "source": "docs/mapping_compounds.txt",
+                 "note": "No more CO2-stripping once fermentation is done -- the raw "
+                         "hydrocarbon from a cold addition persists better."},
+    },
+    "caryophyllene": {
+        "boil": {"state": "precursor", "source": "Janish, The New IPA / ASBC",
+                 "note": "Same mechanism as humulene: the raw hydrocarbon evaporates "
+                         "as-is, but a long boil oxidizes it into caryophyllene oxide, "
+                         "the source of its persistent spicy character."},
+        "whirlpool": {"state": "precursor", "source": "docs/mapping_compounds.txt",
+                      "note": "Same oxidation continues at kettle/whirlpool temperature."},
+        "afdh": {"state": "lost",
+                 "source": "barthhaas_hop_flavorist_seminar_notes (Christian Scheb, BarthHaas Academy)",
+                 "note": "Raw, non-polar hydrocarbon -- stripped by CO2 off-gassing and "
+                         "yeast adsorption during active fermentation, same as humulene."},
+        "pfdh": {"state": "kept", "source": "docs/mapping_compounds.txt",
+                 "note": "No more CO2-stripping once fermentation is done."},
+    },
+    "farnesene": {
+        "boil": {"state": "precursor",
+                 "source": "reference.PROCESS_SURVIVAL_EXPLANATIONS['direct traces, contributes via oxidation']",
+                 "note": "Same sesquiterpene-hydrocarbon class behavior as humulene/"
+                         "caryophyllene (can oxidize into farnesol) -- no farnesene-"
+                         "specific boil-time citation found, class-level annotation only."},
+        "whirlpool": {"state": "precursor",
+                      "source": "reference.PROCESS_SURVIVAL_EXPLANATIONS['direct traces, contributes via oxidation']",
+                      "note": "Same class-level reasoning as humulene/caryophyllene."},
+        "afdh": {"state": "lost",
+                 "source": "barthhaas_hop_flavorist_seminar_notes (Christian Scheb, BarthHaas Academy)",
+                 "note": "Raw sesquiterpene hydrocarbon -- same CO2-stripping mechanism "
+                         "as humulene/caryophyllene."},
+        "pfdh": {"state": "kept", "source": "docs/mapping_compounds.txt",
+                 "note": "No more CO2-stripping once fermentation is done."},
+    },
+    "selinene": {
+        "boil": {"state": "precursor",
+                 "source": "reference.PROCESS_SURVIVAL_EXPLANATIONS['direct traces, contributes via oxidation']",
+                 "note": "Same sesquiterpene-hydrocarbon class behavior as humulene/"
+                         "caryophyllene -- no selinene-specific boil-time citation found, "
+                         "class-level annotation only."},
+        "whirlpool": {"state": "precursor",
+                      "source": "reference.PROCESS_SURVIVAL_EXPLANATIONS['direct traces, contributes via oxidation']",
+                      "note": "Same class-level reasoning as humulene/caryophyllene."},
+        "afdh": {"state": "lost",
+                 "source": "barthhaas_hop_flavorist_seminar_notes (Christian Scheb, BarthHaas Academy)",
+                 "note": "Raw sesquiterpene hydrocarbon -- same CO2-stripping mechanism "
+                         "as humulene/caryophyllene."},
+        "pfdh": {"state": "kept", "source": "docs/mapping_compounds.txt",
+                 "note": "No more CO2-stripping once fermentation is done."},
+    },
+    "linalool": {
+        "boil": {"state": "lost",
+                 "source": "reference.PROCESS_SURVIVAL_EXPLANATIONS['boil-sensitive, survives whirlpool']",
+                 "note": "Same quantified loss order as myrcene under active boil -- "
+                         "~50% at 10 minutes, essentially gone by 60 minutes. Not "
+                         "boil-resistant just because it's oxygenated."},
+        "whirlpool": {"state": "kept", "source": "CLAUDE.md — YCH handbook rule 1",
+                      "note": "One of the 8 officially published YCH survivable "
+                              "compounds -- high survivables are usable early, including "
+                              "whirlpool."},
+        "afdh": {"state": "kept", "source": "CLAUDE.md — YCH handbook rule 4",
+                 "note": "Loading the wort early with survivables (linalool included) "
+                         "favors biotransformation."},
+        "pfdh": {"state": "kept", "source": "CLAUDE.md — YCH handbook rule 1",
+                 "note": "Survives a cold, post-fermentation dry hop addition without "
+                         "reservation."},
+    },
+    "geraniol": {
+        "boil": {"state": "partial",
+                 "source": "reference.PROCESS_SURVIVAL_EXPLANATIONS['heat-resistant, persists through boiling']",
+                 "note": "Higher boiling point than linalool/myrcene -- decreases "
+                         "gradually over a full boil but is still measurable at 60 "
+                         "minutes."},
+        "whirlpool": {"state": "kept", "source": "CLAUDE.md — YCH handbook rule 1",
+                      "note": "One of the 8 officially published YCH survivable "
+                              "compounds."},
+        "afdh": {"state": "kept", "source": "CLAUDE.md — YCH handbook rule 4",
+                 "note": "Key biotransformation molecule -- converted by yeast during "
+                         "active fermentation into β-citronellol, amplifying the "
+                         "citrus/floral profile."},
+        "pfdh": {"state": "kept", "source": "CLAUDE.md — YCH handbook rule 1",
+                 "note": "Survives a cold, post-fermentation dry hop addition without "
+                         "reservation."},
+    },
+    "isobutyrate": {
+        "boil": {"state": "partial", "source": "Janish, Survivables: Unpacking Hot-Side Hop Flavor",
+                 "note": "Ester aggregate (isobutyl isobutyrate, isoamyl isobutyrate, "
+                         "2-methylbutyl isobutyrate) -- all 3 are officially published "
+                         "YCH survivables, but boil exposure still reduces the amount "
+                         "that carries through."},
+        "whirlpool": {"state": "kept", "source": "CLAUDE.md — YCH handbook rule 1",
+                      "note": "All 3 named esters in this aggregate are officially "
+                              "published YCH survivable compounds."},
+        "afdh": {"state": "kept", "source": "CLAUDE.md — YCH handbook rule 1",
+                 "note": "Same reasoning -- high survivables usable through active "
+                         "fermentation dry hop."},
+        "pfdh": {"state": "kept", "source": "CLAUDE.md — YCH handbook rule 1",
+                 "note": "Survives a cold, post-fermentation dry hop addition without "
+                         "reservation."},
+    },
+    "ketones": {
+        "boil": {"state": "partial", "source": "CLAUDE.md — YCH handbook rule 1 (2-nonanone only)",
+                 "note": "2-nonanone (field `twoNonanone`) is an officially published YCH "
+                         "survivable, but the BarthHaas 'ketones' aggregate also includes "
+                         "2-undecanone, which isn't -- lower confidence than isobutyrate "
+                         "for this reason (see reference.PROCESS_SURVIVAL['ketones'])."},
+        "whirlpool": {"state": "kept", "source": "CLAUDE.md — YCH handbook rule 1 (2-nonanone only)",
+                      "note": "2-nonanone specifically is a high survivable, usable at "
+                              "whirlpool -- but the aggregate mixes in an undocumented "
+                              "compound (2-undecanone)."},
+        "afdh": {"state": "kept", "source": "CLAUDE.md — YCH handbook rule 1 (2-nonanone only)",
+                 "note": "Same reasoning, same aggregate caveat."},
+        "pfdh": {"state": "kept", "source": "CLAUDE.md — YCH handbook rule 1 (2-nonanone only)",
+                 "note": "Survives a cold, post-fermentation dry hop addition -- same "
+                         "aggregate caveat."},
+    },
+    "thiols": {
+        "boil": {"state": "partial", "source": "CLAUDE.md — YCH handbook (order-of-magnitude thresholds)",
+                 "note": "Present in vanishingly small quantities (µg/kg) and highly "
+                         "volatile -- boiling drives off most of it."},
+        "whirlpool": {"state": "kept",
+                      "source": "CLAUDE.md — YCH handbook (\"wort-soluble compounds pass to the fermenter\")",
+                      "note": "3-mercaptohexanol (3MH) specifically is named as surviving "
+                              "into the fermenter from a whirlpool/knockout addition."},
+        "afdh": {"state": "kept", "source": "CLAUDE.md — YCH handbook rule 1",
+                 "note": "One of the 8 officially published YCH survivable compounds "
+                         "(field `threeMercaptohexanol`)."},
+        "pfdh": {"state": "kept", "source": "CLAUDE.md — YCH handbook rule 1",
+                 "note": "Survives a cold, post-fermentation dry hop addition without "
+                         "reservation."},
+    },
+}
+
 # Amorce ingrédient -> descripteurs de la roue d'arôme houblon (T76,
 # 2026-08-22, demande utilisateur explicite -- "build a dictionary or
 # mapping between each ingredient in fooddb and possible note descriptor
