@@ -2552,6 +2552,26 @@ Mais la transparence doit être RÉELLE, pas un simple adverbe :
   absent, citra n'en a aucune mesure). 10 nouveaux tests (5 unitaires sur
   `_coverage_cell_text`, 5 AppTest sur `_coverage`), suite verte (391 tests).
 
+  **Addendum (2026-08-30, retour utilisateur en test réel : Citra +
+  Mosaic, sélinène manquant).** « I have no idea how to add this compound.
+  Is it possible to show examples of hops and the process of addition ».
+  Panneau "Where would these come from?" ajouté dans la carte "A priori not
+  covered" : pour CHAQUE composé non couvert (plain ET precursor-only),
+  `app._coverage_delivering_stages` (lecture pure de `matching.compound_
+  survival`, quels stades T119 livrent RÉELLEMENT ce composé -- jamais
+  precursor/lost) + `app._coverage_source_suggestions` (houblons RÉELS avec
+  ce composé mesuré, triés par quantité -- ceux déjà dans le plan signalés
+  à part : "add it at PFDH too", pas une nouvelle variété à chercher).
+  **Pas un solveur** (T120/T122 l'interdisent explicitement) : aucun
+  houblon n'est ajouté automatiquement, aucun blend n'est proposé -- une
+  simple lecture de données déjà chargées, symétrique à la question
+  houblon->composés déjà posée par le reste de l'outil. Vérifié en direct
+  (Chrome) sur le scénario RÉEL signalé : Citra (whirlpool) + Mosaic (afdh)
+  -> "Selinene — delivered only from a PFDH addition; real examples with
+  measured data: Topaz, Ella." 5 nouveaux tests (états delivering stages,
+  déjà-dans-le-plan vs. exemples réels, repli honnête sans aucune donnée),
+  suite verte (396 tests).
+
 - [x] **T122 — Garde-fou : l'outil discrimine-t-il vraiment ?**
   *À faire AVANT d'écrire la GUI de T121.*
 

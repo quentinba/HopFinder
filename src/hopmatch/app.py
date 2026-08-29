@@ -6010,6 +6010,72 @@ def _coverage_cell_text(compound: str, stage: str, entry: dict | None) -> str:
     return "Lost during this addition"
 
 
+_COVERAGE_EXAMPLE_HOPS = 5
+
+
+def _coverage_delivering_stages(compound: str) -> list[str]:
+    """Stades (parmi les 4 de T119) où `compound`, une fois mesuré chez un
+    houblon, est effectivement LIVRÉ (`state` kept/partial) -- jamais
+    precursor/lost. Pure lecture de `matching.compound_survival`, ordre
+    `_COVERAGE_STAGE_LABELS` (boil -> pfdh)."""
+    return [stage for stage in _COVERAGE_STAGE_LABELS
+           if (info := matching.compound_survival(compound, stage))
+           and info["state"] in ("kept", "partial")]
+
+
+def _coverage_source_suggestions(hops: dict, comp: dict, compound: str,
+                                 plan_varieties: set[str]) -> str:
+    """Phrase "where would this come from?" pour UN composé non couvert --
+    2026-08-30, demande utilisateur explicite après un test réel (Citra +
+    Mosaic, selinene manquant) : « I have no idea how to add this compound.
+    Is it possible to show examples of hops and the process of addition ».
+
+    **Pas une recommandation de blend** (le ticket T120/T122 interdit tout
+    solveur/proposition) -- une simple LECTURE de données déjà chargées :
+    quels houblons réels ont ce composé mesuré (triés par quantité), et à
+    quel(s) stade(s) T119 le livre (jamais precursor/lost). Aucun houblon
+    n'est ajouté au plan automatiquement ; c'est à l'utilisateur de le faire.
+    Houblons DÉJÀ dans le plan traités à part (réponse la plus actionnable :
+    "vous l'avez déjà, ajoutez-le aussi à ce stade" plutôt qu'une nouvelle
+    variété).
+
+    **Provenance affichée par houblon** (2026-08-30, retour utilisateur
+    direct : « you should write where the source of this information [comes
+    from] ») -- `comp[v][compound]["sources"]` (déjà réconcilié par
+    `matching.load`), même convention d'affichage brute (noms de source en
+    minuscules, ex. "yakima") que la colonne "Sources" utilisée partout
+    ailleurs dans l'app (Browse, expanders, Compare Hops -- jamais une
+    affirmation sans provenance, principe "honnêteté d'abord" du projet)."""
+    delivering_stages = _coverage_delivering_stages(compound)
+    if not delivering_stages:
+        return ("never reaches \"Delivered\" at any tracked stage in this database "
+                "(always lost, or a precursor with no stage where the raw compound "
+                "survives).")
+    stage_text = " or ".join(_COVERAGE_STAGE_LABELS[s] for s in delivering_stages)
+
+    def _hop_with_source(v: str) -> str:
+        sources = ", ".join(sorted(comp[v][compound].get("sources", ())))
+        return f"{hops[v]['name']} ({sources})" if sources else hops[v]["name"]
+
+    already = sorted(
+        (v for v in plan_varieties if comp.get(v, {}).get(compound, {}).get("mid") not in (None, 0)),
+        key=lambda v: -comp[v][compound]["mid"])
+    candidates = sorted(
+        (v for v in comp if v not in plan_varieties
+         and comp[v].get(compound, {}).get("mid") not in (None, 0)),
+        key=lambda v: -comp[v][compound]["mid"])[:_COVERAGE_EXAMPLE_HOPS]
+    bits = [f"delivered only from a {stage_text} addition"]
+    if already:
+        bits.append("already in your plan: " + ", ".join(_hop_with_source(v) for v in already) +
+                    f" — add it at {stage_text} too")
+    if candidates:
+        bits.append("real examples with measured data: " +
+                    ", ".join(_hop_with_source(v) for v in candidates))
+    if not already and not candidates:
+        bits.append("but no hop in this database has it measured at all")
+    return "; ".join(bits) + "."
+
+
 def _coverage(con) -> None:
     """T121 : nouveau mode "Hopping plan" -- grille composé × addition d'un
     plan de houblonnage (`matching.hopping_plan_coverage`, T120, sur la
@@ -6109,6 +6175,11 @@ def _coverage(con) -> None:
                     for r in precursor_only:
                         st.badge(_compound_display_label(r["compound"]), color="gray",
                                 help=_COVERAGE_PRECURSOR_CELL_TEXT)
+            st.write("**Where would these come from?**")
+            plan_varieties = {v for v, _ in plan}
+            for r in not_covered:
+                st.caption(f"**{_compound_display_label(r['compound'])}** — " +
+                          _coverage_source_suggestions(hops, comp, r["compound"], plan_varieties))
 
     with _panel_expander("Why \"a priori\"? What does each compound's coverage look like?"):
         st.write(
