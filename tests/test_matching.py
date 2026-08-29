@@ -353,6 +353,75 @@ def test_process_survival_never_consulted_by_any_scoring_path(db, monkeypatch):
     matching.contrast(db, descriptors=["citrus", "floral"])
     matching.by_descriptor(db, ["citrus", "tropical"])
 
+def test_compound_survival_only_produces_the_four_ordinal_states():
+    # T119 : `state` in {"kept", "partial", "lost", "precursor"}, vérifié
+    # sur TOUTES les entrées réelles de la matrice -- pas de 5e état qui se
+    # serait glissé par erreur.
+    allowed = {"kept", "partial", "lost", "precursor"}
+    for by_stage in matching.reference.PROCESS_STAGE_SURVIVAL.values():
+        for entry in by_stage.values():
+            assert entry["state"] in allowed
+
+def test_compound_survival_covers_all_eleven_compounds_and_four_stages():
+    # Périmètre exact du ticket : les 11 composés de
+    # reference.PROCESS_SURVIVAL (app._COMPARE_DETAIL_OIL_COMPOUNDS +
+    # thiols), chacun avec une décision sur les 4 stades -- pas de trou
+    # silencieux (composé mappé mais un stade oublié).
+    stages = {"boil", "whirlpool", "afdh", "pfdh"}
+    assert set(matching.reference.PROCESS_STAGE_SURVIVAL) == set(matching.reference.PROCESS_SURVIVAL)
+    for compound, by_stage in matching.reference.PROCESS_STAGE_SURVIVAL.items():
+        assert set(by_stage) == stages, f"{compound} : stades manquants {stages - set(by_stage)}"
+
+def test_compound_survival_returns_none_for_unmapped_compound_or_stage():
+    # Contrainte explicite du ticket : jamais un état par défaut fabriqué.
+    assert matching.compound_survival("limonene", "boil") is None
+    assert matching.compound_survival("nonexistent", "boil") is None
+    assert matching.compound_survival("myrcene", "fermentation") is None
+    assert matching.compound_survival("myrcene", "") is None
+
+def test_compound_survival_returns_full_structure_for_mapped_entry():
+    # Chaque entrée porte state/source/note, source et note non vides
+    # (contrainte du ticket : chaque décision doit avoir sa justification
+    # dans le code, jamais une affirmation nue).
+    info = matching.compound_survival("myrcene", "boil")
+    assert info["state"] == "lost"
+    assert info["source"] and info["note"]
+
+def test_compound_survival_every_entry_has_a_non_empty_source_and_note():
+    for compound, by_stage in matching.reference.PROCESS_STAGE_SURVIVAL.items():
+        for stage, entry in by_stage.items():
+            assert entry["source"].strip(), f"{compound}/{stage} sans source"
+            assert entry["note"].strip(), f"{compound}/{stage} sans note"
+
+def test_compound_survival_humulene_and_caryophyllene_are_precursors_hot_side_only():
+    # Coeur de la demande utilisateur T74/T115/T119 : l'oxydation des
+    # sesquiterpènes au côté chaud (boil/whirlpool) génère un dérivé
+    # DIFFÉRENT du composé mesuré -- jamais confondu avec une simple survie.
+    for compound in ("humulene", "caryophyllene", "farnesene", "selinene"):
+        assert matching.compound_survival(compound, "boil")["state"] == "precursor"
+        assert matching.compound_survival(compound, "whirlpool")["state"] == "precursor"
+        # Côté froid : le composé brut (pas le dérivé d'oxydation) domine à nouveau.
+        assert matching.compound_survival(compound, "pfdh")["state"] == "kept"
+
+def test_compound_survival_myrcene_and_linalool_share_the_same_boil_loss():
+    # Corrigé le 2026-08-29 vs. la proposition de départ du ticket (qui
+    # avait linalol à "partial" au boil) : la source citée par le ticket
+    # lui-même (PROCESS_SURVIVAL_EXPLANATIONS "boil-sensitive, survives
+    # whirlpool") documente le MÊME ordre de perte pour les deux au boil.
+    assert matching.compound_survival("myrcene", "boil")["state"] == "lost"
+    assert matching.compound_survival("linalool", "boil")["state"] == "lost"
+    assert matching.compound_survival("linalool", "whirlpool")["state"] == "kept"
+
+def test_compound_survival_never_consulted_by_any_scoring_path(db, monkeypatch):
+    # Même garde-fou structurel que test_process_survival_never_consulted_
+    # by_any_scoring_path ci-dessus, pour la nouvelle fonction.
+    def _boom(compound, stage):
+        raise AssertionError(f"compound_survival() appelé depuis un chemin de score pour {compound!r}/{stage!r}")
+    monkeypatch.setattr(matching, "compound_survival", _boom)
+    matching.amplify(db, "_citrus")
+    matching.contrast(db, descriptors=["citrus", "floral"])
+    matching.by_descriptor(db, ["citrus", "tropical"])
+
 def test_amplify_ranks(db):
     r = matching.amplify(db, "_citrus")
     assert r["ranked"], "au moins un houblon"
