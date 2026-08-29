@@ -220,6 +220,39 @@ CREATE TABLE style_hop_pairings (
 """
 SCHEMA += STYLE_HOP_PAIRINGS_SCHEMA
 
+# Où un houblon est réellement utilisé dans le procédé, et combien (T88,
+# épique B, socle empirique de T99) -- beer-analytics.com, pages
+# `/hops/<purpose>/<slug>/` (purpose = aroma/bittering/dual-purpose, lu
+# depuis le sitemap réel, JAMAIS deviné -- une 4e catégorie d'URL existe,
+# `/hops/flavors/<terme>/`, ce sont des pages de DESCRIPTEUR D'ARÔME, pas
+# des houblons, vérifié en direct et exclue). `usage-types.json` (recipes_
+# count par étape : Mash/First Wort/Boil/Aroma/Dry Hop -- vocabulaire BRUT
+# de la source, jamais renommé/normalisé) + `amount-used-per-use.json`
+# (boxplot q1/median/q3 par étape, même 5 clés). ⚠ `Aroma` ici ≠ whirlpool :
+# couvre les additions tardives fin d'ébullition/flameout selon les formats
+# de recette importés par beer-analytics -- jamais renommé "Whirlpool" en
+# GUI, jamais fusionné avec le `Whirlpool` de MMuM (T126, champ distinct
+# d'une autre source, coexiste sans fusion). `variety` résolu via `ingest.
+# _resolve_hop_variety`, NULL si non résolu (leurs slugs ne couvrent pas
+# nos 189 variétés, taux de résolution rapporté comme ailleurs).
+#
+# `typical-styles-relative.json` (styles typiques d'un houblon, listé par
+# le ticket) N'A PAS de colonne ici : ne s'indexe pas par `use_type` comme
+# le reste de cette table (c'est une relation houblon->style, pas houblon->
+# étape) -- le `CREATE TABLE` du ticket ne lui réservait aucune place.
+# Donnée réelle et valable (vérifiée en direct), mais hors du schéma tel
+# qu'écrit -- voir T131 (nouveau ticket, backlog) plutôt qu'une table
+# inventée ici sans le demander.
+HOP_USAGE_STATS_SCHEMA = """
+CREATE TABLE hop_usage_stats (
+    variety TEXT, hop_name TEXT, use_type TEXT, recipes_count INTEGER,
+    amount_q1 REAL, amount_median REAL, amount_q3 REAL,
+    source TEXT, fetched_at TEXT,
+    PRIMARY KEY (variety, use_type, source)
+);
+"""
+SCHEMA += HOP_USAGE_STATS_SCHEMA
+
 # alpha_acid/beta_acid retirés de ce filtre (2026-08-19, demande utilisateur) :
 # non-aromatiques (jamais utilisés dans le scoring moléculaire, qui n'itère
 # que sur les molécules de la NOTE -- aucune note FooDB ne référence jamais
@@ -248,7 +281,8 @@ def init_db(con: sqlite3.Connection) -> None:
         "DROP TABLE IF EXISTS hop_beer_styles;"
         "DROP TABLE IF EXISTS style_recipe_stats;"
         "DROP TABLE IF EXISTS style_hop_usage;"
-        "DROP TABLE IF EXISTS style_hop_pairings;")
+        "DROP TABLE IF EXISTS style_hop_pairings;"
+        "DROP TABLE IF EXISTS hop_usage_stats;")
     con.executescript(SCHEMA)
 
 

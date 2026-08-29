@@ -636,6 +636,14 @@ def test_parse_beer_analytics_style_name():
 def test_parse_beer_analytics_style_name_absent_returns_none():
     assert parsers.parse_beer_analytics_style_name("<p>rien ici</p>") is None
 
+def test_parse_beer_analytics_hop_name_strips_bare_hops_suffix():
+    # gabarit trimmé d'une vraie page beer-analytics.com/hops/dual-purpose/citra/
+    html = "<html><head><title> Citra Hops...</title></head><body><h1>Citra Hops</h1></body></html>"
+    assert parsers.parse_beer_analytics_hop_name(html) == "Citra"
+
+def test_parse_beer_analytics_hop_name_absent_returns_none():
+    assert parsers.parse_beer_analytics_hop_name("<p>rien ici</p>") is None
+
 def test_plotly_traces_ignores_layout():
     # payload["layout"] (le template Plotly, ~90% du poids réel observé)
     # ne doit jamais être renvoyé -- seul payload["data"] compte.

@@ -1105,3 +1105,120 @@ def test_ingest_style_hop_pairings_creates_table_without_wiping_existing_data(tm
     con.close()
     assert hops == ["cascade"]
     assert n == 2
+
+
+# --------------------------------------------------------------------------- #
+# T88 -- beer-analytics.com (hop_usage_stats)
+# --------------------------------------------------------------------------- #
+
+def test_ba_hop_page_regex_excludes_flavors_pages():
+    # /hops/flavors/<terme>/ = pages de descripteur d'arôme, PAS des houblons
+    # (vérifié en direct, 184 pages réelles) -- ne doivent jamais être
+    # traitées comme des houblons.
+    sitemap = (
+        "<urlset>"
+        "<url><loc>https://www.beer-analytics.com/hops/dual-purpose/citra/</loc></url>"
+        "<url><loc>https://www.beer-analytics.com/hops/flavors/apricot/</loc></url>"
+        "<url><loc>https://www.beer-analytics.com/hops/aroma/ahtanum/</loc></url>"
+        "</urlset>")
+    matches = ingest._BA_HOP_PAGE_RE.findall(sitemap)
+    assert matches == ["/hops/dual-purpose/citra/", "/hops/aroma/ahtanum/"]
+
+_BA_HOP_SITEMAP_FIXTURE = (
+    "<?xml version=\"1.0\"?><urlset><url><loc>"
+    "https://www.beer-analytics.com/hops/dual-purpose/citra/"
+    "</loc></url></urlset>")
+
+_BA_HOP_PAGE_FIXTURE = (
+    "<html><body><h1>Citra Hops</h1>"
+    '<div data-chart="/hops/dual-purpose/citra/charts/usage-types.json"></div>'
+    '<div data-chart="/hops/dual-purpose/citra/charts/amount-used-per-use.json"></div>'
+    "</body></html>")
+
+# gabarit trimmé d'un vrai usage-types.json (Citra, 2026-08-28)
+_BA_USAGE_TYPES_FIXTURE = json.dumps({
+    "data": [{"x": ["Mash", "First Wort", "Boil", "Aroma", "Dry Hop"],
+              "y": [439, 5317, 98936, 67840, 90061], "type": "bar"}],
+    "layout": {},
+})
+_BA_AMOUNT_PER_USE_FIXTURE = json.dumps({
+    "data": [
+        {"name": "Mash", "type": "box", "q1": [0.08], "median": [0.13], "q3": [0.23]},
+        {"name": "First Wort", "type": "box", "q1": [0.05], "median": [0.09], "q3": [0.14]},
+        {"name": "Boil", "type": "box", "q1": [0.13], "median": [0.24], "q3": [0.40]},
+        {"name": "Aroma", "type": "box", "q1": [0.12], "median": [0.18], "q3": [0.28]},
+        {"name": "Dry Hop", "type": "box", "q1": [0.15], "median": [0.21], "q3": [0.31]},
+    ],
+    "layout": {},
+})
+
+_BA_HOP_USAGE_STATS_FIXTURES = {
+    "/sitemap.xml": _BA_HOP_SITEMAP_FIXTURE,
+    "/hops/dual-purpose/citra/": _BA_HOP_PAGE_FIXTURE,
+    "/hops/dual-purpose/citra/charts/usage-types.json": _BA_USAGE_TYPES_FIXTURE,
+    "/hops/dual-purpose/citra/charts/amount-used-per-use.json": _BA_AMOUNT_PER_USE_FIXTURE,
+}
+
+
+def test_ingest_hop_usage_stats_joins_counts_and_amounts_by_use_type(tmp_path, monkeypatch):
+    monkeypatch.setattr(ingest, "_beer_analytics_fetch",
+                        lambda path, **kw: _BA_HOP_USAGE_STATS_FIXTURES[path])
+    monkeypatch.setattr(ingest, "_beer_analytics_get",
+                        lambda path, **kw: json.loads(_BA_HOP_USAGE_STATS_FIXTURES[path]))
+
+    db_path = str(tmp_path / "t.db")
+    ingest.ingest_hop_usage_stats(db_path)
+
+    con = connect(db_path)
+    rows = {r["use_type"]: dict(r) for r in con.execute(
+        "SELECT * FROM hop_usage_stats WHERE hop_name='Citra'")}
+    con.close()
+
+    assert set(rows) == {"Mash", "First Wort", "Boil", "Aroma", "Dry Hop"}
+    # vocabulaire BRUT de la source, jamais renommé (ex. "Aroma" pas "Whirlpool")
+    assert rows["Boil"]["recipes_count"] == 98936
+    assert rows["Boil"]["amount_median"] == 0.24
+    assert rows["Dry Hop"]["recipes_count"] == 90061
+    assert rows["Dry Hop"]["amount_q1"] == 0.15
+
+def test_ingest_hop_usage_stats_resolves_variety_and_strips_hops_suffix(tmp_path, monkeypatch):
+    monkeypatch.setattr(ingest, "_beer_analytics_fetch",
+                        lambda path, **kw: _BA_HOP_USAGE_STATS_FIXTURES[path])
+    monkeypatch.setattr(ingest, "_beer_analytics_get",
+                        lambda path, **kw: json.loads(_BA_HOP_USAGE_STATS_FIXTURES[path]))
+
+    con = connect(str(tmp_path / "t.db"))
+    init_db(con)
+    con.execute("INSERT INTO hops (variety, name, region, sources, purpose) "
+               "VALUES ('citra', 'Citra', 'United States', 'yakima', NULL)")
+    con.commit(); con.close()
+
+    ingest.ingest_hop_usage_stats(str(tmp_path / "t.db"))
+
+    con = connect(str(tmp_path / "t.db"))
+    row = con.execute("SELECT * FROM hop_usage_stats WHERE use_type='Boil'").fetchone()
+    con.close()
+    # "Citra Hops" -> "Citra" (suffixe "Hops" retiré) -> résolu vers 'citra'
+    assert row["hop_name"] == "Citra"
+    assert row["variety"] == "citra"
+
+def test_ingest_hop_usage_stats_creates_table_without_wiping_existing_data(tmp_path, monkeypatch):
+    con = connect(str(tmp_path / "t.db"))
+    init_db(con)
+    con.execute("INSERT INTO hops (variety, name, region, sources, purpose) "
+               "VALUES ('citra', 'Citra', 'United States', 'yakima', NULL)")
+    con.execute("DROP TABLE hop_usage_stats")
+    con.commit(); con.close()
+
+    monkeypatch.setattr(ingest, "_beer_analytics_fetch",
+                        lambda path, **kw: _BA_HOP_USAGE_STATS_FIXTURES[path])
+    monkeypatch.setattr(ingest, "_beer_analytics_get",
+                        lambda path, **kw: json.loads(_BA_HOP_USAGE_STATS_FIXTURES[path]))
+    ingest.ingest_hop_usage_stats(str(tmp_path / "t.db"))
+
+    con = connect(str(tmp_path / "t.db"))
+    hops = [r[0] for r in con.execute("SELECT variety FROM hops")]
+    n = con.execute("SELECT COUNT(*) FROM hop_usage_stats").fetchone()[0]
+    con.close()
+    assert hops == ["citra"]
+    assert n == 5  # 5 use_type

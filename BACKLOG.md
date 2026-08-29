@@ -821,38 +821,58 @@ Elles sont écrites pour qu'aucune décision implicite ne reste à deviner.
   table (pas ce ticket, infrastructure/données pures — pas d'entrée
   `_RECENT_UPDATES`).
 
-- [ ] **T88 — `hop_usage_stats` : où ce houblon est réellement utilisé**
-  *Socle empirique de T99. À faire EN PREMIER dans l'épique B.*
+- [x] **T88 — `hop_usage_stats` : où ce houblon est réellement utilisé**
+  *Socle empirique de T99.*
 
-  **Charts par houblon** (URL : `/hops/<purpose>/<slug>/charts/…`, où
-  `<purpose>` vaut `aroma`/`bittering`/`dual-purpose` — le récupérer depuis la
-  page du houblon, ne pas le deviner) :
-  - `usage-types.json` → une trace `bar`, `x = ["Mash","First Wort","Boil",
-    "Aroma","Dry Hop"]`, `y` = nombre de recettes. Exemple réel Citra :
-    `[439, 5317, 98935, 67838, 90059]` sur 154 571 recettes.
-  - `amount-used-per-use.json` → une boîte par type d'usage
-    (`q1`/`median`/`q3`).
-  - `typical-styles-relative.json` → les styles typiques de ce houblon.
+  **Compte rendu (2026-08-28/29)** : `purpose` lu depuis le sitemap réel, jamais
+  deviné, comme demandé — et bien lui en a pris : **4 catégories d'URL
+  existent**, pas 3. `/hops/aroma/`, `/hops/bittering/`, `/hops/dual-purpose/`
+  (435 pages, de vrais houblons) MAIS AUSSI `/hops/flavors/<terme>/` (184
+  pages : `alfalfa`, `allspice`, `apricot`, `black-pepper`...) — ce ne sont PAS
+  des houblons, ce sont des pages de DESCRIPTEUR D'ARÔME (une sorte de roue
+  d'arôme navigable). Exclues explicitement (`ingest._BA_HOP_PAGE_RE`, lookahead
+  négatif) — les inclure aurait pollué `hop_usage_stats` avec 184 fausses
+  entrées « houblon ». `usage-types.json`/`amount-used-per-use.json` vérifiés
+  en direct sur Citra : chiffres quasi identiques à l'exemple du ticket
+  (`[439, 5317, 98936, 67840, 90061]` vs `[439, 5317, 98935, 67838, 90059]` —
+  juste plus récent), jointure par nom d'étape confirmée fiable (mêmes 5 clés
+  des deux côtés, même ordre). `hop_name` nettoyé du suffixe " Hops" du `<h1>`
+  (`parsers.strip_bare_hops_suffix`, réutilisé de T123 — "Citra Hops" →
+  "Citra").
 
-  ```sql
-  CREATE TABLE hop_usage_stats (
-      variety TEXT, hop_name TEXT, use_type TEXT, recipes_count INTEGER,
-      amount_q1 REAL, amount_median REAL, amount_q3 REAL,
-      source TEXT, fetched_at TEXT,
-      PRIMARY KEY (variety, use_type, source)
-  );
-  ```
+  ⚠ **`typical-styles-relative.json` non capturé** (listé par le ticket mais
+  sans place dans le `CREATE TABLE` fourni, qui n'indexe que par `use_type` —
+  relation houblon→style, pas houblon→étape). Donnée réelle et vérifiée
+  (ex. Citra → Hazy IPA 55%, IPA 37%...) mais hors du schéma tel qu'écrit —
+  voir **T131** (nouveau ticket) plutôt qu'une table inventée sans le
+  demander.
 
-  ⚠ **`Aroma` chez beer-analytics ≠ whirlpool.** Leur enum vient des formats
-  de recette importés ; `Aroma` couvre les additions tardives de fin
-  d'ébullition/flameout. Ne pas le renommer « Whirlpool » dans la GUI, et ne
-  pas le confondre avec le `Whirlpool` de MMuM (T126), qui est un champ
-  distinct d'une autre source. **Les deux vues coexistent sans être
-  fusionnées.**
+  **401/435 (92%) pages houblon couvertes, 2837 lignes, 143/435 houblons
+  résolus vers une `variety`** (leurs 435 slugs, dont beaucoup de houblons
+  rares/expérimentaux hors de notre catalogue à 203 variétés, ne couvrent
+  qu'une fraction — cohérent avec l'attente du ticket, taux rapporté comme
+  pour BeerMaverick).
 
-  **Couverture attendue** : leurs slugs de houblons ne couvrent pas nos 189
-  variétés. Rapporter le taux de résolution comme ailleurs (143/203 pour
-  BeerMaverick), et laisser `NULL` plutôt que de forcer une correspondance.
+  ⚠ **Crawl le plus laborieux de l'épique B** : ~10h étalées sur la nuit du
+  28 au 29, une dizaine de cycles arrêt/reprise (blocages nets de 15-40 min,
+  CPU quasi nul, `curl` direct restant rapide entre deux incidents — sauf UNE
+  fois où `curl` lui-même a timeout 60s sur beer-analytics.com spécifiquement,
+  alors qu'un `curl` simultané vers google.com répondait normalement --
+  suggère une combinaison de flakiness locale ET de ralentissements
+  ponctuels réels côté serveur, jamais isolée avec certitude à une seule
+  cause unique, voir CLAUDE.md). Reprise laissée tourner sans intervention
+  une bonne partie de la nuit (accord explicite utilisateur, « proceed as
+  much as possible... you have my permission ») : 234→387→401 houblons entre
+  minuit et le matin, progression lente mais jamais nulle sur la durée totale.
+  Terminé proprement au matin (réseau redevenu rapide, 0,2s/requête).
+
+  **`Aroma` ≠ whirlpool, respecté** : vocabulaire brut de la source
+  (Mash/First Wort/Boil/Aroma/Dry Hop), jamais renommé, jamais fusionné avec
+  le `Whirlpool` distinct de MMuM (T126, pas encore ingéré).
+
+  **Aucun changement GUI** — infrastructure/données pures, pas d'entrée
+  `_RECENT_UPDATES`. Attribution + statut détaillé par table : voir
+  `docs/DATA_SOURCES.md`, section beer-analytics.com (nouvelle, T89).
 
 - [ ] **T89 — Posture d'accès, cache, attribution, et prise de contact**
 
@@ -2159,6 +2179,50 @@ Mais la transparence doit être RÉELLE, pas un simple adverbe :
   **Statut** : opportuniste, ne bloque rien et n'est bloqué par rien
   -- à faire quand une session GUI légère est utile entre deux tickets plus
   lourds.
+
+- [ ] **T131 — `hop_typical_styles` : dans quels styles un houblon est-il utilisé**
+
+  **Origine** : découvert en implémentant T88 (2026-08-28/29). Chaque page
+  houblon beer-analytics.com porte un chart `typical-styles-relative.json`
+  (et son pendant `typical-styles-absolute.json`) que le ticket T88 listait
+  explicitement ("les styles typiques de ce houblon") mais dont le
+  `CREATE TABLE hop_usage_stats` fourni ne prévoyait aucune colonne — cette
+  table n'est indexée QUE par `use_type` (étape de procédé), alors que
+  cette donnée est une relation houblon→STYLE, un axe complètement
+  différent. Vérifié en direct sur Citra : trace `bar`, `x` = nom de style
+  (`"Hazy IPA"`, `"IPA"`, `"White IPA"`, `"Double IPA"`, `"Specialty IPA"`...),
+  `y` = part relative (0,55 pour Hazy IPA, la plus haute) — format identique
+  à `usage-types.json`, même parseur `parsers.plotly_traces` réutilisable
+  directement, aucun nouveau parseur nécessaire.
+
+  **Ce que ça apporte** : c'est la relation INVERSE de `style_hop_usage`
+  (T86, "pour ce style, quels houblons sont populaires") — ici "pour ce
+  houblon, dans quels styles est-il populaire", empirique (recettes
+  réelles), à ne jamais confondre avec `hop_beer_styles` (T83, éditorial —
+  suggestion Yakima/BeerMaverick, pas une mesure de fréquence). Les trois
+  restent des relations séparées, jamais fusionnées (même règle que les
+  trois relations houblon↔houblon établie en T25/T109).
+
+  **Table proposée** (à confirmer/ajuster en implémentant, comme tous les
+  tickets de ce backlog) :
+  ```sql
+  CREATE TABLE hop_typical_styles (
+      variety TEXT, hop_name TEXT, style_label TEXT, style_id TEXT,
+      relative_share REAL, source TEXT, fetched_at TEXT,
+      PRIMARY KEY (hop_name, style_label)
+  );
+  ```
+  `style_label` = nom BRUT tel qu'écrit par beer-analytics (comme
+  `hop_beer_styles.style_label`, T83) ; `style_id` résolu via le même
+  `data/mappings/beer_style_aliases.yaml` (T84/T85, déjà enrichi côté
+  beer-analytics par T85-T87 — bonne chance qu'une bonne partie résolve
+  déjà sans travail de curation supplémentaire).
+
+  **Dépend de T88** (réutilise les pages houblon déjà énumérées/cachées,
+  même boucle de crawl possible pour ne pas refaire 435 fetches de page).
+
+  **Statut** : opportuniste, comme T130 -- ne bloque rien, découvert en
+  marge d'un autre ticket plutôt que planifié.
 
 ## 11. Ordre d'attaque recommandé
 

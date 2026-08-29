@@ -33,7 +33,7 @@ from . import parsers, reference
 from .schema import (init_db, validate_and_repair, DROP_COMPOUNDS, ensure_table, ensure_columns,
                      BEER_STYLES_SCHEMA, HOP_BEER_STYLES_SCHEMA, HOP_IDENTITY_COLUMNS,
                      HOP_DESCRIPTION_COLUMNS, STYLE_RECIPE_STATS_SCHEMA, STYLE_HOP_USAGE_SCHEMA,
-                     STYLE_HOP_PAIRINGS_SCHEMA)
+                     STYLE_HOP_PAIRINGS_SCHEMA, HOP_USAGE_STATS_SCHEMA)
 
 MAPPINGS_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "data", "mappings")
 
@@ -1551,9 +1551,20 @@ BEER_ANALYTICS_HISTOGRAM_CHARTS = {
 
 # page de style : deux segments après /styles/ (catégorie + style), jamais la
 # page catégorie seule (un seul segment, ex. /styles/ipa/) ni l'index
-# /styles/ -- vérifié en direct sur le sitemap réel (159 URLs de style).
+# /styles/ -- vérifié en direct sur le sitemap réel (123 URLs de style ;
+# un premier comptage à 159 incluait par erreur les pages catégorie seules,
+# corrigé T85 le 2026-08-28, voir BACKLOG.md).
 _BA_STYLE_PAGE_RE = re.compile(
     r"https://www\.beer-analytics\.com(/styles/[a-z0-9-]+/[a-z0-9-]+/)")
+
+# page de houblon : /hops/<purpose>/<slug>/ -- purpose vaut aroma/bittering/
+# dual-purpose (435 pages réelles), JAMAIS deviné (T88, lu depuis le
+# sitemap). ⚠ Exclut explicitement /hops/flavors/<terme>/ (184 pages) --
+# ce ne sont PAS des houblons mais des pages de DESCRIPTEUR D'ARÔME
+# (ex. /hops/flavors/apricot/, /hops/flavors/black-pepper/), vérifié en
+# direct sur le sitemap réel.
+_BA_HOP_PAGE_RE = re.compile(
+    r"https://www\.beer-analytics\.com(/hops/(?!flavors/)[a-z0-9-]+/[a-z0-9-]+/)")
 
 
 def _beer_analytics_cache_filename(path: str) -> str:
@@ -1915,5 +1926,106 @@ def ingest_style_hop_pairings(out_db: str, limit: int | None = None, sleep: floa
             con.commit()
     con.commit(); con.close()
     print(f"  {n_resolved_style} style_id résolus, {n_unresolved_style} non résolus")
+    print(f"  {n_variety_resolved}/{n_variety_total} houblons résolus vers une variety, "
+         f"{n_rows} lignes écrites")
+
+
+# --------------------------------------------------------------------------- #
+# beer-analytics.com (T88) -- où un houblon est réellement utilisé, et combien
+# --------------------------------------------------------------------------- #
+def ingest_hop_usage_stats(out_db: str, limit: int | None = None, sleep: float = 1.0,
+                           timeout: float = 30.0) -> None:
+    """
+    beer-analytics.com (T88, socle empirique de T99) : où un houblon est
+    réellement utilisé dans le procédé (Mash/First Wort/Boil/Aroma/Dry Hop,
+    vocabulaire BRUT de la source, jamais renommé) et combien -- table
+    `hop_usage_stats`. Pages `/hops/<purpose>/<slug>/` énumérées depuis le
+    sitemap (`_BA_HOP_PAGE_RE`, voir sa docstring pour le piège `/hops/
+    flavors/...` exclu -- ce sont des pages de descripteur d'arôme, pas des
+    houblons).
+
+    Deux charts par houblon : `usage-types.json` (trace `bar`, `x` = étape,
+    `y` = nombre de recettes -> `recipes_count`) et `amount-used-per-use.
+    json` (une trace `box` par étape, `parsers.parse_box_trace` -> `amount_
+    q1/median/q3`) -- jointes par le nom d'étape (`trace["name"]` côté
+    boxplot == `trace["x"][i]` côté bar, vérifié en direct : les 5 mêmes
+    clés dans le même ordre sur Citra).
+
+    ⚠ `typical-styles-relative.json` (listé par le ticket, "les styles
+    typiques de ce houblon") n'est PAS capturé ici : c'est une relation
+    houblon->style, pas houblon->étape, et n'a nulle part où aller dans le
+    `CREATE TABLE` du ticket (voir schema.HOP_USAGE_STATS_SCHEMA) -- donnée
+    réelle et vérifiée, mais hors du schéma tel qu'écrit. Voir T131
+    (nouveau ticket backlog) plutôt qu'une table inventée sans le demander.
+
+    `variety` résolu via `ingest._resolve_hop_variety`, `NULL` si non
+    résolu -- leurs 435 pages houblon ne couvrent pas nos 203 variétés 1:1,
+    taux de résolution rapporté comme pour BeerMaverick (143/203).
+    """
+    from datetime import datetime, timezone
+    from .schema import connect
+    con = connect(out_db)
+    if not con.execute("SELECT name FROM sqlite_master WHERE name='hops'").fetchone():
+        init_db(con); seed_reference(con); con.commit()
+    else:
+        ensure_table(con, "hop_usage_stats", HOP_USAGE_STATS_SCHEMA)  # base existante : ne PAS la vider
+    index = _build_hop_name_index(con)
+
+    sitemap = _beer_analytics_fetch("/sitemap.xml", timeout=timeout, sleep=sleep)
+    hop_paths = sorted(set(_BA_HOP_PAGE_RE.findall(sitemap)))
+    if limit:
+        hop_paths = hop_paths[:limit]
+    print(f"beer-analytics (hop usage stats) : {len(hop_paths)} pages houblon (sitemap)")
+
+    fetched_at = datetime.now(timezone.utc).isoformat()
+    n_variety_resolved = n_variety_total = n_rows = 0
+    for i, hop_path in enumerate(hop_paths, 1):
+        try:
+            html = _beer_analytics_fetch(hop_path, timeout=timeout, sleep=sleep)
+        except Exception as e:  # noqa
+            print(f"  !! {hop_path}: {e}"); continue
+        charts = parsers.discover_beer_analytics_charts(html)
+        hop_name = parsers.parse_beer_analytics_hop_name(html)
+        if not hop_name:
+            continue
+        variety = _resolve_hop_variety(index, hop_name)
+        n_variety_total += 1
+        if variety:
+            n_variety_resolved += 1
+
+        counts_path = charts.get("usage-types")
+        amount_path = charts.get("amount-used-per-use")
+        if not counts_path and not amount_path:
+            continue
+
+        counts_by_use: dict[str, int] = {}
+        if counts_path:
+            try:
+                payload = _beer_analytics_get(counts_path, timeout=timeout, sleep=sleep)
+                traces = parsers.plotly_traces(payload)
+                if traces:
+                    counts_by_use = dict(zip(traces[0].get("x") or [], traces[0].get("y") or []))
+            except Exception as e:  # noqa
+                print(f"  !! {counts_path}: {e}")
+        amount_by_use: dict[str, tuple] = {}
+        if amount_path:
+            try:
+                payload = _beer_analytics_get(amount_path, timeout=timeout, sleep=sleep)
+                for trace in parsers.plotly_traces(payload):
+                    amount_by_use[trace["name"]] = parsers.parse_box_trace(trace)
+            except Exception as e:  # noqa
+                print(f"  !! {amount_path}: {e}")
+
+        for use_type in sorted(set(counts_by_use) | set(amount_by_use)):
+            recipes_count = counts_by_use.get(use_type)
+            q1, median, q3 = amount_by_use.get(use_type, (None, None, None))
+            con.execute(
+                "INSERT OR REPLACE INTO hop_usage_stats VALUES (?,?,?,?,?,?,?,?,?)",
+                (variety, hop_name, use_type, recipes_count, q1, median, q3,
+                 "beer-analytics", fetched_at))
+            n_rows += 1
+        if i % 10 == 0:
+            con.commit()
+    con.commit(); con.close()
     print(f"  {n_variety_resolved}/{n_variety_total} houblons résolus vers une variety, "
          f"{n_rows} lignes écrites")
