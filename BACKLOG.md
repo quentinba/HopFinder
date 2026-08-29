@@ -874,23 +874,32 @@ Elles sont écrites pour qu'aucune décision implicite ne reste à deviner.
   `_RECENT_UPDATES`. Attribution + statut détaillé par table : voir
   `docs/DATA_SOURCES.md`, section beer-analytics.com (nouvelle, T89).
 
-- [ ] **T89 — Posture d'accès, cache, attribution, et prise de contact**
+- [x] **T89 — Posture d'accès, cache, attribution, et prise de contact**
 
-  **Technique** (déjà décrit en T85, rappelé ici comme critère de recette) :
-  User-Agent identifiable, une seule passe, 1 s entre requêtes, cache disque,
-  `fetched_at` par ligne.
-
-  **Attribution GUI, obligatoire** partout où une de ces données apparaît :
-  « Recipe statistics: beer-analytics.com — aggregated from public homebrew
-  recipes ». Section dédiée dans `docs/DATA_SOURCES.md` avec la date de fetch
-  et le taux de couverture réel.
-
-  **Prise de contact** : envoyer le message rédigé dans
-  `docs/OUTREACH_beer-analytics.md`. Deux buts — prévenir avant de lire
-  régulièrement leurs endpoints, et demander un **agrégat de co-occurrence
-  n-aire** (le seul chemin vers des triplets à grande échelle, cf. D3).
-  Proposer une contribution en retour (nos variétés BarthHaas/Yakima récentes
-  normalisées, pour leur `hops.csv`).
+  **Compte rendu (2026-08-29)** :
+  - **Technique** : déjà satisfait PAR CONSTRUCTION depuis T85 (`User-Agent:
+    hopmatch/0.1 (research)`, une seule passe par défaut, 1s entre requêtes
+    réelles, cache disque `data/cache/beer_analytics/`, `fetched_at` par
+    ligne dans les 4 tables T85-T88) — rien à ajouter, juste confirmé ici.
+  - **Attribution/DATA_SOURCES.md** : nouvelle section « Statistiques de
+    recettes (beer-analytics.com) » ajoutée (voir T88, même commit), avec le
+    texte d'attribution exact demandé par le ticket, la date de fetch réelle
+    (2026-08-27 à 2026-08-29) et le taux de couverture réel PAR TABLE (pas
+    un chiffre global qui masquerait les écarts : 123/123 styles pour T85-87,
+    92% des pages houblon pour T88). ⚠ **Aucune vue GUI ne consomme encore
+    ces données** (T85-T88 sont des tickets d'ingestion pure) — la règle
+    d'attribution est documentée pour la première GUI qui les affichera,
+    rien à câbler aujourd'hui.
+  - **Prise de contact : PAS envoyée par l'assistant.** Message à un tiers
+    réel (Christian Scheb) au nom de l'utilisateur — hors du périmètre
+    d'une action autonome même avec l'accord large donné pour le reste de
+    cette session (« you have my permission to launch command lines and
+    other access » ne couvre pas l'envoi d'un message externe en son nom,
+    catégorie distincte et plus engageante). `docs/OUTREACH_beer-
+    analytics.md` relu : toujours exact et prêt à l'emploi tel quel (relate
+    l'intention de lire leurs endpoints au présent/futur, ce qui reste
+    valide même après les crawls T85-T88 déjà effectués). **Action restante
+    pour l'utilisateur** : l'envoyer sur LinkedIn quand il le souhaite.
 
 ---
 
