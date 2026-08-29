@@ -2437,7 +2437,7 @@ Mais la transparence doit être RÉELLE, pas un simple adverbe :
   mais mauvaise résistance au boil). Aucun `state` changé, uniquement la
   clarté des `note`. Suite verte (373 tests).
 
-- [ ] **T120 — Calcul de couverture d'un plan de houblonnage**
+- [x] **T120 — Calcul de couverture d'un plan de houblonnage**
 
   `matching.hopping_plan_coverage(con, plan) -> list[dict]` où
   `plan = [(variety, stage), …]` (un même houblon peut apparaître à plusieurs
@@ -2472,6 +2472,26 @@ Mais la transparence doit être RÉELLE, pas un simple adverbe :
   **Test** : plan à 2 houblons dont un sans `isobutyrate`, vérifier
   `presumed_absent` ; plan avec un houblon hors BarthHaas, vérifier
   `measured_source_missing = True`.
+
+  **FAIT (2026-08-30).** `matching.hopping_plan_coverage(con, plan)`,
+  lecture pure sur `matching.load()` (déjà réconcilié multi-sources -- pas
+  de nouvelle requête `hop_composition`). Une entrée par composé (11, ordre
+  de `reference.PROCESS_STAGE_SURVIVAL`) : `state`
+  (`delivered`/`presumed_absent`), `delivered_by`/`precursor_by` (listes de
+  `{variety, stage, amount, unit}`), `survival` (meilleur état contributeur,
+  `kept` > `partial` > `None`), `measured_source_missing`. `ValueError` sur
+  un stade hors des 4 reconnus (pas dans le spec du ticket mais garde-fou
+  raisonnable contre une faute de frappe silencieuse). `measured_source_
+  missing` calculé au niveau du PLAN entier (pas houblon par houblon) : si
+  au moins un houblon du plan a une couverture BarthHaas réelle (même sur un
+  autre composé), l'absence d'isobutyrate/ketones/thiols pour ce plan reste
+  une vraie inférence "a priori absent", pas un trou de données -- testé sur
+  les fixtures réelles (saazer = BarthHaas sans isobutyrate propre → `False` ;
+  simcoe = Yakima seul, aucune ligne BarthHaas → `True`). 8 tests (périmètre
+  11 composés, stade invalide, delivered/kept, precursor ne livre jamais le
+  composé lui-même, agrégation "meilleur des contributeurs", les deux cas du
+  ticket, amount/unit vs `load()`). Suite verte (381 tests). Pas de câblage
+  GUI (T121) ni de garde-fou de discrimination (T122, à faire avant T121).
 
 - [ ] **T121 — GUI : le tableau de couverture**
 
