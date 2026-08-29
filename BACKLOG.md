@@ -1466,6 +1466,15 @@ Elles sont écrites pour qu'aucune décision implicite ne reste à deviner.
   repli silencieux sans descripteur typique). Aucune modification
   d'`aromahops.db` (GUI seule) — pas de push HopFinder-db nécessaire.
 
+  **Addendum (2026-08-29, revue utilisateur)** : section "Aromatically
+  relevant, rarely used in this style" déplacée SOUS les deux classements
+  côte à côte (au lieu d'au-dessus) ; les deux classements passent dans
+  leur propre `_panel()` (`_panel(cols[i])`, même mécanisme que les cartes
+  de la page Home) pour partager le même fond opaque que la section "rare
+  & relevant" -- les trois cartes ont désormais un traitement visuel
+  identique, plutôt que deux blocs de texte nu à côté d'une carte encadrée.
+  Vérifié en direct (Chrome, 21A American IPA, clair ET sombre).
+
 - [ ] **T104 — Blends contraints par le style**
 
   `contrast_blend` / `amplify_blend` acceptent un `style_id` optionnel :
