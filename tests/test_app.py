@@ -566,6 +566,10 @@ def test_by_descriptor_popularity_filter_never_hides_no_data_hops(toy_cwd):
     at.run()
     at.sidebar.radio[0].set_value("by-descriptor").run()
     at.multiselect[0].select("citrus").select("floral").select("resinous").run()
+    # le slider "Minimum recipes" ne s'affiche qu'en mode Popularity
+    # (2026-08-29, retour utilisateur : "otherwise it make no sense to
+    # display it") -- absent tant que "Relevance" (défaut) est actif.
+    at.segmented_control(key="by_descriptor_sort_mode").set_value("Popularity").run()
     at.slider[1].set_value(10).run()
     assert not at.exception
     labels = " ".join(e.label for e in at.expander)
@@ -779,6 +783,11 @@ def test_browse_mode_lists_all_hops_without_a_search_box(toy_cwd):
     at = _app()
     at.run()
     at.sidebar.radio[0].set_value("browse").run()
+    # tri "Name" explicite (2026-08-29 : "Popularity" est désormais le
+    # défaut, voir test_browse_sort_by_popularity_groups_no_data_hops_
+    # separately) -- ce test porte sur "toujours tous les houblons, aucun
+    # filtre texte préalable", indépendant du mode de tri par défaut.
+    at.segmented_control[0].set_value("Name").run()
     assert not at.exception
     assert len(at.text_input) == 0
     # .options renvoie le libellé affiché (format_func), pas le code brut.
@@ -817,6 +826,11 @@ def test_browse_disambiguates_duplicate_hop_names_by_region(toy_cwd):
     at = _app()
     at.run()
     at.sidebar.radio[0].set_value("browse").run()
+    # tri "Name" explicite (2026-08-29 : "Popularity", désormais le défaut,
+    # append un suffixe "(N recipes)"/"(no popularity data)" au libellé --
+    # ce test porte sur la désambiguïsation par région, indépendante du
+    # mode de tri).
+    at.segmented_control[0].set_value("Name").run()
     assert not at.exception
     # twina/twinb : même nom, régions différentes -- les deux doivent
     # apparaître, désambiguïsées, dans la liste COMPLÈTE (pas de recherche

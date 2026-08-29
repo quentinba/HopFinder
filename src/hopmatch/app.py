@@ -209,6 +209,11 @@ _TOOL_SUMMARY_BY_MODE = {t["mode"]: t for t in _TOOL_SUMMARIES}
 # un `git log` en direct exigerait aussi que `.git` soit présent dans le
 # conteneur déployé, ce qui n'est pas garanti.
 _RECENT_UPDATES = [
+    ("2026-08-29", "Browse a hop now sorts by Popularity by default (so "
+                   "the hop dropdown shows recipe counts right away), and "
+                   "the \"Minimum recipes\" filter only appears when a "
+                   "Popularity sort is actually active, in both Browse a "
+                   "hop and From descriptors."),
     ("2026-08-29", "New \"Hops for a style\" tool: pick a BJCP style and see "
                    "two rankings side by side -- real recipe frequency "
                    "(beer-analytics.com) and aroma relevance (typical "
@@ -2406,19 +2411,27 @@ def _browse(con):
     # filtre supplémentaire (mêmes critères nom/variété que la complétion du
     # selectbox lui-même).
     # T108 : tri par popularité réelle (beer-analytics.com, hop_usage_stats)
-    # en plus du tri alphabétique (par défaut, comportement inchangé). Filtre
-    # "quasi jamais utilisé" désactivé par défaut (0 = tout montrer) -- un
-    # houblon ne doit pas disparaître silencieusement d'un mode déjà en place
-    # sans action explicite.
+    # en plus du tri alphabétique. Popularité PAR DÉFAUT (2026-08-29, retour
+    # utilisateur explicite en revue : "so that the dropdown menu is more
+    # informative by default" -- le sélecteur "Hop" affiche déjà le nombre
+    # de recettes dans son libellé quand ce mode est actif, voir
+    # `_format_hop` plus bas). Filtre "quasi jamais utilisé" désactivé par
+    # défaut (0 = tout montrer) et affiché SEULEMENT en mode Popularité
+    # (retour utilisateur : "otherwise it make no sense to display it" --
+    # il n'a aucun effet en tri par nom, ni sur ce qui est montré ni sur
+    # l'ordre).
     popularity = matching.hop_popularity(con)
     with _panel():
         sort_mode = st.segmented_control("Sort by", ["Name", "Popularity"],
-                                         default="Name", key="browse_sort_mode", required=True)
-        min_recipes = st.slider(
-            "Minimum recipes (popularity filter, 0 = show all)", 0, 200, 0,
-            key="browse_min_recipes",
-            help="Hides hops with fewer than this many recipes on beer-analytics.com. "
-                 "Hops with no popularity data at all are never hidden by this filter.")
+                                         default="Popularity", key="browse_sort_mode",
+                                         required=True)
+        min_recipes = 0
+        if sort_mode == "Popularity":
+            min_recipes = st.slider(
+                "Minimum recipes (popularity filter, 0 = show all)", 0, 200, 0,
+                key="browse_min_recipes",
+                help="Hides hops with fewer than this many recipes on beer-analytics.com. "
+                     "Hops with no popularity data at all are never hidden by this filter.")
     varieties = [v for v in hops
                 if min_recipes == 0 or popularity.get(v) is None or popularity[v] >= min_recipes]
     if not varieties:
@@ -2872,18 +2885,24 @@ def _by_descriptor(con):
         # `_amplify` -- même correctif mobile pour les 3 outils).
         top = st.slider("Number of hops shown", 1, 30, 10)
         # T108 : tri par popularité réelle (beer-analytics.com, hop_usage_stats)
-        # EN PLUS du tri par pertinence (inchangé par défaut). Filtre "quasi
-        # jamais utilisé" séparé -- 0 = désactivé, jamais appliqué par défaut
-        # (un houblon ne doit pas disparaître silencieusement d'un mode déjà
-        # utilisé sans action explicite de l'utilisateur).
+        # EN PLUS du tri par pertinence -- pertinence reste le défaut ici
+        # (contrairement à Browse, voir son commentaire : ce mode existe
+        # justement pour trier par pertinence aromatique, la popularité est
+        # un ajout secondaire, pas d'argument "dropdown plus informatif" ici
+        # puisqu'il n'y a pas de sélecteur de houblon). Filtre "quasi jamais
+        # utilisé" affiché SEULEMENT en mode Popularité (2026-08-29, retour
+        # utilisateur explicite : "otherwise it make no sense to display it"
+        # -- sans effet en tri par pertinence).
         sort_mode = st.segmented_control("Sort by", ["Relevance", "Popularity"],
                                          default="Relevance", key="by_descriptor_sort_mode",
                                          required=True)
-        min_recipes = st.slider(
-            "Minimum recipes (popularity filter, 0 = show all)", 0, 200, 0,
-            key="by_descriptor_min_recipes",
-            help="Hides hops with fewer than this many recipes on beer-analytics.com. "
-                 "Hops with no popularity data at all are never hidden by this filter.")
+        min_recipes = 0
+        if sort_mode == "Popularity":
+            min_recipes = st.slider(
+                "Minimum recipes (popularity filter, 0 = show all)", 0, 200, 0,
+                key="by_descriptor_min_recipes",
+                help="Hides hops with fewer than this many recipes on beer-analytics.com. "
+                     "Hops with no popularity data at all are never hidden by this filter.")
     if not text_selected and not wheel_selected:
         with _panel():
             st.write("Choose at least one descriptor.")
