@@ -193,6 +193,13 @@ _TOOL_SUMMARY_BY_MODE = {t["mode"]: t for t in _TOOL_SUMMARIES}
 # un `git log` en direct exigerait aussi que `.git` soit présent dans le
 # conteneur déployé, ce qui n'est pas garanti.
 _RECENT_UPDATES = [
+    ("2026-08-29", "Browse a hop and From descriptors both gained a "
+                   "\"Sort by\" toggle (Name/Popularity or Relevance/"
+                   "Popularity) plus a minimum-recipes filter, using real "
+                   "recipe counts from beer-analytics.com. Hops beer-"
+                   "analytics doesn't cover are never treated as "
+                   "\"unpopular\" — they're grouped separately as "
+                   "\"no popularity data\" and never hidden by the filter."),
     ("2026-08-27", "Browse a hop now has a collapsed \"Producer description\" "
                    "section right under the identity metadata, with the "
                    "hop's own marketing description from Yakima Chief Hops "
@@ -2361,13 +2368,44 @@ def _browse(con):
     # un second champ texte au-dessus était une redondance pure, jamais un
     # filtre supplémentaire (mêmes critères nom/variété que la complétion du
     # selectbox lui-même).
-    varieties = sorted(hops, key=lambda v: hops[v]["name"].lower())
+    # T108 : tri par popularité réelle (beer-analytics.com, hop_usage_stats)
+    # en plus du tri alphabétique (par défaut, comportement inchangé). Filtre
+    # "quasi jamais utilisé" désactivé par défaut (0 = tout montrer) -- un
+    # houblon ne doit pas disparaître silencieusement d'un mode déjà en place
+    # sans action explicite.
+    popularity = matching.hop_popularity(con)
+    with _panel():
+        sort_mode = st.segmented_control("Sort by", ["Name", "Popularity"],
+                                         default="Name", key="browse_sort_mode", required=True)
+        min_recipes = st.slider(
+            "Minimum recipes (popularity filter, 0 = show all)", 0, 200, 0,
+            key="browse_min_recipes",
+            help="Hides hops with fewer than this many recipes on beer-analytics.com. "
+                 "Hops with no popularity data at all are never hidden by this filter.")
+    varieties = [v for v in hops
+                if min_recipes == 0 or popularity.get(v) is None or popularity[v] >= min_recipes]
     if not varieties:
-        st.write("No hop in the database.")
+        st.write("No hop matches the current filter.")
         return
+    if sort_mode == "Popularity":
+        # houblons avec donnée de popularité d'abord (part de recettes
+        # décroissante), puis houblons SANS donnée -- groupe "no data" séparé,
+        # jamais mélangé au tri numérique avec un 0 implicite (T108).
+        with_data = sorted((v for v in varieties if v in popularity), key=lambda v: -popularity[v])
+        without_data = sorted((v for v in varieties if v not in popularity),
+                              key=lambda v: hops[v]["name"].lower())
+        varieties = with_data + without_data
+    else:
+        varieties = sorted(varieties, key=lambda v: hops[v]["name"].lower())
 
-    selected = st.selectbox("Hop", varieties, format_func=lambda v: hops[v]["name"],
-                            key="browse_hop")
+    def _format_hop(v):
+        label = hops[v]["name"]
+        if sort_mode == "Popularity":
+            count = popularity.get(v)
+            label += f" ({count:,} recipes)" if count is not None else " (no popularity data)"
+        return label
+
+    selected = st.selectbox("Hop", varieties, format_func=_format_hop, key="browse_hop")
     h = hops[selected]
     hcomp = comp.get(selected, {})
     # T-D04/T-D10 (2026-08-23, spec Claude Design) : ordre FIXE -- "purpose
@@ -2791,23 +2829,68 @@ def _by_descriptor(con):
         # Page principale, pas la sidebar (2026-08-20, voir le commentaire de
         # `_amplify` -- même correctif mobile pour les 3 outils).
         top = st.slider("Number of hops shown", 1, 30, 10)
+        # T108 : tri par popularité réelle (beer-analytics.com, hop_usage_stats)
+        # EN PLUS du tri par pertinence (inchangé par défaut). Filtre "quasi
+        # jamais utilisé" séparé -- 0 = désactivé, jamais appliqué par défaut
+        # (un houblon ne doit pas disparaître silencieusement d'un mode déjà
+        # utilisé sans action explicite de l'utilisateur).
+        sort_mode = st.segmented_control("Sort by", ["Relevance", "Popularity"],
+                                         default="Relevance", key="by_descriptor_sort_mode",
+                                         required=True)
+        min_recipes = st.slider(
+            "Minimum recipes (popularity filter, 0 = show all)", 0, 200, 0,
+            key="by_descriptor_min_recipes",
+            help="Hides hops with fewer than this many recipes on beer-analytics.com. "
+                 "Hops with no popularity data at all are never hidden by this filter.")
     if not text_selected and not wheel_selected:
         with _panel():
             st.write("Choose at least one descriptor.")
         return
     r = matching.by_descriptor(con, text_selected, wheel_descriptors=wheel_selected, top=top)
     ranked = r["ranked"]
+    total_matches = r["total_matches"]
     if not ranked:
         with _panel():
             st.write("No hop overlaps with these descriptors.")
         return
-    if r["total_matches"] > len(ranked):
+
+    popularity = matching.hop_popularity(con)
+    if sort_mode == "Popularity" and total_matches > len(ranked):
+        # Trier par popularité doit porter sur TOUT le recoupement, pas
+        # seulement les `top` premiers déjà coupés par pertinence -- sinon
+        # "sort by popularity" ne ferait que réordonner un sous-ensemble
+        # choisi par un critère différent, pas le vrai palmarès popularité
+        # parmi tout ce qui matche réellement les descripteurs.
+        r = matching.by_descriptor(con, text_selected, wheel_descriptors=wheel_selected,
+                                   top=total_matches)
+        ranked = r["ranked"]
+
+    n_before_filter = len(ranked)
+    if min_recipes > 0:
+        ranked = [h for h in ranked
+                 if popularity.get(h["variety"]) is None or popularity[h["variety"]] >= min_recipes]
+    n_hidden_by_filter = n_before_filter - len(ranked)
+
+    if sort_mode == "Popularity":
+        # houblons avec donnée de popularité d'abord (part de recettes
+        # décroissante), puis houblons SANS donnée -- groupe "no data" séparé,
+        # jamais mélangé au tri numérique avec un 0 implicite (T108).
+        with_data = sorted((h for h in ranked if h["variety"] in popularity),
+                           key=lambda h: -popularity[h["variety"]])
+        without_data = [h for h in ranked if h["variety"] not in popularity]
+        ranked = with_data + without_data
+    ranked = ranked[:top]
+
+    if total_matches > len(ranked) or n_hidden_by_filter > 0:
         # Transparence sur la troncature (2026-08-20, revue de code — même
         # principe que `contrast`/T56 : jamais laisser croire que "Number of
         # hops shown" couvre tout le recoupement réel).
+        parts = [f"Showing {len(ranked)} of {total_matches} hops overlapping these descriptors"]
+        if n_hidden_by_filter > 0:
+            parts.append(f"{n_hidden_by_filter} hidden by the popularity filter")
         with _panel():
-            st.caption(f"Showing {len(ranked)} of {r['total_matches']} hops overlapping these "
-                      "descriptors — raise \"Number of hops shown\" above to see more.")
+            st.caption(" — ".join(parts) + ". Raise \"Number of hops shown\" or lower the "
+                      "popularity filter above to see more.")
 
     _, comp, _, _ = matching.load(con)
     compound_smells = _all_compound_descriptors(con, comp)
@@ -2866,6 +2949,14 @@ def _by_descriptor(con):
                 st.caption("Quantitative refinement: no aroma-wheel intensity data for "
                           "this hop (neither Yakima nor BarthHaas covers it, or the "
                           "only entry present is a corrupted all-zero YCH reading).")
+            # T108 : transparence du tri popularité -- montré uniquement quand
+            # ce tri est actif, même esprit que le caption quant_score ci-dessus
+            # (jamais un réordonnancement silencieux).
+            if sort_mode == "Popularity":
+                pop_count = popularity.get(h["variety"])
+                st.caption(f"Popularity: {pop_count:,} recipes (beer-analytics.com)"
+                          if pop_count is not None else
+                          "Popularity: no data (beer-analytics.com does not cover this hop)")
             # Roue d'arôme quantitative (demande utilisateur 2026-08-19 : "The
             # aroma wheel is missing from the from descriptor tool") -- même
             # rendu que `_browse`/`_hop_detail_expanders`. T79 (2026-08-22) : le score de

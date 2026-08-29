@@ -126,6 +126,14 @@ def _build_toy_db(path):
     con.execute(
         "UPDATE hops SET description=?, description_source='yakima' WHERE variety='hopa'",
         ("Toy hop known for its citrus profile.\n\nGreat in Toy IPAs.",))
+    # T108 : popularité (hop_usage_stats) -- hopa très populaire (10000
+    # recettes), hopb peu populaire (5 recettes, sous le seuil filtre par
+    # défaut du test), hopc SANS AUCUNE donnée (jamais dans hop_usage_stats)
+    # -- teste les 3 cas : donnée forte, donnée faible, absence de donnée.
+    con.executemany("INSERT INTO hop_usage_stats VALUES (?,?,?,?,?,?,?,?,?)", [
+        ("hopa", "Hopa", "Boil", 10000, None, None, None, "test", "2026"),
+        ("hopb", "Hopb", "Boil", 5, None, None, None, "test", "2026"),
+    ])
     con.commit()
     con.close()
 
@@ -501,6 +509,40 @@ def test_by_descriptor_mode_lists_matching_hop(toy_cwd):
     assert any("Hopa" in e.label for e in at.expander)
     assert not any("Hopb" in e.label for e in at.expander)
 
+def test_by_descriptor_sort_by_popularity_reorders_results(toy_cwd):
+    # T108 : hopa (10000 recettes) et hopb (5 recettes) recoupent tous deux
+    # au moins un descripteur choisi -- tri "Popularity" doit passer hopa
+    # devant hopb, contrairement au tri "Relevance" par défaut.
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("by-descriptor").run()
+    at.multiselect[0].select("citrus").select("floral").run()
+    assert not at.exception
+    labels = [e.label for e in at.expander]
+    assert any(l.startswith("Hopa") for l in labels)
+    assert any(l.startswith("Hopb") for l in labels)
+
+    at.segmented_control[0].set_value("Popularity").run()
+    assert not at.exception
+    names = [e.label.split(" —")[0] for e in at.expander]
+    assert names.index("Hopa") < names.index("Hopb")
+    assert any("Popularity: 10,000 recipes" in c.value for c in at.caption)
+    assert any("Popularity: 5 recipes" in c.value for c in at.caption)
+
+def test_by_descriptor_popularity_filter_never_hides_no_data_hops(toy_cwd):
+    # hopc (descripteur "resinous") n'a aucune donnée hop_usage_stats --
+    # le filtre popularité (seuil > 0) ne doit jamais l'exclure.
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("by-descriptor").run()
+    at.multiselect[0].select("citrus").select("floral").select("resinous").run()
+    at.slider[1].set_value(10).run()
+    assert not at.exception
+    labels = " ".join(e.label for e in at.expander)
+    assert "Hopb" not in labels  # 5 recettes, sous le seuil -> exclu
+    assert "Hopa" in labels      # 10000 recettes -> reste
+    assert "Hopc" in labels      # aucune donnée -> jamais exclu
+
 def test_by_descriptor_wheel_pills_appear_and_contribute_to_match(toy_cwd):
     # Demande utilisateur explicite (2026-08-19) : "propose a section here
     # user can click on the boxes corresponding to aroma wheel flavors" --
@@ -672,6 +714,34 @@ def test_browse_mode_lists_all_hops_without_a_search_box(toy_cwd):
     # .options renvoie le libellé affiché (format_func), pas le code brut.
     options = at.selectbox[0].options
     assert options == ["Hopa", "Hopb", "Hopc", "Twins (Region A)", "Twins (Region B)"]
+
+def test_browse_sort_by_popularity_groups_no_data_hops_separately(toy_cwd):
+    # T108 : hopa (10000 recettes) > hopb (5 recettes) > groupe "no data"
+    # (hopc/twina/twinb, jamais mélangé au tri numérique avec un 0 implicite).
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("browse").run()
+    at.segmented_control[0].set_value("Popularity").run()
+    assert not at.exception
+    options = at.selectbox[0].options
+    assert options == [
+        "Hopa (10,000 recipes)", "Hopb (5 recipes)",
+        "Hopc (no popularity data)",
+        "Twins (Region A) (no popularity data)", "Twins (Region B) (no popularity data)",
+    ]
+
+def test_browse_popularity_filter_never_hides_no_data_hops(toy_cwd):
+    # seuil 10 : exclut hopb (5 recettes, mesuré sous le seuil) mais PAS
+    # hopc/twina/twinb (aucune donnée -- jamais traité comme "impopulaire").
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("browse").run()
+    at.slider[0].set_value(10).run()
+    assert not at.exception
+    options = at.selectbox[0].options
+    assert "Hopb" not in " ".join(options)
+    assert any(o.startswith("Hopa") for o in options)
+    assert any(o.startswith("Hopc") for o in options)
 
 def test_browse_disambiguates_duplicate_hop_names_by_region(toy_cwd):
     at = _app()

@@ -314,6 +314,31 @@ def load_aroma_intensity(con) -> dict[str, dict[str, dict[str, float]]]:
     return out
 
 
+# seuil par défaut du filtre "quasi jamais utilisé" (T108) -- ajustable en
+# GUI, cette valeur n'est qu'un point de départ suggéré par le ticket.
+DEFAULT_MIN_POPULARITY_RECIPES = 50
+
+
+def hop_popularity(con) -> dict[str, int]:
+    """{variety: nombre total de recettes} depuis `hop_usage_stats` (T88,
+    beer-analytics.com) -- SOMME de `recipes_count` sur les 5 `use_type`
+    (Mash/First Wort/Boil/Aroma/Dry Hop) d'un même houblon, un proxy de
+    popularité relative (pas un compte de recettes UNIQUES : une recette
+    utilisant un houblon à la fois en Boil et en Dry Hop compte deux fois --
+    acceptable pour un TRI/FILTRE relatif, jamais présenté comme "nombre de
+    recettes"). Une `variety` absente de ce dict n'a AUCUNE ligne
+    `hop_usage_stats` (houblon non résolu côté beer-analytics, voir T88) --
+    à distinguer d'une popularité mesurée comme faible, jamais traité comme
+    0 par l'appelant (voir T108 : groupe "no data" séparé, pas un 0
+    implicite en bas d'un tri)."""
+    out: dict[str, int] = {}
+    for r in con.execute(
+        "SELECT variety, SUM(recipes_count) AS total FROM hop_usage_stats "
+        "WHERE variety IS NOT NULL AND recipes_count IS NOT NULL GROUP BY variety"):
+        out[r["variety"]] = r["total"]
+    return out
+
+
 def _usable_aroma_readings(values: dict[str, float]) -> bool:
     """Une entrée `hop_aroma_intensity` "présente mais entièrement à 0" (le
     cas corrompu déjà documenté côté Yakima, ex. `admiral`, voir
