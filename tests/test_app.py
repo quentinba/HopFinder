@@ -887,6 +887,46 @@ def test_compare_shows_no_detailed_data_message_when_absent(toy_cwd):
     assert not at.exception
     assert any("No detailed composition data" in m.value for m in at.markdown)
 
+def test_compare_blend_explorer_hidden_for_a_single_hop(toy_cwd):
+    # T102 : une "blend" a besoin d'au moins 2 houblons -- jamais affiché
+    # pour une sélection d'un seul.
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("compare").run()
+    at.multiselect[0].select("Hopa").run()
+    assert not at.exception
+    assert not any(s.value.startswith("Blend Explorer") for s in at.subheader)
+
+def test_compare_blend_explorer_renders_chart_and_flags_missing_hop(toy_cwd):
+    # hopa (linalool=30) contribue au blend, hopb (moly, hors des 4 composés
+    # survivables) n'a AUCUNE des 4 mesures -- doit apparaître dans la
+    # caption "No survivable-compound data for", jamais silencieusement
+    # traité comme 0.
+    from streamlit.testing.v1.element_tree import UnknownElement
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("compare").run()
+    at.multiselect[0].select("Hopa").select("Hopb").run()
+    assert not at.exception
+    assert any(s.value.startswith("Blend Explorer") for s in at.subheader)
+    assert any("No survivable-compound data for: Hopb" in c.value for c in at.caption)
+    assert len([n for n in at.main if isinstance(n, UnknownElement)]) >= 1
+
+def test_compare_blend_explorer_honest_when_no_hop_has_survivable_data(toy_cwd):
+    # hopb (moly)/hopc (alpha/beta/co-humulone/total_oil) : NI l'un ni
+    # l'autre n'a un des 4 composés survivables -- message honnête plutôt
+    # qu'un graphique vide, et les deux listés comme manquants.
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("compare").run()
+    at.multiselect[0].select("Hopb").select("Hopc").run()
+    assert not at.exception
+    assert any(s.value.startswith("Blend Explorer") for s in at.subheader)
+    assert any("None of the selected hops has any of these 4 compounds measured" in m.value
+              for m in at.markdown)
+    caption = next(c.value for c in at.caption if "No survivable-compound data for" in c.value)
+    assert "Hopb" in caption and "Hopc" in caption
+
 def test_chemical_earliness_index_all_averages_quantile_rank_per_compound():
     # T99, couche chimique : moyenne du rang quantile PAR COMPOSÉ sur toute
     # la base (réutilise _normalize_quantile, jamais une normalisation
@@ -1202,6 +1242,16 @@ def test_survivables_mode_shows_per_compound_coverage_and_only_covered_hops(toy_
     # impossible -> "High" par défaut (voir _survivable_buckets).
     assert at.pills(key="survivables_bucket_filter").value == ["High", "Medium", "Low"]
     assert len([n for n in at.main if isinstance(n, UnknownElement)]) >= 1
+
+def test_survivables_mode_shows_ych_rules_infobox(toy_cwd):
+    # 2026-08-29, retour utilisateur en revue : les 4 règles YCH citées
+    # comme contexte, jamais appliquées automatiquement au calcul.
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("survivables").run()
+    assert not at.exception
+    assert any("YCH handbook rules" in m.value for m in at.markdown)
+    assert any("biotransformation" in m.value for m in at.markdown)
 
 def test_survivables_mode_filters_by_bucket(toy_cwd):
     at = _app()

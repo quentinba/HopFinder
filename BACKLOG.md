@@ -1415,7 +1415,7 @@ Elles sont écrites pour qu'aucune décision implicite ne reste à deviner.
   `requirements.txt` et le temps de démarrage **avant** de s'engager ; une
   régression logistique se code en NumPy si c'est le seul besoin.
 
-- [ ] **T102 — Blend Explorer chimique (dans Compare Hops)**
+- [x] **T102 — Blend Explorer chimique (dans Compare Hops)**
 
   Empiler la composition en composés « survivables » de 2-3 houblons, avec
   **nos** données (linalol, géraniol, isobutyrate, thiols).
@@ -1427,6 +1427,40 @@ Elles sont écrites pour qu'aucune décision implicite ne reste à deviner.
 
   **Branché sur le mode Compare Hops existant**, pas de nouveau mode.
   Idée reprise du hop-finder russe, mais sans aucune de leurs données.
+
+  **Compte rendu (2026-08-29)** : carte "Blend Explorer" ajoutée EN FIN de
+  `app._compare`, affichée dès que ≥2 houblons sont sélectionnés (pas un
+  plafond dur à 2-3 -- Compare Hops autorise déjà jusqu'à 5, restreindre
+  davantage aurait été une contrainte UX artificielle sans raison technique
+  forte). Réutilise `_survivable_compound_positions_all` (même socle
+  factorisé que T99/T117) transposé : un bar PAR COMPOSÉ (pas par houblon
+  comme T117), empilé PAR HOUBLON, mêmes couleurs `colors` déjà calculées
+  pour les 2 autres graphiques de Compare Hops (cohérence visuelle
+  garantie -- un houblon a la MÊME couleur sur les 3 graphiques).
+
+  Vérifié en direct sur les VRAIS exemples cités par le ticket : Loral +
+  Talus (réel, base réelle) reproduit exactement le récit YCH -- deux
+  barres hautes (Linalool ~1.4 dominé par Loral, Géraniol ~1.7 dominé par
+  Talus) = blend "dynamique", spread sur 2 axes. Loral + Crystal : les
+  DEUX composés apparaissent chez les deux houblons (Crystal porte
+  réellement du géraniol mesuré, pas seulement du linalol comme le
+  suggérait l'exemple simplifié du handbook) -- pas un "plat" parfait,
+  mais c'est la VRAIE donnée qui parle, pas un exemple fabriqué pour
+  coller à la pédagogie YCH -- honnêteté d'abord, cohérent avec le reste
+  du projet.
+
+  Houblon sans AUCUN des 4 composés listé dans une caption dédiée ("No
+  survivable-compound data for: ..."), jamais silencieusement traité comme
+  0 dans l'empilement. 3 nouveaux tests AppTest (masqué à 1 seul houblon,
+  rendu + houblon manquant signalé, message honnête si personne n'a de
+  donnée). 360 tests passent.
+
+  **Addendum (2026-08-29, retour utilisateur)** : infobox des 4 règles YCH
+  (texte, sourcé handbook 2022) ajoutée sur la page Survivables (T117),
+  juste après l'intro -- citées comme CONTEXTE de lecture du classement,
+  jamais appliquées automatiquement au calcul (aucune des 4 n'est codée en
+  dur dans l'indice, qui reste une simple normalisation par composé). La
+  règle 3 renvoie explicitement vers ce Blend Explorer.
 
 ---
 
