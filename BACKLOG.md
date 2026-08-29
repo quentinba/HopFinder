@@ -2627,6 +2627,47 @@ Mais la transparence doit être RÉELLE, pas un simple adverbe :
   **Statut** : opportuniste, comme T130 -- ne bloque rien, découvert en
   marge d'un autre ticket plutôt que planifié.
 
+- [ ] **T132 — Revue de licence : CC-BY-SA 4.0 (beer-analytics.com)**
+
+  **Origine** : réponse de Christian Scheb (mainteneur beer-analytics.com)
+  à la prise de contact T89 (2026-08-29, voir mémoire `beer_analytics_
+  contact_outcome`) -- crawl explicitement autorisé, mais "All content...
+  is licensed under CC-BY-SA 4.0. So please have a look at the license
+  terms regarding attribution and derivative works."
+
+  **Ce qui manque aujourd'hui** : `docs/DATA_SOURCES.md` et la section
+  « Licence » de CLAUDE.md ne mentionnent PAS cette licence pour
+  beer-analytics — seule une attribution générique est documentée (T89).
+  Contrairement aux sources déjà cataloguées (FooDB/FlavorDB2 = non
+  commercial ; BeerMaverick = pas de licence de données publiée ;
+  BarthHaas/Yakima = pas de CC connue), **CC-BY-SA a une clause ShareAlike
+  réelle** : si `aromahops.db` compte comme une œuvre dérivée incorporant
+  ces données (`style_recipe_stats`, `style_hop_usage`,
+  `style_hop_pairings`, `hop_usage_stats`, T85-T88), ShareAlike pourrait
+  exiger que CETTE PARTIE de la base soit elle-même redistribuée sous
+  CC-BY-SA 4.0 — plus strict que le MIT du code, et potentiellement en
+  tension avec le dépôt `HopFinder-db` actuellement privé/sans licence
+  affichée.
+
+  **Travail** :
+  1. Lire le texte réel de CC-BY-SA 4.0 (pas juste "attribution requise") —
+     en particulier ce que "derivative work" couvre pour une base de
+     données dérivée d'agrégats statistiques (vs. republier leurs données
+     brutes telles quelles).
+  2. Trancher si `aromahops.db` (ou au moins les 4 tables T85-T88)
+     constitue une œuvre dérivée au sens de la licence, et ce que ça
+     implique pour `HopFinder-db` (dépôt privé aujourd'hui) et pour le
+     déploiement Streamlit Cloud public.
+  3. Mettre à jour `docs/DATA_SOURCES.md` (section beer-analytics.com) et
+     CLAUDE.md (section Licence) avec la conclusion, quelle qu'elle soit —
+     jamais laisser la question implicite.
+
+  **Statut : explicitement reporté à la fin du projet, sur demande
+  utilisateur** ("I need to review the license question at some point but
+  I first want to finish the app") — ne bloque aucun autre ticket, mais ne
+  doit pas être oublié avant tout élargissement de la diffusion (dépôt
+  rendu public, usage commercial, etc.).
+
 ## 11. Ordre d'attaque recommandé
 
 Tous les tickets sont désormais au niveau **spec d'implémentation** : DDL,
@@ -2670,6 +2711,11 @@ Survivables sur indice dérivé — faisable dès maintenant, ne dépend de rien
 T118 (Brewfather), T100/T101 (régression, T101 conditionné par T100),
 T102 (Blend Explorer), T109/T110/T112 (vocabulaire), T113/T114 (docs),
 **T129** (familles d'arôme, GUI seule — faisable dès maintenant).
+
+⚠ **T132** (revue de licence CC-BY-SA 4.0) n'est PAS opportuniste comme les
+tickets ci-dessus — explicitement **reporté à la toute fin du projet** sur
+demande utilisateur (2026-08-29), à ne reprendre qu'une fois le reste
+terminé, jamais avant.
 
 ### Dépendances dures — à ne pas contourner
 
