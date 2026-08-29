@@ -518,6 +518,25 @@ def test_load_aroma_intensity_groups_by_variety_then_source(db):
 def test_hop_similar_varieties_empty_without_yakima_data(db):
     assert matching.hop_similar_varieties(db, "citra") == []
 
+def test_hop_popularity_sums_recipes_count_across_use_types(db):
+    db.executemany("INSERT INTO hop_usage_stats VALUES (?,?,?,?,?,?,?,?,?)", [
+        ("_fixture_popular", "Fixture Popular", "Boil", 100, None, None, None, "test", "2026"),
+        ("_fixture_popular", "Fixture Popular", "Dry Hop", 50, None, None, None, "test", "2026"),
+        # recipes_count NULL (chart présent mais dosage seul résolu, T88) --
+        # jamais compté comme 0, simplement ignoré dans la somme.
+        ("_fixture_partial", "Fixture Partial", "Boil", None, 0.2, 0.3, 0.4, "test", "2026"),
+    ])
+    db.commit()
+    out = matching.hop_popularity(db)
+    assert out["_fixture_popular"] == 150
+    # aucune ligne avec un recipes_count exploitable -> absent du dict,
+    # jamais un 0 fabriqué (T108 : "no data" doit rester distinct de 0).
+    assert "_fixture_partial" not in out
+    assert "_fixture_never_seen" not in out
+    db.execute("DELETE FROM hop_usage_stats WHERE variety IN "
+              "('_fixture_popular','_fixture_partial')")
+    db.commit()
+
 def test_hop_similar_varieties_reads_inserted_rows(db):
     db.execute("INSERT INTO hop_similar VALUES (?,?,?)", ("citra", "mosaic", "yakima"))
     db.commit()

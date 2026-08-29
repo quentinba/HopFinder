@@ -1502,16 +1502,49 @@ Elles sont écrites pour qu'aucune décision implicite ne reste à deviner.
   d'expander vide. Vérifié en direct (Chrome, dark theme) sur Citra (deux
   paragraphes propres) et Kohatu (lien produit cliquable rendu en markdown).
 
-- [ ] **T108 — Tri/filtre par popularité**
+- [x] **T108 — Tri/filtre par popularité**
 
-  **Dépend de T88** (`hop_usage_stats.recipes_count`).
+  **Compte rendu (2026-08-29)** : `matching.hop_popularity(con)` — SOMME de
+  `recipes_count` sur les 5 `use_type` de `hop_usage_stats` (T88) par
+  `variety`, un proxy de popularité relative (pas un compte de recettes
+  UNIQUES : une recette utilisant un houblon en Boil ET en Dry Hop compte
+  deux fois — acceptable pour un tri/filtre relatif, jamais présenté comme
+  "nombre de recettes exact"). Une `variety` absente du dict = aucune ligne
+  `hop_usage_stats` (non résolu côté beer-analytics) : jamais traité comme 0.
 
-  Ajouter un tri « Popularity » dans `browse` et `by-descriptor`, et un filtre
-  « exclure les houblons quasi jamais utilisés » (seuil ajustable, défaut
-  suggéré : moins de 50 recettes).
-  ⚠ Un houblon **sans** donnée de popularité (non résolu côté beer-analytics)
-  n'est pas « impopulaire » : le placer dans un groupe « no data », jamais en
-  bas d'un tri numérique avec un 0 implicite.
+  **`browse`** : `st.segmented_control` "Sort by" (Name/Popularity, défaut
+  Name — comportement inchangé par défaut) + `st.slider` "Minimum recipes"
+  (0-200, défaut 0 = désactivé, jamais un filtre actif sans action explicite
+  de l'utilisateur). Tri popularité : houblons AVEC donnée d'abord (part de
+  recettes décroissante), houblons SANS donnée ensuite, triés par nom —
+  groupe "no data" séparé et VISIBLE (`format_func` ajoute "(no popularity
+  data)" au libellé quand ce tri est actif), jamais un 0 implicite mélangé
+  au tri numérique. Le filtre ne masque QUE les houblons avec une popularité
+  MESURÉE sous le seuil — jamais un houblon sans donnée.
+
+  **`by-descriptor`** : mêmes contrôles, + un piège réel évité : le pool
+  `ranked` retourné par `matching.by_descriptor` est déjà tronqué à `top`
+  PAR PERTINENCE avant que je puisse le retrier par popularité — trier ce
+  sous-ensemble déjà coupé n'aurait pas donné le vrai palmarès popularité
+  parmi TOUT ce qui recoupe les descripteurs (vérifié en direct : "citrus"
+  seul faisait ressortir des houblons blend NZ obscurs en tête du tri
+  popularité, parce que le top-10 pertinence ne contenait pas les vrais
+  houblons populaires). Corrigé : si le tri popularité est actif ET qu'il y
+  a eu troncature, `matching.by_descriptor` est rappelé avec `top=
+  total_matches` pour retrier sur l'ensemble réel avant de retronquer à
+  `top`. Caption de transparence étendue pour mentionner le nombre masqué
+  par le filtre popularité, même esprit que la transparence de troncature
+  déjà en place (T56). Un caption "Popularity: N recipes (beer-analytics.com)"
+  ajouté dans chaque expander de détail quand ce tri est actif (même
+  emplacement que la transparence "Quantitative refinement" déjà existante).
+
+  Vérifié en direct (Chrome, dark theme, base réelle) : tri popularité sur
+  `browse` classe Cascade (298k recettes) en tête ; `by-descriptor` sur
+  "citrus" (122 houblons recoupés) bascule correctement du top-10 pertinence
+  (dominé par des blends NZ peu pertinents pour ce test) vers les vrais
+  houblons populaires (Cascade/Citra/Amarillo/Centennial/Simcoe/Mosaic...)
+  une fois le tri popularité activé — la correction de troncature ci-dessus
+  fonctionne réellement, pas seulement en test.
 
 - [ ] **T109 — Substitutions : une troisième source**
 
