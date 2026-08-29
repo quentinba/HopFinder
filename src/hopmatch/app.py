@@ -193,6 +193,13 @@ _TOOL_SUMMARY_BY_MODE = {t["mode"]: t for t in _TOOL_SUMMARIES}
 # un `git log` en direct exigerait aussi que `.git` soit présent dans le
 # conteneur déployé, ce qui n'est pas garanti.
 _RECENT_UPDATES = [
+    ("2026-08-29", "Beer styles now overlays the official BJCP range with "
+                   "the observed distribution from real published recipes "
+                   "(beer-analytics.com) on the same chart for ABV, IBU, "
+                   "OG, FG and color -- a terracotta band for the official "
+                   "range, sage bars for the observed histogram. Falls "
+                   "back to the plain range bar (no fabricated histogram) "
+                   "for the styles beer-analytics doesn't cover."),
     ("2026-08-29", "Browse a hop and From descriptors both gained a "
                    "\"Sort by\" toggle (Name/Popularity or Relevance/"
                    "Popularity) plus a minimum-recipes filter, using real "
@@ -4947,7 +4954,47 @@ def _sg_to_plato(sg: float) -> float:
     return -616.868 + 1111.14 * sg - 630.272 * sg ** 2 + 135.997 * sg ** 3
 
 
-def _vital_stat_row(row, use_ebc: bool, use_plato: bool) -> None:
+def _style_observed_vs_official_chart(bins: list[dict], vmin: float, vmax: float,
+                                      domain: tuple[float, float], x_title: str):
+    """Histogramme des recettes RÉELLEMENT brassées (`style_recipe_stats`,
+    beer-analytics.com, T85) + bande translucide pour la fourchette
+    OFFICIELLE BJCP `[vmin, vmax]` (T81), sur le MÊME domaine fixe que
+    `_range_bar_html` (T105 : "sur le même axe... jamais moyennées, jamais
+    fusionnées" -- deux encodages visuels distincts, jamais recalculées en
+    un seul chiffre). Couleurs : sauge pour l'histogramme observé (même
+    langage que le remplissage par défaut de `_range_bar_html`, "donnée
+    mesurée"), terracotta translucide pour la bande BJCP (référence
+    prescriptive, distincte). L'histogramme est PRÉ-BINNÉ ET ÉCRÊTÉ côté
+    beer-analytics (outliers déjà retirés) -- jamais un percentile
+    dérivable, rappelé en `st.caption` par l'appelant, pas ici (le chart
+    reste réutilisable sans dépendre d'un texte GUI en anglais précis)."""
+    dark = st.context.theme.type == "dark"
+    sage = "#aebf92" if dark else "#7f9455"
+    terracotta = "#f6a06b" if dark else "#c67139"
+    # `y2=alt.Y2Datum(0)` EXPLICITE -- piège Vega-Lite réel, vérifié en
+    # direct (T105) : `mark_bar` avec `x`/`x2` (bins de largeur variable) ET
+    # seulement `y` (sans `y2`) ne redescend PAS automatiquement à 0 comme un
+    # bar chart classique `x:nominal, y:quantitative` -- chaque bin rendait
+    # un petit carré flottant à la hauteur de sa valeur au lieu d'une vraie
+    # barre. Même famille de piège que `x2=alt.X2Datum(domain_min)` déjà
+    # documenté pour `_compare_dual_axis_barplot` (log scale), symétrique ici
+    # sur l'axe Y avec une échelle linéaire.
+    bars = alt.Chart(alt.Data(values=bins)).mark_bar(color=sage, opacity=0.85).encode(
+        x=alt.X("bin_low:Q", scale=alt.Scale(domain=list(domain)), title=x_title),
+        x2="bin_high:Q",
+        y=alt.Y("count:Q", title="Recipes"),
+        y2=alt.Y2Datum(0),
+        tooltip=[alt.Tooltip("bin_low:Q", title="From", format=".3g"),
+                alt.Tooltip("bin_high:Q", title="To", format=".3g"),
+                alt.Tooltip("count:Q", title="Recipes")],
+    )
+    band = alt.Chart(alt.Data(values=[{"lo": vmin, "hi": vmax}])).mark_rect(
+        color=terracotta, opacity=0.28,
+    ).encode(x=alt.X("lo:Q", scale=alt.Scale(domain=list(domain))), x2="hi:Q")
+    return (band + bars).properties(height=130)
+
+
+def _vital_stat_row(row, use_ebc: bool, use_plato: bool, observed: dict[str, list[dict]] | None = None) -> None:
     """5 `st.metric` (ABV/IBU/OG/FG/SRM, ou EBC/Plato selon les toggles) +
     barre de range, UNE LIGNE PAR CRITÈRE (2026-08-27, retour utilisateur en
     direct : 5 colonnes côte à côte tronquaient les fourchettes, ex.
@@ -4974,20 +5021,30 @@ def _vital_stat_row(row, use_ebc: bool, use_plato: bool) -> None:
     laisserait croire à zéro)."""
     has_vitals = row["abv_min"] is not None
     for label, min_key, max_key, fmt, domain in _VITAL_STAT_SPECS:
+        metric_key = label.lower()  # capturé AVANT toute mutation de `label` ci-dessous
         vmin, vmax = row[min_key], row[max_key]
         srm_mid = (vmin + vmax) / 2 if (label == "SRM" and vmin is not None
                                         and vmax is not None) else None
+        # T105 : bins observés (style_recipe_stats) convertis dans la MÊME
+        # unité que la fourchette BJCP affichée -- sinon les deux encodages
+        # ne s'aligneraient plus sur le même axe une fois EBC/°Plato actif.
+        bins = [dict(b) for b in (observed or {}).get(metric_key, [])]
         if label == "SRM" and use_ebc:
             label, fmt = "EBC", (lambda v: f"{v:.0f}")
             domain = (domain[0] * _EBC_PER_SRM, domain[1] * _EBC_PER_SRM)
             if vmin is not None:
                 vmin, vmax = vmin * _EBC_PER_SRM, vmax * _EBC_PER_SRM
+            for b in bins:
+                b["bin_low"] *= _EBC_PER_SRM; b["bin_high"] *= _EBC_PER_SRM
         elif label in ("OG", "FG"):
             if use_plato:
                 label, fmt = f"{label} (°P)", (lambda v: f"{v:.1f}")
                 domain = (_sg_to_plato(domain[0]), _sg_to_plato(domain[1]))
                 if vmin is not None:
                     vmin, vmax = _sg_to_plato(vmin), _sg_to_plato(vmax)
+                for b in bins:
+                    b["bin_low"] = _sg_to_plato(b["bin_low"])
+                    b["bin_high"] = _sg_to_plato(b["bin_high"])
             else:
                 label = f"{label} (SG)"
         label_col, bar_col = st.columns([2, 3], vertical_alignment="center")
@@ -4995,8 +5052,12 @@ def _vital_stat_row(row, use_ebc: bool, use_plato: bool) -> None:
             st.metric(label, f"{fmt(vmin)}–{fmt(vmax)}" if vmin is not None else "—")
         with bar_col:
             if vmin is not None and vmax is not None:
-                st.html(_range_bar_html(vmin, vmax, domain, fmt(vmin), fmt(vmax),
-                                        color=_srm_color(srm_mid) if srm_mid is not None else None))
+                if bins:
+                    st.altair_chart(_style_observed_vs_official_chart(
+                        bins, vmin, vmax, domain, label), width="stretch")
+                else:
+                    st.html(_range_bar_html(vmin, vmax, domain, fmt(vmin), fmt(vmax),
+                                            color=_srm_color(srm_mid) if srm_mid is not None else None))
     if not has_vitals:
         st.caption(
             "This style has no vital statistics of its own — it inherits them "
@@ -5094,8 +5155,24 @@ def _styles(con) -> None:
         # `_render_key_stats`) si la police par défaut redevient trop large
         # -- ligne-par-critère (`_vital_stat_row`) laisse déjà bien plus de
         # place que l'ancien layout à 5 colonnes côte à côte.
+        # T105 : distribution RÉELLEMENT brassée (style_recipe_stats,
+        # beer-analytics.com, T85) superposée à la fourchette BJCP quand
+        # elle existe pour ce style -- `matching.style_observed_distribution`
+        # renvoie {} si beer-analytics ne couvre pas ce style, jamais un
+        # histogramme fabriqué (voir `_vital_stat_row`, repli silencieux sur
+        # la simple barre BJCP dans ce cas).
+        observed = matching.style_observed_distribution(con, row["style_id"])
         with st.container(key="hf_vital_stats"):
-            _vital_stat_row(row, use_ebc, use_plato)
+            _vital_stat_row(row, use_ebc, use_plato, observed)
+        if observed:
+            # Légende explicite (ticket T105) + rappel obligatoire : c'est un
+            # histogramme PRÉ-BINNÉ ET ÉCRÊTÉ côté beer-analytics, jamais un
+            # vrai percentile (même réserve que style_recipe_stats/T85).
+            st.caption(":material/info: Terracotta band = official BJCP range. "
+                      "Sage bars = observed distribution in real published "
+                      "recipes (beer-analytics.com) — a pre-binned, clipped "
+                      "histogram, not a percentile. They can diverge; that's "
+                      "the point, not an error.")
 
     with _panel():
         if row["overall_impression"]:

@@ -537,6 +537,24 @@ def test_hop_popularity_sums_recipes_count_across_use_types(db):
               "('_fixture_popular','_fixture_partial')")
     db.commit()
 
+def test_style_observed_distribution_groups_bins_by_metric_sorted(db):
+    db.executemany("INSERT INTO style_recipe_stats VALUES (?,?,?,?,?,?,?,?)", [
+        ("_fixture_style", "american-ipa", "abv", 6.0, 6.5, 20, "test", "2026"),
+        ("_fixture_style", "american-ipa", "abv", 5.5, 6.0, 10, "test", "2026"),
+        ("_fixture_style", "american-ipa", "ibu", 40.0, 50.0, 5, "test", "2026"),
+    ])
+    db.commit()
+    out = matching.style_observed_distribution(db, "_fixture_style")
+    assert out["abv"] == [
+        {"bin_low": 5.5, "bin_high": 6.0, "count": 10},
+        {"bin_low": 6.0, "bin_high": 6.5, "count": 20},
+    ]
+    assert out["ibu"] == [{"bin_low": 40.0, "bin_high": 50.0, "count": 5}]
+    # aucune ligne pour ce style -> dict vide, jamais un histogramme fabriqué
+    assert matching.style_observed_distribution(db, "_fixture_never_seen") == {}
+    db.execute("DELETE FROM style_recipe_stats WHERE style_id='_fixture_style'")
+    db.commit()
+
 def test_hop_similar_varieties_reads_inserted_rows(db):
     db.execute("INSERT INTO hop_similar VALUES (?,?,?)", ("citra", "mosaic", "yakima"))
     db.commit()
