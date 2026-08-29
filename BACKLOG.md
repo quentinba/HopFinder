@@ -1633,10 +1633,21 @@ Elles sont écrites pour qu'aucune décision implicite ne reste à deviner.
   "nombre de recettes exact"). Une `variety` absente du dict = aucune ligne
   `hop_usage_stats` (non résolu côté beer-analytics) : jamais traité comme 0.
 
-  **`browse`** : `st.segmented_control` "Sort by" (Name/Popularity, défaut
-  Name — comportement inchangé par défaut) + `st.slider` "Minimum recipes"
-  (0-200, défaut 0 = désactivé, jamais un filtre actif sans action explicite
-  de l'utilisateur). Tri popularité : houblons AVEC donnée d'abord (part de
+  **Addendum (2026-08-29, revue utilisateur)** : Popularity devient le
+  DÉFAUT (au lieu de Name) sur `browse` — "so that the dropdown menu is
+  more informative by default" (le sélecteur Hop affiche déjà le nombre de
+  recettes dans son libellé une fois ce tri actif). `by-descriptor` GARDE
+  Relevance par défaut (pas d'argument "dropdown" là — ce mode existe pour
+  trier par pertinence aromatique, la popularité reste un ajout
+  secondaire). Sur les DEUX modes, le slider "Minimum recipes" ne
+  s'affiche plus QUE si le tri Popularity est actif — "otherwise it make
+  no sense to display it" (sans effet en tri Name/Relevance, ni sur ce qui
+  est montré ni sur l'ordre).
+
+  **`browse`** : `st.segmented_control` "Sort by" (Name/Popularity) +
+  `st.slider` "Minimum recipes" (0-200, défaut 0 = désactivé, jamais un
+  filtre actif sans action explicite de l'utilisateur). Tri popularité :
+  houblons AVEC donnée d'abord (part de
   recettes décroissante), houblons SANS donnée ensuite, triés par nom —
   groupe "no data" séparé et VISIBLE (`format_func` ajoute "(no popularity
   data)" au libellé quand ce tri est actif), jamais un 0 implicite mélangé
