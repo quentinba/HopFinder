@@ -2650,6 +2650,68 @@ Mais la transparence doit être RÉELLE, pas un simple adverbe :
 
   C'est l'analyse qui manquait à `combine()` et qui a coûté son retrait.
 
+- [ ] **T133 — Stade « Late boil » (5 min) distinct de « boil »**
+
+  **Origine** : question utilisateur en direct (2026-08-30), en testant T121 :
+  « I'm surprized we only have boil / whirlpool / afdh / pfdh. Why don't we
+  have late boil for example? Should we rename whirlpool by "LateBoil(5min)/
+  Whirlpool/HopStand"? ».
+
+  **Décision de cadrage prise en direct (à ne pas revenir dessus sans
+  raison neuve)** : NE PAS fusionner « late boil » dans « Whirlpool ».
+  Chimiquement distincts — un ajout à 5 min de la fin d'ébullition reste
+  sous ébullition ACTIVE (rolling boil), plus proche de « boil » que de
+  « whirlpool » (post-ébullition, plus d'apport de chaleur actif). Ajouter
+  un VRAI 5e stade plutôt qu'un renommage.
+
+  **Pourquoi ce n'est pas cosmétique** : `reference.PROCESS_SURVIVAL_
+  EXPLANATIONS["direct traces, contributes via oxidation"]` documente déjà
+  qu'humulène/caryophyllène ont besoin d'une ébullition de PLUS de ~20
+  minutes pour produire leurs dérivés d'oxydation (épicé/boisé) — un ajout
+  à 5 min n'atteint jamais ce seuil. Le stade "boil" actuel de T119
+  (`state="precursor"` pour humulène/caryophyllène/farnésène/sélinène)
+  suppose implicitement une exposition PLEINE (60 min depuis le début),
+  fausse pour un ajout tardif : à 5 min, ces composés devraient plutôt
+  rester `kept` (forme brute, pas encore oxydée) qu'à `precursor`.
+
+  **Ce qui est solidement sourcé pour la nouvelle colonne** :
+  - Sesquiterpènes (humulène/caryophyllène/farnésène/sélinène) : `kept` à 5
+    min (sous le seuil des ~20 min), pas `precursor` — direct depuis la
+    source déjà citée ci-dessus.
+
+  **Ce qui NE l'est PAS encore, à trancher AVANT d'écrire le code** :
+  myrcène/linalol n'ont que 2 points de données chiffrés (Janish : ~50% de
+  perte à 10 min, quasi totale à 60 min) — aucun chiffre à 5 min. Extrapoler
+  un état ordinal (`kept`/`partial`) à partir de la FORME de la courbe (perte
+  déjà significative à 10 min → probablement `partial`, pas `kept`, à 5 min)
+  serait une INFÉRENCE, pas une lecture directe de la source — à valider
+  explicitement avec l'utilisateur avant d'écrire quoi que ce soit
+  (même règle que partout ailleurs dans ce projet : jamais deviner
+  silencieusement). Géraniol/beta-pinène/isobutyrate/ketones/thiols non
+  examinés du tout pour ce point — même travail de recoupement source par
+  source que T119 à refaire pour ce seul stade.
+
+  **Périmètre** (touche 4 tickets déjà livrés, pas juste une addition) :
+  - `reference.PROCESS_STAGE_SURVIVAL` : nouvelle clé de stade
+    (`"late_boil"` ou équivalent) sur les 11 composés — 11 nouvelles
+    entrées sourcées, pas une extrapolation généralisée à toute la matrice.
+  - `matching._PLAN_STAGES`/`compound_survival` : stade reconnu en plus des
+    4 existants.
+  - `app._COVERAGE_STAGE_LABELS` (T121) : libellé GUI ("Late boil" —
+    PAS de fusion avec "Whirlpool", décision ci-dessus), colonne
+    supplémentaire dans le `st.segmented_control` par houblon et dans la
+    grille.
+  - T122 (mesure de discrimination) : à REFAIRE sur les ~20 plans réalistes
+    avec le stade en plus — pourrait changer la liste des composés
+    "discriminants" vs. "toujours pareil" (le tableau actuel n'a que 4
+    stades).
+
+  **Test** : même garde-fou que T119
+  (`test_compound_survival_covers_all_eleven_compounds_and_four_stages` →
+  CINQ stades), + un cas qui vérifie explicitement qu'humulène/caryophyllène
+  ne sont PLUS `precursor` à "late_boil" (c'est le point central du
+  ticket).
+
 ## 10bis. Idée hors épique (trouvée en auditant un concurrent)
 
 - [x] **T129 — Familles d'arôme comme filtre facetté (Browse / By-descriptor)**
