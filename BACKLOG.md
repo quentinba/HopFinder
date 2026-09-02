@@ -905,7 +905,7 @@ Elles sont écrites pour qu'aucune décision implicite ne reste à deviner.
 
 ## 4. Épique C — Paires, triplets, quadruplets
 
-- [ ] **T91 — Ingestion du corpus MMuM**
+- [x] **T91 — Ingestion du corpus MMuM**
 
   **Source** : `https://www.maischemalzundmehr.de/export_json.php?id=<N>`.
   Export JSON public, un fichier par recette. Ids observés jusqu'à **2290**,
@@ -971,6 +971,59 @@ Elles sont écrites pour qu'aucune décision implicite ne reste à deviner.
   **Vérification réelle après crawl** : nombre de recettes ingérées, nombre
   d'additions, moyenne d'additions par recette (attendu ~3,7 d'après
   l'échantillon), et répartition des 4 `stage`.
+
+  **FAIT (2026-08-30/2026-09-02).** `parsers.parse_mmum_recipe` (fonction
+  pure, testée sur 3 exports RÉELS sauvegardés en fixtures --
+  `mmum_with_dryhop.json`/`mmum_without_dryhop.json`/`mmum_first_wort.json`
+  -- + un payload synthétique pour le `Typ` inconnu, 9 tests). `schema.
+  RECIPES_SCHEMA`/`init_recipes_db` (D4 : fichier `recipes.db` séparé,
+  `CREATE TABLE IF NOT EXISTS`, jamais de DROP). `ingest.ingest_mmum`
+  (cache-first `_mmum_fetch`, détection des trous par échec de
+  désérialisation JSON -- un id absent répond HTTP 200 avec un court
+  message HTML, PAS un 404, vérifié en direct -- écriture idempotente via
+  DELETE+INSERT OR REPLACE sur `recipe_hops`, 5 tests sur la boucle de
+  crawl). CLI : `hopmatch ingest-mmum`.
+
+  **Formule Plato<->SG consolidée** (découverte en cours de ticket) :
+  `app._sg_to_plato` existait déjà (T82, bascule GUI Plato/SG sur les
+  styles BJCP) avec un commentaire anticipant explicitement ce ticket
+  ("formule déjà établie... CLAUDE.md/BACKLOG.md T91"). Plutôt que
+  dupliquer les coefficients de la cubique ASBC dans `parsers.py`,
+  déplacés dans `reference.sg_to_plato`/`reference.plato_to_sg` (inverse
+  numérique par bissection, `sg_to_plato(plato_to_sg(p)) ≈ p` vérifié) +
+  `reference.EBC_PER_SRM` -- SOURCE UNIQUE, `app._sg_to_plato`/`_EBC_PER_SRM`
+  délèguent désormais à `reference` au lieu de porter leur propre copie de
+  la formule (même discipline que Yakima/BarthHaas jamais moyennées entre
+  elles, appliquée ici à l'intérieur d'une seule conversion physique).
+
+  **Crawl réel exécuté (2026-09-02)**, 1..2400, 1 req/s, cache disque
+  `data/cache/mmum/` : 1 erreur réseau transitoire (`id=1122`, connexion
+  réinitialisée) sur la 1ère passe, corrigée par une 2e passe cache-first
+  (quasi instantanée, seul l'id manquant refetché) -- même traitement que
+  les incidents réseau beer-analytics (T86-T88), voir CLAUDE.md.
+  **Résultat final : 1844 recettes ingérées, 556 trous, 0 erreur réseau sur
+  2400 ids scannés, 6395 additions de houblon (3,5/recette, proche de
+  l'attendu ~3,7).** Répartition des 4 stades : boil 3925, first_wort 942
+  (14,7 % des additions, cohérent avec le ~13 % du ticket), dry_hop 789,
+  whirlpool 739 -- **zéro `Typ` inconnu rencontré en pratique** sur les
+  1844 recettes réelles (les 3 valeurs Standard/Whirlpool/Vorderwuerze +
+  Stopfhopfen couvrent 100 % des additions observées). Top houblons par
+  nombre d'additions : Cascade (361), Citra (355), Perle (290), Amarillo
+  (269), Magnum (219) -- cohérent avec un corpus généraliste germanophone
+  (D3). `recipes.db` poussée vers le dépôt privé HopFinder-db (jamais dans
+  le dépôt de code, `*.db` gitignore, jamais référencée par
+  `app._fetch_remote_db`).
+
+  ⚠ **Second corpus optionnel (BrewDog DIY Dog) explicitement PAS fait** --
+  le ticket le proposait "même ticket si le temps le permet" ; structure et
+  source différentes (pas un export JSON par id), traité comme un
+  complément séparé plutôt que d'élargir ce crawl déjà substantiel. Pas de
+  nouveau ticket ouvert pour l'instant (T92/T93/T94 n'en ont pas besoin
+  pour démarrer sur le corpus MMuM seul).
+
+  14 nouveaux tests (9 parseur + 5 boucle d'ingestion), suite verte
+  (410 tests avant le crawl réel -- le crawl lui-même ne touche à aucun
+  test, données uniquement).
 
 - [ ] **T92 — Réconciliation nom-de-recette → `variety`**
   *Le ticket qui fait ou casse toute l'épique C.*

@@ -1,0 +1,90 @@
+{
+  "Rezeptquelle": "www.maischemalzundmehr.de",
+  "ExportVersion": "2.0",
+  "Name": "Black Chocolate",
+  "Datum": "07.11.2017",
+  "Sorte": "Schwarzbier",
+  "Autor": "h-isteas",
+  "Ausschlagwuerze": 0,
+  "Sudhausausbeute": 0,
+  "Stammwuerze": 14,
+  "Bittere": 40,
+  "Farbe": 97,
+  "Alkohol": 5.5,
+  "Kurzbeschreibung": "Schwarzbier mit Schokoaromen passend zur Weihnachtszeit",
+  "Malze": [
+    {
+      "Name": "Pale Ale",
+      "Menge": 2.2,
+      "Einheit": "kg"
+    },
+    {
+      "Name": "Pilsener Malz",
+      "Menge": 1.5,
+      "Einheit": "kg"
+    },
+    {
+      "Name": "Wiener Malz",
+      "Menge": 1.5,
+      "Einheit": "kg"
+    },
+    {
+      "Name": "Chocolate Malt",
+      "Menge": 0.6,
+      "Einheit": "kg"
+    },
+    {
+      "Name": "Carafa II",
+      "Menge": 0.3,
+      "Einheit": "kg"
+    }
+  ],
+  "Maischform": "infusion",
+  "Hauptguss": 18,
+  "Einmaischtemperatur": 60,
+  "Rasten": [
+    {
+      "Temperatur": 57,
+      "Zeit": 10
+    },
+    {
+      "Temperatur": 63,
+      "Zeit": 35
+    },
+    {
+      "Temperatur": 72,
+      "Zeit": 30
+    }
+  ],
+  "Abmaischtemperatur": 78,
+  "Nachguss": 14,
+  "Kochzeit_Wuerze": 90,
+  "Hopfenkochen": [
+    {
+      "Sorte": "Mandarina Bavaria",
+      "Menge": 32,
+      "Alpha": 6.8,
+      "Zeit": 80,
+      "Typ": "Standard"
+    },
+    {
+      "Sorte": "Spalter Select",
+      "Menge": 13,
+      "Alpha": 5.2,
+      "Zeit": 80,
+      "Typ": "Standard"
+    },
+    {
+      "Sorte": "Perle",
+      "Menge": 8,
+      "Alpha": 3.9,
+      "Zeit": 80,
+      "Typ": "Standard"
+    }
+  ],
+  "Hefe": "Fermentis SAFLAGER S-23",
+  "Gaertemperatur": "12-15",
+  "Endvergaerungsgrad": 65,
+  "Karbonisierung": 6,
+  "Anmerkung_Autor": "Herrliche Malzaromen, mein Lieblingsbier zur Weihnachtszeit. War ein Versuch mit restlichen Malzen, die ich noch über hatte und ist meines Erachtens sehr lecker geworden. Nach 4-6 Wochen schon gut trinkbar mit feinem, festem Schaum. Beim nächsten Brauvorgang würde ich noch etwas mit dem Mandarina Bavaria variieren um die Aromen noch mehr zu betonen. \r\nMich würde mal die Meinung anderer interessieren :) "
+}

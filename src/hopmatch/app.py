@@ -5333,24 +5333,21 @@ _VITAL_STAT_SPECS = [
     ("SRM", "srm_min", "srm_max", lambda v: f"{v:.1f}", (0.0, 42.0)),
 ]
 
-# EBC = SRM x ce facteur -- formule déjà établie dans ce projet pour la
-# conversion inverse (CLAUDE.md/BACKLOG.md T91, ingestion MMuM : "Farbe en
-# EBC -> SRM : SRM = EBC / 1.97"), pas une valeur inventée pour ce ticket.
-_EBC_PER_SRM = 1.97
+# EBC = SRM x ce facteur -- SOURCE UNIQUE désormais `reference.EBC_PER_SRM`
+# (T91, 2026-08-30 : `parsers.parse_mmum_recipe` a besoin de la MÊME
+# conversion pour les unités allemandes MMuM -- déplacée dans `reference.py`
+# pour ne jamais faire diverger silencieusement les deux usages, voir son
+# commentaire).
+_EBC_PER_SRM = reference.EBC_PER_SRM
 
 
 def _sg_to_plato(sg: float) -> float:
-    """Densité spécifique -> degrés Plato -- polynôme cubique standard ASBC
-    (formule établie de l'industrie brassicole, pas une approximation
-    improvisée pour ce ticket ; vérifié : SG 1.050 -> ~12.4°P, cohérent avec
-    les tables de référence usuelles). Appliqué à OG ET FG (2026-08-27,
-    demande utilisateur explicite : "toggle density in optical density
-    versus plato... Plato make sense to use in some cases") -- pour FG,
-    c'est l'« extrait apparent » conventionnel de tout logiciel de brassage
-    (BeerSmith, Brewer's Friend...), pas une seconde mesure : la présence
-    d'alcool fausse la relation densité<->sucre réelle, mais c'est la
-    convention établie partout, pas une invention de ce ticket."""
-    return -616.868 + 1111.14 * sg - 630.272 * sg ** 2 + 135.997 * sg ** 3
+    """Densité spécifique -> degrés Plato (2026-08-27, demande utilisateur
+    explicite : "toggle density in optical density versus plato... Plato
+    make sense to use in some cases") -- délègue à `reference.sg_to_plato`
+    (T91, même raison que `_EBC_PER_SRM` ci-dessus : formule PARTAGÉE avec
+    `parsers.parse_mmum_recipe`, plus de coefficients dupliqués ici)."""
+    return reference.sg_to_plato(sg)
 
 
 def _style_observed_vs_official_chart(bins: list[dict], vmin: float, vmax: float,

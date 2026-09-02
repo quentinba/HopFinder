@@ -12,6 +12,8 @@ from __future__ import annotations
 import html as _html
 import re
 
+from . import reference
+
 # label normalisé -> (compound, unit)
 BARTHHAAS_LABELS = {
     "MYRCENE": ("myrcene", "pct_oil"), "HUMULENE": ("humulene", "pct_oil"),
@@ -973,3 +975,89 @@ def parse_box_trace(trace: dict) -> tuple[float | None, float | None, float | No
         vals = trace.get(key)
         return vals[0] if vals else None
     return first("q1"), first("median"), first("q3")
+
+
+# --------------------------------------------------------------------------- #
+# MMuM (maischemalzundmehr.de) -- corpus brut de recettes (T91, épique C)
+# --------------------------------------------------------------------------- #
+# Mapping Typ -> stade -- SEULES les 3 valeurs RÉELLEMENT observées dans
+# `Hopfenkochen[].Typ` (vérifié sur des dizaines d'exports réels le
+# 2026-08-30). Le bloc `Stopfhopfen` (dry hop) est une structure séparée du
+# JSON, PAS une 4e valeur de `Typ` -- traité à part dans `parse_mmum_recipe`.
+# Toute AUTRE valeur de `Typ` qui apparaîtrait à l'usage doit rester hors de
+# ce dict (jamais ajoutée par supposition) -- `parse_mmum_recipe` laisse
+# alors `stage=None` plutôt que deviner, garde-fou explicite du ticket T91.
+_MMUM_TYP_TO_STAGE = {
+    "Standard": "boil",
+    "Whirlpool": "whirlpool",
+    "Vorderwuerze": "first_wort",
+}
+
+
+def parse_mmum_recipe(payload: dict, source_id: str) -> dict:
+    """Un export JSON MMuM (`maischemalzundmehr.de/export_json.php?id=<N>`,
+    T91) -> `{"recipe": {...}, "hops": [...]}` prêt à insérer dans
+    `recipes`/`recipe_hops` (`recipes.db`, `schema.RECIPES_SCHEMA`).
+    Fonction PURE (aucun appel réseau, aucune connexion DB) -- le crawl/
+    cache et l'écriture restent chez l'appelant (`ingest.ingest_mmum`),
+    testée séparément sur fixtures réelles (`tests/fixtures/mmum_*.json`).
+
+    **Conversions d'unité, valeur brute ET convertie stockées** (BACKLOG.md
+    T91) : `Stammwuerze` (°Plato) -> `og_sg` (`reference.plato_to_sg` --
+    MÊME formule que la bascule GUI Plato<->SG des styles BJCP, T82, source
+    unique, jamais deux formules divergentes pour la même conversion
+    physique) ; `Farbe` (EBC) -> `srm` (`reference.EBC_PER_SRM`, idem) ;
+    `Bittere` DÉJÀ en IBU et `Alkohol` DÉJÀ en % ABV (copie directe, aucune
+    conversion à faire). `fg_sg` reste TOUJOURS `None` : aucun export MMuM
+    vérifié ne porte le FG ou l'extrait apparent de façon fiable et
+    univoque -- `Endvergaerungsgrad` (atténuation apparente, présent sur
+    certains exports seulement) permettrait de le CALCULER, mais ce serait
+    une valeur dérivée, pas mesurée par la source -- jamais fabriquée
+    silencieusement ici.
+
+    **Stade dérivé, jamais deviné pour un `Typ` inconnu** (garde-fou
+    explicite du ticket) : `_MMUM_TYP_TO_STAGE` mappe les 3 valeurs
+    RÉELLEMENT observées (Standard/Whirlpool/Vorderwuerze) vers boil/
+    whirlpool/first_wort ; toute AUTRE valeur laisse `stage=None` --
+    `addition_type` garde la valeur brute allemande dans tous les cas,
+    aucune perte d'information même quand `stage` reste NULL. Le bloc
+    `Stopfhopfen` (dry hop, structure séparée, PAS un `Typ` parmi
+    d'autres) -> `stage="dry_hop"` toujours, `addition_type="Stopfhopfen"`
+    (nom du champ source, même convention que pour les entrées
+    `Hopfenkochen`)."""
+    uid = f"mmum-{source_id}"
+    og_plato = payload.get("Stammwuerze")
+    farbe_ebc = payload.get("Farbe")
+    recipe = {
+        "uid": uid, "source": "mmum", "source_id": source_id,
+        "name": payload.get("Name"), "author": payload.get("Autor"),
+        "brewed_on": payload.get("Datum"),
+        "style_raw": payload.get("Sorte"), "style_id": None,
+        "og_plato": og_plato,
+        "og_sg": reference.plato_to_sg(og_plato) if og_plato is not None else None,
+        "fg_sg": None,
+        "abv": payload.get("Alkohol"),
+        "ibu": payload.get("Bittere"),
+        "ebc": farbe_ebc,
+        "srm": farbe_ebc / reference.EBC_PER_SRM if farbe_ebc is not None else None,
+    }
+    hops = []
+    seq = 0
+    for h in payload.get("Hopfenkochen") or []:
+        seq += 1
+        typ = h.get("Typ")
+        hops.append({
+            "seq": seq, "hop_name": h.get("Sorte"), "variety": None,
+            "stage": _MMUM_TYP_TO_STAGE.get(typ), "addition_type": typ,
+            "time_min": h.get("Zeit"), "amount_g": h.get("Menge"),
+            "alpha": h.get("Alpha"),
+        })
+    for h in payload.get("Stopfhopfen") or []:
+        seq += 1
+        hops.append({
+            "seq": seq, "hop_name": h.get("Sorte"), "variety": None,
+            "stage": "dry_hop", "addition_type": "Stopfhopfen",
+            "time_min": None, "amount_g": h.get("Menge"),
+            "alpha": h.get("Alpha"),
+        })
+    return {"recipe": recipe, "hops": hops}

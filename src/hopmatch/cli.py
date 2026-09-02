@@ -180,6 +180,15 @@ def main(argv=None):
     hus.add_argument("--sleep", type=float, default=1.0)
     hus.add_argument("--limit", type=int)
 
+    mm = sub.add_parser("ingest-mmum",
+                        help="corpus BRUT de recettes (maischemalzundmehr.de) : "
+                             "recipes.db, JAMAIS aromahops.db (D4) -- T91")
+    mm.add_argument("--db", default="recipes.db")
+    mm.add_argument("--start", type=int, default=1)
+    mm.add_argument("--end", type=int, default=ingest.MMUM_DEFAULT_END)
+    mm.add_argument("--sleep", type=float, default=1.0)
+    mm.add_argument("--limit", type=int)
+
     am = sub.add_parser("amplify", help="cas d'usage : amplify")
     am.add_argument("note")
     am.add_argument("--db", default=DEFAULT_DB)
@@ -264,6 +273,8 @@ def main(argv=None):
         ingest.ingest_style_hop_pairings(a.db, limit=a.limit, sleep=a.sleep); return 0
     if a.cmd == "ingest-hop-usage-stats":
         ingest.ingest_hop_usage_stats(a.db, limit=a.limit, sleep=a.sleep); return 0
+    if a.cmd == "ingest-mmum":
+        ingest.ingest_mmum(a.db, start=a.start, end=a.end, sleep=a.sleep, limit=a.limit); return 0
 
     con = connect(a.db)
     try:
