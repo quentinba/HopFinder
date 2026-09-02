@@ -1263,3 +1263,102 @@ def test_ingest_hop_usage_stats_creates_table_without_wiping_existing_data(tmp_p
     con.close()
     assert hops == ["citra"]
     assert n == 5  # 5 use_type
+
+
+# --------------------------------------------------------------------------- #
+# MMuM (T91) -- boucle de crawl/écriture (parsing déjà testé sur fixtures
+# réelles côté test_parsers.py, ces tests couvrent le mécanisme d'ingestion :
+# cache-first, "trous", écriture idempotente -- _mmum_fetch mocké, AUCUN
+# appel réseau.
+# --------------------------------------------------------------------------- #
+_MMUM_HOLE_TEXT = "<h2>Das Rezept existiert nicht oder wurde gelöscht.</h2>"
+
+_MMUM_RECIPE_1 = json.dumps({
+    "Name": "Test IPA", "Autor": "tester", "Datum": "01.01.2020",
+    "Sorte": "American IPA", "Stammwuerze": 13.0, "Bittere": 45, "Farbe": 8,
+    "Alkohol": 6.0,
+    "Hopfenkochen": [
+        {"Sorte": "Citra", "Menge": 20, "Alpha": 12.0, "Zeit": 60, "Typ": "Standard"},
+        {"Sorte": "Mosaic", "Menge": 30, "Alpha": 11.5, "Zeit": 0, "Typ": "Whirlpool"},
+    ],
+    "Stopfhopfen": [{"Sorte": "Citra", "Menge": 40}],
+})
+
+_MMUM_RECIPE_2 = json.dumps({
+    "Name": "Test Pils", "Autor": "tester2", "Datum": "02.01.2020",
+    "Sorte": "German Pils", "Stammwuerze": 11.5, "Bittere": 30, "Farbe": 4,
+    "Alkohol": 5.0,
+    "Hopfenkochen": [
+        {"Sorte": "Saphir", "Menge": 25, "Alpha": 4.5, "Zeit": 60, "Typ": "Standard"},
+    ],
+})
+
+_MMUM_FIXTURES = {1: _MMUM_RECIPE_1, 2: _MMUM_HOLE_TEXT, 3: _MMUM_RECIPE_2}
+
+
+def test_ingest_mmum_writes_recipes_and_hops(tmp_path, monkeypatch):
+    monkeypatch.setattr(ingest, "_mmum_fetch", lambda sid, **kw: _MMUM_FIXTURES[sid])
+    db_path = str(tmp_path / "recipes.db")
+    ingest.ingest_mmum(db_path, start=1, end=3, sleep=0)
+
+    con = connect(db_path)
+    recipes = {r["uid"]: dict(r) for r in con.execute("SELECT * FROM recipes")}
+    hop_counts = {r[0]: r[1] for r in con.execute(
+        "SELECT recipe_uid, COUNT(*) FROM recipe_hops GROUP BY recipe_uid")}
+    con.close()
+    # id=2 est un trou -- aucune ligne recipes/recipe_hops pour lui.
+    assert set(recipes) == {"mmum-1", "mmum-3"}
+    assert recipes["mmum-1"]["name"] == "Test IPA"
+    assert recipes["mmum-1"]["source"] == "mmum" and recipes["mmum-1"]["source_id"] == "1"
+    assert hop_counts["mmum-1"] == 3  # 2 Hopfenkochen + 1 Stopfhopfen
+    assert hop_counts["mmum-3"] == 1
+
+def test_ingest_mmum_never_touches_aromahops_tables(tmp_path, monkeypatch):
+    # recipes.db (D4) n'a JAMAIS de table hops/hop_composition -- init_recipes_db,
+    # pas init_db.
+    monkeypatch.setattr(ingest, "_mmum_fetch", lambda sid, **kw: _MMUM_FIXTURES[sid])
+    db_path = str(tmp_path / "recipes.db")
+    ingest.ingest_mmum(db_path, start=1, end=1, sleep=0)
+
+    con = connect(db_path)
+    tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    con.close()
+    assert tables == {"recipes", "recipe_hops"}
+
+def test_ingest_mmum_respects_limit_on_ids_scanned(tmp_path, monkeypatch):
+    calls = []
+    def _fake_fetch(sid, **kw):
+        calls.append(sid)
+        return _MMUM_FIXTURES.get(sid, _MMUM_HOLE_TEXT)
+    monkeypatch.setattr(ingest, "_mmum_fetch", _fake_fetch)
+    db_path = str(tmp_path / "recipes.db")
+    ingest.ingest_mmum(db_path, start=1, end=100, sleep=0, limit=3)
+    assert calls == [1, 2, 3]  # bornée au nombre d'ids scannés, pas de recettes trouvées
+
+def test_ingest_mmum_idempotent_reimport_no_duplicate_hop_rows(tmp_path, monkeypatch):
+    monkeypatch.setattr(ingest, "_mmum_fetch", lambda sid, **kw: _MMUM_FIXTURES[sid])
+    db_path = str(tmp_path / "recipes.db")
+    ingest.ingest_mmum(db_path, start=1, end=3, sleep=0)
+    ingest.ingest_mmum(db_path, start=1, end=3, sleep=0)  # même passe, deux fois
+
+    con = connect(db_path)
+    n_recipes = con.execute("SELECT COUNT(*) FROM recipes").fetchone()[0]
+    n_hops_recipe1 = con.execute(
+        "SELECT COUNT(*) FROM recipe_hops WHERE recipe_uid='mmum-1'").fetchone()[0]
+    con.close()
+    assert n_recipes == 2  # pas de doublon
+    assert n_hops_recipe1 == 3  # pas de doublon non plus
+
+def test_ingest_mmum_network_error_on_one_id_does_not_stop_the_scan(tmp_path, monkeypatch):
+    def _fake_fetch(sid, **kw):
+        if sid == 2:
+            raise ConnectionError("simulated network failure")
+        return _MMUM_FIXTURES[sid]
+    monkeypatch.setattr(ingest, "_mmum_fetch", _fake_fetch)
+    db_path = str(tmp_path / "recipes.db")
+    ingest.ingest_mmum(db_path, start=1, end=3, sleep=0)
+
+    con = connect(db_path)
+    uids = {r[0] for r in con.execute("SELECT uid FROM recipes")}
+    con.close()
+    assert uids == {"mmum-1", "mmum-3"}  # id=2 sauté, le reste de la plage continue

@@ -1541,3 +1541,50 @@ INGREDIENT_DESCRIPTORS: dict[str, list[str]] = {
     'zwieback'                                           : [],
 }
 
+
+
+# --------------------------------------------------------------------------- #
+# Conversions physiques partagées (T91, ingestion MMuM, 2026-08-30)
+# --------------------------------------------------------------------------- #
+# EBC<->SRM et Plato<->SG sont utilisées à DEUX endroits du projet :
+# `app._vital_stat_row` (bascule GUI EBC/SRM et Plato/SG sur les ranges BJCP,
+# T82) et `parsers.parse_mmum_recipe` (unités allemandes brutes MMuM,
+# Stammwuerze en °Plato / Farbe en EBC). SOURCE UNIQUE ici pour ne jamais
+# faire diverger silencieusement les deux usages de la même conversion
+# physique -- même discipline que Yakima/BarthHaas jamais moyennées entre
+# elles (CLAUDE.md), appliquée cette fois À L'INTÉRIEUR d'une seule formule.
+# `app._sg_to_plato`/`app._EBC_PER_SRM` délèguent à ces fonctions plutôt que
+# de dupliquer les coefficients.
+
+EBC_PER_SRM = 1.97  # EBC = SRM x ce facteur (facteur de conversion standard, brassage)
+
+
+def sg_to_plato(sg: float) -> float:
+    """Densité spécifique -> degrés Plato -- polynôme cubique standard ASBC
+    (formule établie de l'industrie brassicole, pas une approximation
+    improvisée ; vérifié : SG 1.050 -> ~12.4°P, cohérent avec les tables de
+    référence usuelles). Appliqué à OG ET FG côté GUI (T82) -- pour FG,
+    c'est l'« extrait apparent » conventionnel de tout logiciel de brassage
+    (BeerSmith, Brewer's Friend...), pas une seconde mesure : la présence
+    d'alcool fausse la relation densité<->sucre réelle, mais c'est la
+    convention établie partout, pas une invention de ce projet."""
+    return -616.868 + 1111.14 * sg - 630.272 * sg ** 2 + 135.997 * sg ** 3
+
+
+def plato_to_sg(plato: float) -> float:
+    """Degrés Plato -> densité spécifique -- inverse NUMÉRIQUE de
+    `sg_to_plato` par bissection (la cubique ASBC n'a pas d'inverse fermée
+    simple ; monotone croissante sur toute la plage de brassage réaliste,
+    vérifié : SG 1.000 -> ~0°P, SG 1.150 -> ~34°P). Jamais une approximation
+    linéaire séparée : garantit que `sg_to_plato(plato_to_sg(p)) ≈ p` pour
+    toute valeur réaliste -- une seule relation physique, dans les deux
+    sens, à un seul endroit du code (T91, Stammwuerze MMuM en °Plato ->
+    `og_sg` pour comparer aux ranges BJCP, en SG)."""
+    lo, hi = 0.980, 1.250
+    for _ in range(60):
+        mid = (lo + hi) / 2
+        if sg_to_plato(mid) < plato:
+            lo = mid
+        else:
+            hi = mid
+    return (lo + hi) / 2

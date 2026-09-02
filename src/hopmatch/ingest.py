@@ -1,7 +1,9 @@
 """
-Ingestion des données dans aromahops.db.
+Ingestion des données dans aromahops.db (+ recipes.db pour ingest_mmum, D4).
 
 RÉEL (tourne ici) :
+  - ingest_mmum          : moissonne maischemalzundmehr.de (réseau ; requests seul), corpus
+                           BRUT de recettes -> recipes.db (fichier SÉPARÉ, jamais aromahops.db)
   - build_from_fixtures : reconstruit la base depuis data/fixtures/{barthhaas,yakima}
   - seed_reference       : charge molécules + amorce note→molécule/descripteur
   - crawl_barthhaas      : moissonne barthhaas.com (réseau ; requests+bs4)
@@ -2065,3 +2067,135 @@ def ingest_hop_usage_stats(out_db: str, limit: int | None = None, sleep: float =
     con.commit(); con.close()
     print(f"  {n_variety_resolved}/{n_variety_total} houblons résolus vers une variety, "
          f"{n_rows} lignes écrites")
+
+
+# --------------------------------------------------------------------------- #
+# MMuM (maischemalzundmehr.de) -- corpus brut de recettes (T91, épique C)
+# --------------------------------------------------------------------------- #
+MMUM_BASE = "https://www.maischemalzundmehr.de"
+MMUM_CACHE_DIR = "data/cache/mmum"
+# Borne haute par défaut : ids observés jusqu'à 2290 le 2026-08-30 (vérifié
+# en direct -- id 2290 a une vraie recette, 2300/2350 sont des trous), une
+# marge de 100 au-delà pour couvrir les recettes ajoutées depuis sans
+# refaire cette vérification à chaque run.
+MMUM_DEFAULT_END = 2400
+
+
+def _mmum_fetch(source_id: int, cache_dir: str = MMUM_CACHE_DIR,
+                timeout: float = 30.0, sleep: float = 1.0) -> str:
+    """GET cache-first sur `MMUM_BASE + /export_json.php?id=<source_id>`
+    (même mécanisme que `_beer_analytics_fetch` : cache disque obligatoire,
+    `User-Agent` identifiable, `sleep` uniquement sur un fetch réseau réel,
+    jamais sur un hit de cache). Écrit le texte BRUT tel quel, y compris
+    pour un "trou" (id sans recette -- réponse HTTP 200 avec un court
+    message HTML, PAS un 404 : `raise_for_status()` ne le détecte donc pas,
+    la détection se fait à la désérialisation JSON côté `ingest_mmum`) --
+    mettre en cache un trou évite de le refetcher à chaque run futur."""
+    import tempfile
+    import time
+
+    import requests
+
+    os.makedirs(cache_dir, exist_ok=True)
+    cache_path = os.path.join(cache_dir, f"{source_id}.json")
+    if os.path.exists(cache_path):
+        with open(cache_path, encoding="utf-8") as f:
+            return f.read()
+
+    resp = requests.get(f"{MMUM_BASE}/export_json.php?id={source_id}", timeout=timeout,
+                        headers={"User-Agent": "hopmatch/0.1 (research)"})
+    resp.raise_for_status()
+    text = resp.text
+    fd, tmp_path = tempfile.mkstemp(dir=cache_dir)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(tmp_path, cache_path)
+    except BaseException:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        raise
+    time.sleep(sleep)
+    return text
+
+
+def ingest_mmum(out_db: str = "recipes.db", start: int = 1, end: int = MMUM_DEFAULT_END,
+                sleep: float = 1.0, timeout: float = 30.0, limit: int | None = None,
+                cache_dir: str = MMUM_CACHE_DIR) -> None:
+    """T91 : corpus BRUT de recettes MMuM -- `recipes`/`recipe_hops` dans
+    `recipes.db` (D4, fichier SÉPARÉ d'`aromahops.db`, jamais référencé par
+    `app._fetch_remote_db`). Balaye `start..end` (bornes incluses), un GET
+    par id (`_mmum_fetch`, cache-first, 1 requête/s par défaut) ; un id sans
+    recette ("trou" -- réponse HTML courte, PAS un 404, voir `_mmum_fetch`)
+    est détecté à l'échec de désérialisation JSON et sauté proprement, le
+    balayage continue sur le reste de la plage (les ids valides ne sont PAS
+    contigus, ex. 2290 a une vraie recette alors que 2200/2300 sont des
+    trous -- vérifié en direct le 2026-08-30).
+
+    `limit`, s'il est fourni, borne le NOMBRE D'IDS SCANNÉS (pas le nombre
+    de recettes trouvées) -- même sémantique que `limit` dans les autres
+    fonctions `ingest_*` de ce module (teste un sous-ensemble sans attendre
+    la passe complète).
+
+    Toute la conversion d'unité et la dérivation de stade viennent de
+    `parsers.parse_mmum_recipe` (fonction pure, testée séparément sur
+    fixtures) -- cette fonction ne fait QUE crawler/cacher/écrire.
+
+    ⚠ **Périmètre de ce ticket : MMuM seul.** Le second corpus optionnel
+    (BrewDog DIY Dog, ~400 recettes) mentionné par le ticket T91 comme
+    « même ticket si le temps le permet » n'est PAS fait ici -- source et
+    structure différentes (pas un export JSON par id), traité comme un
+    complément séparé plutôt que d'élargir ce crawl déjà substantiel
+    (~2400 requêtes). Voir BACKLOG.md pour le suivi."""
+    import json
+    from datetime import datetime, timezone
+
+    from .schema import connect, init_recipes_db
+
+    con = connect(out_db)
+    init_recipes_db(con)
+    fetched_at = datetime.now(timezone.utc).isoformat()
+
+    ids = list(range(start, end + 1))
+    if limit:
+        ids = ids[:limit]
+
+    n_recipes = n_holes = n_errors = n_hop_rows = 0
+    stage_counts: dict[str | None, int] = {}
+    for i, source_id in enumerate(ids, 1):
+        try:
+            text = _mmum_fetch(source_id, cache_dir=cache_dir, timeout=timeout, sleep=sleep)
+        except Exception as e:  # noqa
+            print(f"  !! id={source_id}: {e}")
+            n_errors += 1
+            continue
+        try:
+            payload = json.loads(text)
+        except json.JSONDecodeError:
+            n_holes += 1
+            continue
+
+        parsed = parsers.parse_mmum_recipe(payload, source_id=str(source_id))
+        r = parsed["recipe"]
+        con.execute(
+            "INSERT OR REPLACE INTO recipes VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (r["uid"], r["source"], r["source_id"], r["name"], r["author"], r["brewed_on"],
+             r["style_raw"], r["style_id"], r["og_plato"], r["og_sg"], r["fg_sg"], r["abv"],
+             r["ibu"], r["ebc"], r["srm"], fetched_at))
+        con.execute("DELETE FROM recipe_hops WHERE recipe_uid=?", (r["uid"],))
+        for h in parsed["hops"]:
+            con.execute(
+                "INSERT OR REPLACE INTO recipe_hops VALUES (?,?,?,?,?,?,?,?,?)",
+                (r["uid"], h["seq"], h["hop_name"], h["variety"], h["stage"],
+                 h["addition_type"], h["time_min"], h["amount_g"], h["alpha"]))
+            n_hop_rows += 1
+            stage_counts[h["stage"]] = stage_counts.get(h["stage"], 0) + 1
+        n_recipes += 1
+        if i % 20 == 0:
+            con.commit()
+    con.commit(); con.close()
+
+    avg = n_hop_rows / n_recipes if n_recipes else 0.0
+    print(f"MMuM : {n_recipes} recettes ingérées ({n_holes} trous, {n_errors} erreurs réseau "
+         f"sur {len(ids)} ids scannés), {n_hop_rows} additions de houblon ({avg:.1f}/recette)")
+    print(f"  répartition des stades : {dict(sorted(stage_counts.items(), key=lambda kv: str(kv[0])))}")

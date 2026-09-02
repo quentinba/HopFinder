@@ -253,6 +253,51 @@ CREATE TABLE hop_usage_stats (
 """
 SCHEMA += HOP_USAGE_STATS_SCHEMA
 
+# T91 (2026-08-30, D4 tranchée) : corpus BRUT de recettes (MMuM, puis
+# Brewfather/DIY Dog) -- fichier `recipes.db` SÉPARÉ d'`aromahops.db`,
+# jamais référencé par `app._fetch_remote_db`, jamais dans `SCHEMA`/
+# `init_db` ci-dessus. Les commandes d'agrégation (T92/T93, T126/T127)
+# LISENT `recipes.db` et écrivent leurs résultats dans `aromahops.db` --
+# les deux bases ne communiquent jamais autrement qu'à la lecture.
+# `uid` = f"{source}-{source_id}" (déterministe, `ingest.ingest_mmum`) --
+# permet un ré-import idempotent (INSERT OR REPLACE) sans dépendre d'un
+# AUTOINCREMENT qui romprait entre deux passes de crawl partielles.
+# `style_id`/`variety` restent NULL à l'ingestion T91 (résolution BJCP et
+# houblon respectivement hors périmètre de ce ticket -- voir T92 pour
+# `variety`, aucun ticket encore ouvert pour `style_id` sur les recettes).
+# `stage` (`recipe_hops`) dérivé de `Typ`/du bloc d'origine MMuM --
+# `first_wort`/`boil`/`whirlpool`/`dry_hop`, ou NULL si `Typ` est une valeur
+# non reconnue (JAMAIS deviné, voir `parsers.parse_mmum_recipe`) ;
+# `addition_type` garde toujours la valeur brute allemande, y compris pour
+# un `Typ` non reconnu -- aucune perte d'information même quand `stage`
+# reste NULL.
+RECIPES_SCHEMA = """
+CREATE TABLE IF NOT EXISTS recipes (
+    uid TEXT PRIMARY KEY, source TEXT, source_id TEXT,
+    name TEXT, author TEXT, brewed_on TEXT,
+    style_raw TEXT, style_id TEXT,
+    og_plato REAL, og_sg REAL, fg_sg REAL, abv REAL,
+    ibu REAL, ebc REAL, srm REAL, imported_at TEXT
+);
+CREATE TABLE IF NOT EXISTS recipe_hops (
+    recipe_uid TEXT, seq INTEGER, hop_name TEXT, variety TEXT,
+    stage TEXT, addition_type TEXT, time_min REAL,
+    amount_g REAL, alpha REAL,
+    PRIMARY KEY (recipe_uid, seq)
+);
+"""
+
+
+def init_recipes_db(con: sqlite3.Connection) -> None:
+    """Initialise `recipes.db` (T91) -- `CREATE TABLE IF NOT EXISTS`,
+    JAMAIS de `DROP` (contrairement à `init_db` ci-dessus, qui vide et
+    recrée tout `aromahops.db`) : un rebuild ne doit jamais effacer le
+    corpus brut déjà crawlé (~2 400 requêtes réseau à 1 s d'écart pour le
+    reconstituer). Idempotent, appelable à chaque `ingest.ingest_mmum` sans
+    risque sur une base déjà peuplée."""
+    con.executescript(RECIPES_SCHEMA)
+
+
 # alpha_acid/beta_acid retirés de ce filtre (2026-08-19, demande utilisateur) :
 # non-aromatiques (jamais utilisés dans le scoring moléculaire, qui n'itère
 # que sur les molécules de la NOTE -- aucune note FooDB ne référence jamais

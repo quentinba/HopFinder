@@ -1,0 +1,86 @@
+{
+  "Rezeptquelle": "www.maischemalzundmehr.de",
+  "ExportVersion": "2.0",
+  "Name": "AFROB II - Altfränkisches Rotbier",
+  "Datum": "29.05.2021",
+  "Sorte": "Nürnberger Rotbier",
+  "Autor": "ErOs",
+  "Ausschlagwuerze": 0,
+  "Stammwuerze": 13.5,
+  "Bittere": 25,
+  "Farbe": 24,
+  "Alkohol": 5.5,
+  "Kurzbeschreibung": "Das Siegerbier aus dem Hobbybrauerwettbewerb der Braufreunde Berlin aus dem Jahr 2020 - in einer leicht abgewandelten Form, die mir noch besser schmeckt. Rot, schön malzig, mit einem Hauch von Rauch! Fränkische Malze, fränkische Hopfen. Das Raucharoma soll an das Mittelalter erinnern und dem Brauen über offenen Feuer. Würde auch als Kellerbier durchgehen! Das sagen zumindest Leute, die - wie ich - lange in Bamberg gelebt haben. Prost! ",
+  "Malze": [
+    {
+      "Name": "Wiener Malz",
+      "Menge": 4,
+      "Einheit": "kg"
+    },
+    {
+      "Name": "Pilsner Malz",
+      "Menge": 2.25,
+      "Einheit": "kg"
+    },
+    {
+      "Name": "Münchner Malz",
+      "Menge": 1.25,
+      "Einheit": "kg"
+    },
+    {
+      "Name": "CaraRed",
+      "Menge": 0.85,
+      "Einheit": "kg"
+    },
+    {
+      "Name": "Melanoidmalz",
+      "Menge": 0.8,
+      "Einheit": "kg"
+    },
+    {
+      "Name": "Rauchmalz",
+      "Menge": 0.5,
+      "Einheit": "kg"
+    },
+    {
+      "Name": "Haferflocken",
+      "Menge": 0.3,
+      "Einheit": "kg"
+    }
+  ],
+  "Maischform": "infusion",
+  "Hauptguss": 27,
+  "Einmaischtemperatur": 57,
+  "Rasten": [
+    {
+      "Temperatur": 55,
+      "Zeit": 15
+    },
+    {
+      "Temperatur": 62,
+      "Zeit": 40
+    }
+  ],
+  "Abmaischtemperatur": 78,
+  "Nachguss": 25,
+  "Kochzeit_Wuerze": 90,
+  "Hopfenkochen": [
+    {
+      "Sorte": "Spalter Select",
+      "Menge": 80,
+      "Alpha": 4.8,
+      "Zeit": 90,
+      "Typ": "Vorderwuerze"
+    },
+    {
+      "Sorte": "Hersbrucker Spät",
+      "Menge": 40,
+      "Alpha": 2.8,
+      "Zeit": 10,
+      "Typ": "Standard"
+    }
+  ],
+  "Hefe": "Fermentis Saflager W-34/70",
+  "Gaertemperatur": "9",
+  "Anmerkung_Autor": "Wasser mit Milchsäure eingestellt. Sofort aktive Kühlung nach Flame-out. Am besten nach 2 Monaten Kaltreifung. "
+}

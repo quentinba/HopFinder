@@ -1,0 +1,101 @@
+{
+  "Rezeptquelle": "www.maischemalzundmehr.de",
+  "ExportVersion": "2.0",
+  "Name": "Fruchtige Anja",
+  "Datum": "16.12.2018",
+  "Sorte": "India Pale Ale (sonstige)",
+  "Autor": "integrator",
+  "Ausschlagwuerze": 0,
+  "Sudhausausbeute": 0,
+  "Stammwuerze": 12.5,
+  "Bittere": 30,
+  "Farbe": 9,
+  "Alkohol": 4.5,
+  "Kurzbeschreibung": "[Update-1] Eine schöne gelbe Bierfarbe mit einer feinporigen und lang anhaltenen Schaumkrone. Aroma ist ein Duftcocktail von Grapefruit und Südfrüchten. Im Geschmack nicht zu bitter mit einem cremigen Mundgefühl. Erinnert ein bisschen an ein Gemisch aus Citrilla und Punk IPA.",
+  "Malze": [
+    {
+      "Name": "Pale Ale Malz",
+      "Menge": 3.2,
+      "Einheit": "kg"
+    },
+    {
+      "Name": "Weizenmalz hell",
+      "Menge": 2.5,
+      "Einheit": "kg"
+    },
+    {
+      "Name": "Spitzmalz",
+      "Menge": 500,
+      "Einheit": "g"
+    }
+  ],
+  "Maischform": "infusion",
+  "Hauptguss": 21.2,
+  "Einmaischtemperatur": 45,
+  "Rasten": [
+    {
+      "Temperatur": 45,
+      "Zeit": 10
+    },
+    {
+      "Temperatur": 64,
+      "Zeit": 45
+    },
+    {
+      "Temperatur": 72,
+      "Zeit": 20
+    }
+  ],
+  "Abmaischtemperatur": 76,
+  "Nachguss": 15,
+  "Kochzeit_Wuerze": 75,
+  "Hopfenkochen": [
+    {
+      "Sorte": "Simcoe",
+      "Menge": 12,
+      "Alpha": 12.7,
+      "Zeit": 65,
+      "Typ": "Standard"
+    },
+    {
+      "Sorte": "Simcoe",
+      "Menge": 12,
+      "Alpha": 12.7,
+      "Zeit": 10,
+      "Typ": "Standard"
+    },
+    {
+      "Sorte": "Simcoe",
+      "Menge": 18,
+      "Alpha": 12.7,
+      "Zeit": 5,
+      "Typ": "Standard"
+    },
+    {
+      "Sorte": "Simcoe",
+      "Menge": 58,
+      "Alpha": 12.7,
+      "Zeit": 0,
+      "Typ": "Whirlpool"
+    }
+  ],
+  "Gewuerze_etc": [
+    {
+      "Name": "Orangenschalen süss",
+      "Menge": 150,
+      "Einheit": "g",
+      "Kochzeit": 10
+    }
+  ],
+  "Stopfhopfen": [
+    {
+      "Sorte": "Simcoe (Cryo)",
+      "Menge": 50
+    }
+  ],
+  "Hefe": "Gozdawa Bavarian Wheat 11",
+  "Gaertemperatur": "19-20",
+  "Endvergaerungsgrad": 70,
+  "Karbonisierung": 6,
+  "Anmerkung_Autor": "Anja ist eigentlich eher ein Rotweingeniesser. In einem gemeinsamen Urlaub hat sie mal ein Citrilla probiert und war positiv überrascht. Der Brauversuch eines WeizenIPA war entfacht. Nach vier Wochen Kaltlagerung ein Hochgenuss, nicht nur für Anja. Erinnert ein bisschen an ein Punk IPA light :-)\r\n\r\nIch habe den Galaxy raus genommen und jetzt in der Kalthopfung einen Cryohopfen ausprobiert. Gefühlt wird das Bier \"schlanker\" und passt gut zu einem Sommerbier.\r\n\r\nBrauen im Grainfather • Einmaischtemperatur ist Malz+Wasser • PH-Wert 5,6 • Restalkalität -2,0°dH • Nachisomisierung 5 min.\r\nWasserwerte: Ca=90 • Mg=5 • SO4=116 • Cl=54 "
+}

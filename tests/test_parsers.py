@@ -1,6 +1,18 @@
+import copy
+import json
+from pathlib import Path
+
 import pytest
 
-from hopmatch import parsers
+from hopmatch import parsers, reference
+
+FIXTURES_DIR = Path(__file__).parent / "fixtures"
+
+
+def _mmum_fixture(name: str) -> dict:
+    with open(FIXTURES_DIR / name, encoding="utf-8") as f:
+        return json.load(f)
+
 
 def test_parse_range():
     assert parsers.parse_range("28.6 - 66%") == (28.6, 66.0)
@@ -705,3 +717,100 @@ def test_pubchem_name_fallbacks():
         "(r)-β-citronellol", "(r)-beta-citronellol", "β-citronellol", "beta-citronellol"]
     # rien à corriger -> une seule variante (le nom lui-même)
     assert parsers.pubchem_name_fallbacks("hexadecanol") == ["hexadecanol"]
+
+
+# --------------------------------------------------------------------------- #
+# MMuM (maischemalzundmehr.de) -- T91
+# --------------------------------------------------------------------------- #
+# Fixtures : 3 exports RÉELS sauvegardés le 2026-08-30 (id=1000 "Fruchtige
+# Anja", id=800 "Black Chocolate", id=1 "AFROB II") -- pas de payload
+# synthétique pour les cas "réels", seul le cas Typ inconnu ci-dessous est
+# fabriqué (aucune vraie recette avec cette valeur observée).
+
+def test_parse_mmum_recipe_converts_units_with_raw_value_kept():
+    recipe = parsers.parse_mmum_recipe(_mmum_fixture("mmum_with_dryhop.json"), "1000")["recipe"]
+    assert recipe["og_plato"] == 12.5
+    assert recipe["og_sg"] == pytest.approx(reference.plato_to_sg(12.5))
+    assert recipe["ebc"] == 9
+    assert recipe["srm"] == pytest.approx(9 / reference.EBC_PER_SRM)
+    # Bittere/Alkohol déjà dans l'unité cible -- copie directe, pas de conversion.
+    assert recipe["ibu"] == 30
+    assert recipe["abv"] == 4.5
+    # Aucun champ MMuM ne porte le FG de façon fiable -- jamais dérivé de
+    # Endvergaerungsgrad (present dans cette fixture, ignoré à dessein).
+    assert recipe["fg_sg"] is None
+
+def test_parse_mmum_recipe_identity_fields():
+    recipe = parsers.parse_mmum_recipe(_mmum_fixture("mmum_with_dryhop.json"), "1000")["recipe"]
+    assert recipe["uid"] == "mmum-1000"
+    assert recipe["source"] == "mmum"
+    assert recipe["source_id"] == "1000"
+    assert recipe["name"] == "Fruchtige Anja"
+    assert recipe["author"] == "integrator"
+    assert recipe["brewed_on"] == "16.12.2018"
+    assert recipe["style_raw"] == "India Pale Ale (sonstige)"
+    # Hors périmètre T91 (résolution BJCP), jamais deviné ici.
+    assert recipe["style_id"] is None
+
+def test_parse_mmum_recipe_derives_stage_from_typ_and_dry_hop_block():
+    hops = parsers.parse_mmum_recipe(_mmum_fixture("mmum_with_dryhop.json"), "1000")["hops"]
+    # 4 entrées Hopfenkochen (3x Standard, 1x Whirlpool) + 1 Stopfhopfen.
+    assert len(hops) == 5
+    stages = [h["stage"] for h in hops]
+    assert stages == ["boil", "boil", "boil", "whirlpool", "dry_hop"]
+    addition_types = [h["addition_type"] for h in hops]
+    assert addition_types == ["Standard", "Standard", "Standard", "Whirlpool", "Stopfhopfen"]
+
+def test_parse_mmum_recipe_dry_hop_has_no_time_and_keeps_amount():
+    hops = parsers.parse_mmum_recipe(_mmum_fixture("mmum_with_dryhop.json"), "1000")["hops"]
+    dry_hop = hops[-1]
+    assert dry_hop["hop_name"] == "Simcoe (Cryo)"
+    assert dry_hop["amount_g"] == 50
+    assert dry_hop["time_min"] is None
+    # Stopfhopfen ne porte pas d'Alpha dans les exports réels -- jamais deviné.
+    assert dry_hop["alpha"] is None
+
+def test_parse_mmum_recipe_variety_left_null_for_t92():
+    # Réconciliation nom -> variety hors périmètre T91 (voir T92) -- jamais
+    # une correspondance approximative ici.
+    hops = parsers.parse_mmum_recipe(_mmum_fixture("mmum_with_dryhop.json"), "1000")["hops"]
+    assert all(h["variety"] is None for h in hops)
+
+def test_parse_mmum_recipe_first_wort_hopping():
+    # Vorderwuerze (first wort hopping) : signalée par le ticket comme 13%
+    # des additions réelles -- ne pas l'oublier dans le mapping Typ->stage.
+    hops = parsers.parse_mmum_recipe(_mmum_fixture("mmum_first_wort.json"), "1")["hops"]
+    assert hops[0]["addition_type"] == "Vorderwuerze"
+    assert hops[0]["stage"] == "first_wort"
+    assert hops[0]["hop_name"] == "Spalter Select"
+    assert hops[1]["stage"] == "boil"  # Typ="Standard", même recette
+
+def test_parse_mmum_recipe_without_dry_hop_block():
+    parsed = parsers.parse_mmum_recipe(_mmum_fixture("mmum_without_dryhop.json"), "800")
+    assert len(parsed["hops"]) == 3
+    assert all(h["stage"] == "boil" for h in parsed["hops"])
+    assert all(h["addition_type"] == "Standard" for h in parsed["hops"])
+
+def test_parse_mmum_recipe_unknown_typ_never_guessed_but_kept_raw():
+    # Aucune vraie recette observée avec une 5e valeur de Typ -- payload
+    # fabriqué à partir d'un export réel pour vérifier le garde-fou explicite
+    # du ticket T91 : "si une 5e valeur apparaît, la journaliser et
+    # l'ingérer telle quelle, ne jamais la mapper au jugé sur une des 4
+    # connues."
+    payload = copy.deepcopy(_mmum_fixture("mmum_without_dryhop.json"))
+    payload["Hopfenkochen"][0]["Typ"] = "Nachhopfung"  # valeur fictive, jamais observée
+    hops = parsers.parse_mmum_recipe(payload, "800")["hops"]
+    assert hops[0]["addition_type"] == "Nachhopfung"
+    assert hops[0]["stage"] is None
+    # Les autres entrées de la même recette restent mappées normalement.
+    assert hops[1]["stage"] == "boil"
+
+def test_parse_mmum_recipe_missing_stammwurze_or_farbe_never_crashes():
+    # Un champ absent (pas seulement 0) -- og_sg/srm doivent rester None,
+    # jamais une conversion sur une valeur fabriquée.
+    payload = copy.deepcopy(_mmum_fixture("mmum_without_dryhop.json"))
+    del payload["Stammwuerze"]
+    del payload["Farbe"]
+    recipe = parsers.parse_mmum_recipe(payload, "800")["recipe"]
+    assert recipe["og_plato"] is None and recipe["og_sg"] is None
+    assert recipe["ebc"] is None and recipe["srm"] is None
