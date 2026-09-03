@@ -1225,7 +1225,7 @@ Elles sont écrites pour qu'aucune décision implicite ne reste à deviner.
   incluant le garde-fou "jamais de triplet dérivé de 3 paires" et la
   non-accumulation entre deux runs), suite verte (456 tests).
 
-- [ ] **T126 — Browse : barplot « comment ce houblon est réellement ajouté »**
+- [x] **T126 — Browse : barplot « comment ce houblon est réellement ajouté »**
   *Demande utilisateur (2026-08-27) : « un simple barplot indiquant le %
   d'utilisation de chaque type (60 min, 30 min, 15 min, 5 min, whirlpool, dry
   hop…) ».*
@@ -1295,6 +1295,48 @@ Elles sont écrites pour qu'aucune décision implicite ne reste à deviner.
   ⚠ Biais du corpus, à écrire en légende : MMuM est germanophone. Les houblons
   nobles y sont sur-représentés, les houblons US modernes vus surtout en IPA.
   Ce profil d'usage n'est pas universel.
+
+  **FAIT (2026-09-03).** Distribution RE-MESURÉE sur le corpus complet
+  réconcilié (5935 additions, T92) -- les ordres de grandeur de
+  l'échantillon initial tenaient : Whirlpool TOUJOURS `time_min=0`
+  (677/677, confirmé), mode à "6-14 min" toujours le plus fréquent (611
+  additions à 10 min précisément), aucune borne n'a eu besoin d'être
+  retouchée. `reference.ADDITION_TIMING_BINS` (11 classes, ordre
+  chronologique) + `ingest._classify_addition_timing` (fonction pure,
+  `Typ`/`time_min` -> classe ou `None` si `Typ` inconnu -- jamais deviné,
+  même garde-fou que T92) + `ingest.compute_hop_addition_timing` (écrit
+  `hop_addition_timing` dans `aromahops.db`, `total_additions` compte
+  TOUTES les additions résolues même celles qui ne classifient dans aucun
+  bin -- dénominateur honnête). `matching.hop_addition_timing` (lecture
+  pure, bins dans l'ordre chronologique, jamais triés par valeur).
+
+  Nouvelle carte `app._addition_timing_panel`, emplacement fixe exact du
+  ticket (juste après "Recommended usage" T99, avant Descriptors) --
+  distincte de T99 (question différente : étape LARGE + indice chimique
+  vs. minute précise de boil mesurée en recette réelle), jamais fusionnées.
+  Seuil de fiabilité (20 additions) respecté : sous le seuil, seul
+  l'effectif réel s'affiche (`st.caption`), jamais un graphique à 11
+  classes construit sur une poignée de points. Légende de biais du corpus
+  affichée systématiquement sous le graphique (jamais seulement dans la
+  doc). Couleur sauge théma-consciente (`#aebf92`/`#7a8a5e`, même paire que
+  la roue d'arôme) -- pas de palette multi-houblon nécessaire ici (une
+  seule série).
+
+  **Bug réel trouvé et corrigé en vérification live (Chrome, les deux
+  thèmes)** : `labelOverlap` par défaut de Vega-Lite masquait
+  silencieusement 5 des 11 libellés d'axe ("Boil 60+ min"/"30 min"/
+  "15 min"/"1-5 min"/"Whirlpool" disparus malgré des données réelles sur
+  chacun) -- même piège déjà rencontré et corrigé sur Survivables (T117).
+  Corrigé par `labelOverlap=False`, vérifié à nouveau en direct après coup
+  (les 11 classes s'affichent, dans le bon ordre, dans les deux thèmes).
+
+  9 nouveaux tests `ingest` (classification paramétrée sur les 11 classes +
+  cas limites, écriture/agrégation, recalcul complet), 4 `matching`
+  (ordre chronologique, share sur `total_additions` pas `total_recipes`,
+  représentation creuse, `None` si aucune donnée), 3 `app` (AppTest :
+  absence de donnée, sous le seuil, au-dessus du seuil avec graphique),
+  suite verte (488 tests). `_RECENT_UPDATES` mis à jour dans le même commit
+  (changement visible utilisateur final).
 
 - [ ] **T127 — Compare Hops : le même barplot, groupé par houblon**
   *« Dans compare la même chose mais avec autant de barres que de houblons

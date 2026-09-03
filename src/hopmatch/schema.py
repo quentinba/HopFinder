@@ -294,6 +294,30 @@ CREATE TABLE hop_combinations (
 """
 SCHEMA += HOP_COMBINATIONS_SCHEMA
 
+# T126 (2026-09-03, épique C) : "comment ce houblon est réellement ajouté"
+# -- répartition des additions RÉELLES d'une variety (corpus MMuM,
+# `recipes.db`) sur les 11 classes chronologiques de `reference.
+# ADDITION_TIMING_BINS`, calculée par `ingest.compute_hop_addition_timing`
+# (lit `recipes.db`, écrit ici -- D4, jamais l'inverse). Une ligne PAR
+# CLASSE NON VIDE (représentation creuse -- une classe sans aucune addition
+# pour cette variety n'a simplement pas de ligne, jamais un `count=0`
+# explicite). `total_additions`/`total_recipes` RÉPÉTÉS sur chaque ligne de
+# la même variety (dénormalisé, même convention que `hop_usage_stats` --
+# simplifie la lecture, `matching.hop_addition_timing` n'a besoin que d'une
+# seule requête). Seuil de fiabilité (20 additions minimum pour afficher le
+# graphique, ticket) appliqué CÔTÉ GUI, jamais ici -- l'ingestion écrit
+# TOUJOURS la donnée brute, même pour une variety sous le seuil (la GUI
+# affiche alors un effectif à la place du graphique, jamais un silence).
+HOP_ADDITION_TIMING_SCHEMA = """
+CREATE TABLE hop_addition_timing (
+    variety TEXT, bin TEXT, count INTEGER,
+    total_additions INTEGER, total_recipes INTEGER,
+    source TEXT, computed_at TEXT,
+    PRIMARY KEY (variety, bin)
+);
+"""
+SCHEMA += HOP_ADDITION_TIMING_SCHEMA
+
 # T91 (2026-08-30, D4 tranchée) : corpus BRUT de recettes (MMuM, puis
 # Brewfather/DIY Dog) -- fichier `recipes.db` SÉPARÉ d'`aromahops.db`,
 # jamais référencé par `app._fetch_remote_db`, jamais dans `SCHEMA`/
@@ -385,7 +409,8 @@ def init_db(con: sqlite3.Connection) -> None:
         "DROP TABLE IF EXISTS style_hop_usage;"
         "DROP TABLE IF EXISTS style_hop_pairings;"
         "DROP TABLE IF EXISTS hop_usage_stats;"
-        "DROP TABLE IF EXISTS hop_combinations;")
+        "DROP TABLE IF EXISTS hop_combinations;"
+        "DROP TABLE IF EXISTS hop_addition_timing;")
     con.executescript(SCHEMA)
 
 

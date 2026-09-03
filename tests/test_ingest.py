@@ -1771,3 +1771,122 @@ def test_compute_frequent_hop_combinations_creates_table_without_wiping_existing
     con.close()
     assert hops == ["citra"]
     assert n > 0
+
+
+# --------------------------------------------------------------------------- #
+# T126 -- classification "comment ce houblon est réellement ajouté"
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("addition_type,time_min,expected_bin", [
+    ("Vorderwuerze", 90, "First wort"),
+    ("Vorderwuerze", None, "First wort"),  # Vorderwuerze porte toujours un temps réel en pratique, mais la classe ne dépend QUE du Typ
+    ("Whirlpool", 0, "Whirlpool"),
+    ("Whirlpool", None, "Whirlpool"),  # même remarque -- Zeit toujours 0 en pratique (677/677, vérifié), mais la classe ne dépend pas de sa valeur
+    ("Stopfhopfen", None, "Dry hop"),  # Stopfhopfen n'a jamais de Zeit dans les exports réels
+    ("Standard", 90, "Boil 60+ min"),
+    ("Standard", 60, "Boil 60+ min"),
+    ("Standard", 59, "Boil 31-59 min"),
+    ("Standard", 31, "Boil 31-59 min"),
+    ("Standard", 30, "Boil 30 min"),
+    ("Standard", 29, "Boil 16-29 min"),
+    ("Standard", 16, "Boil 16-29 min"),
+    ("Standard", 15, "Boil 15 min"),
+    ("Standard", 14, "Boil 6-14 min"),
+    ("Standard", 6, "Boil 6-14 min"),
+    ("Standard", 5, "Boil 1-5 min"),
+    ("Standard", 1, "Boil 1-5 min"),
+    ("Standard", 0, "Flameout (0 min)"),
+    ("Standard", None, None),          # temps manquant -- jamais deviné
+    ("Nachhopfung", 10, None),         # Typ inconnu (T92) -- jamais deviné
+    (None, 10, None),
+])
+def test_classify_addition_timing(addition_type, time_min, expected_bin):
+    assert ingest._classify_addition_timing(addition_type, time_min) == expected_bin
+
+def test_classify_addition_timing_covers_all_eleven_reference_bins():
+    # Garde-fou : chaque classe de reference.ADDITION_TIMING_BINS doit être
+    # atteignable par au moins une entrée réelle de _classify_addition_timing
+    # -- une classe orpheline dans reference.py serait un bug silencieux.
+    from hopmatch import reference
+    reachable = set()
+    for addition_type, time_min in [
+        ("Vorderwuerze", 90), ("Whirlpool", 0), ("Stopfhopfen", None),
+        ("Standard", 90), ("Standard", 45), ("Standard", 30), ("Standard", 20),
+        ("Standard", 15), ("Standard", 10), ("Standard", 3), ("Standard", 0),
+    ]:
+        reachable.add(ingest._classify_addition_timing(addition_type, time_min))
+    assert reachable == set(reference.ADDITION_TIMING_BINS)
+
+def test_compute_hop_addition_timing_writes_counts_and_totals(tmp_path):
+    recipes_path = str(tmp_path / "recipes.db")
+    con = connect(recipes_path)
+    init_recipes_db(con)
+    # Citra ajouté 2 fois dans la même recette (boil 60 + dry hop) : compte
+    # 2 additions mais 1 seule recette pour total_recipes.
+    con.execute("INSERT INTO recipes (uid, source, source_id) VALUES ('mmum-1', 'mmum', '1')")
+    con.execute("INSERT INTO recipe_hops (recipe_uid, seq, hop_name, variety, "
+               "addition_type, time_min) VALUES ('mmum-1', 1, 'Citra', 'citra', 'Standard', 60)")
+    con.execute("INSERT INTO recipe_hops (recipe_uid, seq, hop_name, variety, "
+               "addition_type, time_min) VALUES ('mmum-1', 2, 'Citra', 'citra', 'Stopfhopfen', NULL)")
+    con.commit(); con.close()
+
+    aroma_path = str(tmp_path / "aromahops.db")
+    con = connect(aroma_path); init_db(con); con.close()
+    ingest.compute_hop_addition_timing(recipes_path, aroma_path)
+
+    con = connect(aroma_path)
+    rows = {r["bin"]: dict(r) for r in con.execute(
+        "SELECT bin, count, total_additions, total_recipes FROM hop_addition_timing "
+        "WHERE variety='citra'")}
+    con.close()
+    assert rows["Boil 60+ min"]["count"] == 1
+    assert rows["Dry hop"]["count"] == 1
+    assert rows["Boil 60+ min"]["total_additions"] == 2
+    assert rows["Boil 60+ min"]["total_recipes"] == 1
+
+def test_compute_hop_addition_timing_counts_unclassified_toward_total(tmp_path):
+    # Un Typ inconnu (T92) ne produit AUCUNE ligne de bin, mais doit quand
+    # même compter dans total_additions -- le dénominateur reste honnête.
+    recipes_path = str(tmp_path / "recipes.db")
+    con = connect(recipes_path)
+    init_recipes_db(con)
+    con.execute("INSERT INTO recipes (uid, source, source_id) VALUES ('mmum-1', 'mmum', '1')")
+    con.execute("INSERT INTO recipe_hops (recipe_uid, seq, hop_name, variety, "
+               "addition_type, time_min) VALUES ('mmum-1', 1, 'Citra', 'citra', 'Standard', 60)")
+    con.execute("INSERT INTO recipe_hops (recipe_uid, seq, hop_name, variety, "
+               "addition_type, time_min) VALUES ('mmum-1', 2, 'Citra', 'citra', 'Nachhopfung', 5)")
+    con.commit(); con.close()
+
+    aroma_path = str(tmp_path / "aromahops.db")
+    con = connect(aroma_path); init_db(con); con.close()
+    ingest.compute_hop_addition_timing(recipes_path, aroma_path)
+
+    con = connect(aroma_path)
+    rows = list(con.execute(
+        "SELECT bin, total_additions FROM hop_addition_timing WHERE variety='citra'"))
+    con.close()
+    assert len(rows) == 1  # une seule ligne de bin (l'autre addition n'a pas classifié)
+    assert rows[0]["total_additions"] == 2  # mais le total compte les deux
+
+def test_compute_hop_addition_timing_is_a_full_recompute(tmp_path):
+    recipes_path = str(tmp_path / "recipes.db")
+    con = connect(recipes_path)
+    init_recipes_db(con)
+    con.execute("INSERT INTO recipes (uid, source, source_id) VALUES ('mmum-1', 'mmum', '1')")
+    con.execute("INSERT INTO recipe_hops (recipe_uid, seq, hop_name, variety, "
+               "addition_type, time_min) VALUES ('mmum-1', 1, 'Citra', 'citra', 'Standard', 60)")
+    con.commit(); con.close()
+
+    aroma_path = str(tmp_path / "aromahops.db")
+    con = connect(aroma_path); init_db(con); con.close()
+    ingest.compute_hop_addition_timing(recipes_path, aroma_path)
+
+    # Recette supprimée -- un second appel ne doit garder AUCUNE ligne obsolète.
+    con = connect(recipes_path)
+    con.execute("DELETE FROM recipe_hops"); con.execute("DELETE FROM recipes")
+    con.commit(); con.close()
+    ingest.compute_hop_addition_timing(recipes_path, aroma_path)
+
+    con = connect(aroma_path)
+    n = con.execute("SELECT COUNT(*) FROM hop_addition_timing").fetchone()[0]
+    con.close()
+    assert n == 0

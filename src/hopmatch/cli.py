@@ -203,6 +203,12 @@ def main(argv=None):
     fc.add_argument("--db", default=DEFAULT_DB)
     fc.add_argument("--min-support", type=int, default=20)
 
+    at = sub.add_parser("compute-addition-timing",
+                        help="répartition réelle des additions par classe chronologique "
+                             "(recipes.db -> hop_addition_timing dans aromahops.db) -- T126")
+    at.add_argument("--recipes-db", default="recipes.db")
+    at.add_argument("--db", default=DEFAULT_DB)
+
     am = sub.add_parser("amplify", help="cas d'usage : amplify")
     am.add_argument("note")
     am.add_argument("--db", default=DEFAULT_DB)
@@ -294,6 +300,8 @@ def main(argv=None):
     if a.cmd == "compute-hop-combinations":
         ingest.compute_frequent_hop_combinations(a.recipes_db, a.db, min_support=a.min_support)
         return 0
+    if a.cmd == "compute-addition-timing":
+        ingest.compute_hop_addition_timing(a.recipes_db, a.db); return 0
 
     con = connect(a.db)
     try:

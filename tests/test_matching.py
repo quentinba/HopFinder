@@ -1772,3 +1772,44 @@ def test_frequent_combinations_style_id_always_returns_empty_for_now():
     _insert_combo(con, "citra|mosaic", 2, support=30, total_recipes=1000, lift=2.0)
     assert matching.frequent_hop_combinations(con, size=2, style_id="21B") == []
     con.close()
+
+
+# --------------------------------------------------------------------------- #
+# T126 -- matching.hop_addition_timing (lecture pure de hop_addition_timing)
+# --------------------------------------------------------------------------- #
+def _insert_timing(con, variety, bin_, count, total_additions, total_recipes):
+    con.execute(
+        "INSERT OR REPLACE INTO hop_addition_timing VALUES (?,?,?,?,?,?,?)",
+        (variety, bin_, count, total_additions, total_recipes, "test", "2026-09-03"))
+    con.commit()
+
+def test_hop_addition_timing_returns_none_when_no_data(db):
+    assert matching.hop_addition_timing(db, "nonexistent-variety") is None
+
+def test_hop_addition_timing_orders_bins_chronologically_not_by_value(db):
+    # Insérées dans le désordre -- doit revenir triée selon
+    # reference.ADDITION_TIMING_BINS (chronologique), jamais par valeur/nom.
+    _insert_timing(db, "citra", "Dry hop", 50, 100, 60)
+    _insert_timing(db, "citra", "First wort", 10, 100, 60)
+    _insert_timing(db, "citra", "Whirlpool", 40, 100, 60)
+    result = matching.hop_addition_timing(db, "citra")
+    assert [b["bin"] for b in result["bins"]] == ["First wort", "Whirlpool", "Dry hop"]
+    db.execute("DELETE FROM hop_addition_timing"); db.commit()
+
+def test_hop_addition_timing_share_uses_total_additions_not_total_recipes(db):
+    # 30 additions de Citra sur 20 recettes (ajouté 1.5x/recette en
+    # moyenne) -- share doit diviser par 30 (additions), PAS 20 (recettes).
+    _insert_timing(db, "citra", "Dry hop", 15, 30, 20)
+    result = matching.hop_addition_timing(db, "citra")
+    assert result["total_additions"] == 30
+    assert result["total_recipes"] == 20
+    assert result["bins"][0]["share"] == pytest.approx(0.5)  # 15/30, pas 15/20
+    db.execute("DELETE FROM hop_addition_timing"); db.commit()
+
+def test_hop_addition_timing_only_includes_bins_actually_observed(db):
+    # Une seule classe insérée -- le résultat ne doit PAS inventer les 10
+    # autres à 0.
+    _insert_timing(db, "citra", "Dry hop", 10, 10, 8)
+    result = matching.hop_addition_timing(db, "citra")
+    assert len(result["bins"]) == 1
+    db.execute("DELETE FROM hop_addition_timing"); db.commit()

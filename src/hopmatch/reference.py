@@ -1588,3 +1588,32 @@ def plato_to_sg(plato: float) -> float:
         else:
             hi = mid
     return (lo + hi) / 2
+
+
+# --------------------------------------------------------------------------- #
+# Classification "quand ce houblon est réellement ajouté" (T126, épique C)
+# --------------------------------------------------------------------------- #
+# 11 classes, ordonnées du plus PRÉCOCE au plus TARDIF -- ordre chronologique
+# du procédé, JAMAIS un tri alphabétique/par valeur (l'axe d'affichage doit
+# rester dans cet ordre, voir app._addition_timing_panel/T127). Dérivées de
+# `recipe_hops.addition_type`/`time_min` (MMuM, T91) par `ingest._classify_
+# addition_timing` -- voir cette fonction pour la règle exacte par classe.
+# Binning validé sur le corpus COMPLET réconcilié (5935 additions, T92,
+# 2026-09-03) après une première mesure sur un échantillon de 46 recettes/
+# 170 additions (2026-08-27) : les ordres de grandeur relatifs tenaient déjà
+# (mode à "6-14 min" = "l'ajout à 10 minutes", Whirlpool toujours à temps 0
+# -- confirmé 677/677 sur le corpus complet), les bornes numériques exactes
+# n'ont pas eu besoin d'être retouchées.
+ADDITION_TIMING_BINS = [
+    "First wort",
+    "Boil 60+ min",
+    "Boil 31-59 min",
+    "Boil 30 min",
+    "Boil 16-29 min",
+    "Boil 15 min",
+    "Boil 6-14 min",
+    "Boil 1-5 min",
+    "Flameout (0 min)",
+    "Whirlpool",
+    "Dry hop",
+]
