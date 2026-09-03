@@ -1479,3 +1479,52 @@ def test_coverage_shows_where_would_this_come_from_panel(toy_cwd):
     # "already in your plan", pas comme un composé sans piste.
     assert any("Linalool" in c.value and "already in your plan: Hopa" in c.value
               for c in at.caption)
+
+# --------------------------------------------------------------------------- #
+# T126 -- "Hop addition timing" (Browse, matching.hop_addition_timing)
+# --------------------------------------------------------------------------- #
+def test_addition_timing_panel_shows_no_data_caption_when_absent(toy_cwd):
+    # hopb n'a AUCUNE ligne hop_addition_timing (jamais insérée dans cette
+    # fixture) -- message honnête, jamais un graphique vide fabriqué.
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("browse").run()
+    at.selectbox[0].set_value("hopb").run()
+    assert not at.exception
+    assert any("No addition-timing data" in c.value for c in at.caption)
+
+def test_addition_timing_panel_below_threshold_shows_count_not_chart(toy_cwd):
+    con = connect(os.path.join(os.getcwd(), "aromahops.db"))
+    con.execute("INSERT INTO hop_addition_timing VALUES "
+               "('hopa', 'Dry hop', 5, 5, 4, 'test', '2026-09-03')")
+    con.commit(); con.close()
+
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("browse").run()
+    at.selectbox[0].set_value("hopa").run()
+    assert not at.exception
+    assert any("n = 5 additions in 4 recipes" in c.value for c in at.caption)
+    assert any("Fewer than 20 additions" in c.value for c in at.caption)
+    # Pas de rappel de biais géographique du corpus tant que le graphique
+    # lui-même ne s'affiche pas (rien à contextualiser).
+    assert not any("German-language" in c.value for c in at.caption)
+
+def test_addition_timing_panel_renders_chart_above_threshold(toy_cwd):
+    from streamlit.testing.v1.element_tree import UnknownElement
+    con = connect(os.path.join(os.getcwd(), "aromahops.db"))
+    con.executemany(
+        "INSERT INTO hop_addition_timing VALUES (?,?,?,?,?,?,?)",
+        [("hopa", "First wort", 5, 25, 20, "test", "2026-09-03"),
+         ("hopa", "Dry hop", 20, 25, 20, "test", "2026-09-03")])
+    con.commit(); con.close()
+
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("browse").run()
+    at.selectbox[0].set_value("hopa").run()
+    assert not at.exception
+    assert any("n = 25 additions in 20 recipes" in c.value for c in at.caption)
+    assert not any("Fewer than 20 additions" in c.value for c in at.caption)
+    assert any("German-language" in c.value for c in at.caption)
+    assert len([n for n in at.main if isinstance(n, UnknownElement)]) >= 1

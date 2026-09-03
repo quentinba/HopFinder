@@ -10,6 +10,9 @@ RÉEL (tourne ici) :
   - compute_frequent_hop_combinations : combinaisons de houblons réellement co-observées
                            en recette (lit recipes.db, écrit hop_combinations dans
                            aromahops.db -- pas de réseau)
+  - compute_hop_addition_timing : répartition réelle des additions d'un houblon sur les
+                           11 classes chronologiques (lit recipes.db, écrit
+                           hop_addition_timing dans aromahops.db -- pas de réseau)
   - build_from_fixtures : reconstruit la base depuis data/fixtures/{barthhaas,yakima}
   - seed_reference       : charge molécules + amorce note→molécule/descripteur
   - crawl_barthhaas      : moissonne barthhaas.com (réseau ; requests+bs4)
@@ -2601,3 +2604,103 @@ def compute_frequent_hop_combinations(recipes_db: str = "recipes.db", out_db: st
     con.commit(); con.close()
     print(f"T93 : {n_rows} combinaisons écrites (min_support={min_support}, tailles={sizes}, "
          f"{len(slices)} tranches stade dont 'toutes étapes confondues')")
+
+
+# --------------------------------------------------------------------------- #
+# "Comment ce houblon est réellement ajouté" (T126, épique C)
+# --------------------------------------------------------------------------- #
+def _classify_addition_timing(addition_type: str | None, time_min: float | None) -> str | None:
+    """T126 : une des 11 classes de `reference.ADDITION_TIMING_BINS` pour
+    UNE addition MMuM (`recipe_hops.addition_type`/`time_min`), ou `None`
+    si elle ne correspond à aucune classe reconnue -- `addition_type` hors
+    des 4 valeurs connues (`Standard`/`Whirlpool`/`Vorderwuerze`/
+    `Stopfhopfen`, voir `parsers.parse_mmum_recipe`/`_MMUM_TYP_TO_STAGE`)
+    ou `Standard` sans `time_min` exploitable. JAMAIS deviné -- une
+    addition non classifiée compte quand même dans `total_additions`
+    (`compute_hop_addition_timing`), simplement absente de tout bin.
+
+    Bornes vérifiées sur le corpus COMPLET réconcilié (2026-09-03, 5935
+    additions) : `Whirlpool` a TOUJOURS `time_min == 0` (677/677) -- le
+    temps n'y est pas porteur d'information, seule la catégorie compte."""
+    if addition_type == "Vorderwuerze":
+        return "First wort"
+    if addition_type == "Whirlpool":
+        return "Whirlpool"
+    if addition_type == "Stopfhopfen":
+        return "Dry hop"
+    if addition_type != "Standard" or time_min is None:
+        return None
+    if time_min >= 60:
+        return "Boil 60+ min"
+    if time_min >= 31:
+        return "Boil 31-59 min"
+    if time_min == 30:
+        return "Boil 30 min"
+    if time_min >= 16:
+        return "Boil 16-29 min"
+    if time_min == 15:
+        return "Boil 15 min"
+    if time_min >= 6:
+        return "Boil 6-14 min"
+    if time_min >= 1:
+        return "Boil 1-5 min"
+    if time_min == 0:
+        return "Flameout (0 min)"
+    return None  # temps négatif : jamais observé, jamais deviné
+
+
+def compute_hop_addition_timing(recipes_db: str = "recipes.db", out_db: str = "aromahops.db") -> None:
+    """T126 : répartition RÉELLE des additions d'une variety sur les 11
+    classes chronologiques de `reference.ADDITION_TIMING_BINS` -- lit
+    `recipe_hops` (T92, `variety IS NULL` exclues) dans `recipes_db`, écrit
+    `hop_addition_timing` dans `out_db` (D4, jamais l'inverse). Table
+    intégralement DÉRIVÉE -- `DELETE` puis recalcul complet à chaque appel.
+
+    `total_additions` = TOUTES les additions résolues de cette variety, y
+    compris celles qui ne classifient dans AUCUN bin (`_classify_addition_
+    timing` -> `None`) -- le dénominateur reflète la vraie population de
+    données, pas seulement ce qui a pu être classé. `total_recipes` =
+    nombre de recettes DISTINCTES (une variety ajoutée 3 fois dans la même
+    recette ne compte qu'une fois pour ce total, cohérent avec le "n = 47
+    additions in 31 recipes" du ticket).
+
+    Aucun seuil de fiabilité appliqué ici (voir `schema.HOP_ADDITION_
+    TIMING_SCHEMA`) -- toutes les varietys avec au moins une addition
+    résolue reçoivent une ligne, même sous 20 additions : c'est à la GUI de
+    décider d'afficher le graphique ou un simple effectif."""
+    from collections import Counter
+    from datetime import datetime, timezone
+
+    from .schema import connect, ensure_table, HOP_ADDITION_TIMING_SCHEMA
+
+    recipes_con = connect(recipes_db)
+    rows = recipes_con.execute(
+        "SELECT recipe_uid, variety, addition_type, time_min FROM recipe_hops "
+        "WHERE variety IS NOT NULL").fetchall()
+    recipes_con.close()
+
+    bin_counts: dict[str, Counter] = {}
+    total_additions: dict[str, int] = {}
+    recipe_uids: dict[str, set[str]] = {}
+    for recipe_uid, variety, addition_type, time_min in rows:
+        total_additions[variety] = total_additions.get(variety, 0) + 1
+        recipe_uids.setdefault(variety, set()).add(recipe_uid)
+        bin_ = _classify_addition_timing(addition_type, time_min)
+        if bin_ is not None:
+            bin_counts.setdefault(variety, Counter())[bin_] += 1
+
+    con = connect(out_db)
+    ensure_table(con, "hop_addition_timing", HOP_ADDITION_TIMING_SCHEMA)
+    con.execute("DELETE FROM hop_addition_timing")
+    computed_at = datetime.now(timezone.utc).isoformat()
+
+    n_rows = 0
+    for variety, total in total_additions.items():
+        total_recipes = len(recipe_uids[variety])
+        for bin_, count in bin_counts.get(variety, {}).items():
+            con.execute("INSERT INTO hop_addition_timing VALUES (?,?,?,?,?,?,?)",
+                       (variety, bin_, count, total, total_recipes, "mmum", computed_at))
+            n_rows += 1
+    con.commit(); con.close()
+    print(f"T126 : {n_rows} lignes écrites pour {len(total_additions)} varietys "
+         f"({sum(total_additions.values())} additions résolues au total)")

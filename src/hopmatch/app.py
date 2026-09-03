@@ -239,6 +239,13 @@ _TOOL_SUMMARY_BY_MODE = {t["mode"]: t for t in _TOOL_SUMMARIES}
 # un `git log` en direct exigerait aussi que `.git` soit présent dans le
 # conteneur déployé, ce qui n'est pas garanti.
 _RECENT_UPDATES = [
+    ("2026-09-03", "Browse a hop now has a \"Hop addition timing\" card, "
+                   "right after Recommended usage: a real breakdown of "
+                   "when this hop is actually added in published recipes "
+                   "(first wort, boil at various times, whirlpool, dry "
+                   "hop) from a German-language recipe corpus -- shown "
+                   "only when at least 20 additions are on record, "
+                   "otherwise just the real count."),
     ("2026-08-30", "New \"Hopping plan\" tool: build a plan (hops + the "
                    "stage(s) you add each one at) and see, compound by "
                    "compound, what's delivered, what generates a related "
@@ -2584,6 +2591,13 @@ def _browse(con):
     with _panel():
         _recommended_usage_panel(con, hops, comp, selected)
 
+    # T126 : "comment ce houblon est réellement ajouté" -- nouvelle carte,
+    # même emplacement fixe ("usage") que T99 juste au-dessus, mais donnée
+    # DISTINCTE (corpus MMuM réel, pas un indice dérivé de la composition
+    # ni une part de recettes beer-analytics).
+    with _panel():
+        _addition_timing_panel(con, hops, selected)
+
     # T77 (2026-08-22, demande utilisateur explicite -- confusion vérifiée en
     # direct sur "enigma" : "the source is barthhaas... does berry come from
     # this only?") : jamais juxtaposer la provenance de COMPOSITION à celle
@@ -3605,6 +3619,63 @@ def _recommended_usage_panel(con, hops: dict, comp: dict, variety: str) -> None:
                    "toward early use (whirlpool/active fermentation dry hop), yet it's "
                    "used in whirlpool/aroma additions less than most hops in the "
                    "database -- brewers may be favoring straight dry hop instead.")
+
+
+_ADDITION_TIMING_MIN_ADDITIONS = 20
+
+
+def _addition_timing_panel(con, hops: dict, variety: str) -> None:
+    """T126 : "comment ce houblon est réellement ajouté" -- répartition
+    RÉELLE des additions d'un houblon sur les 11 classes chronologiques de
+    `reference.ADDITION_TIMING_BINS` (corpus MMuM, `matching.hop_addition_
+    timing`). Demande utilisateur d'origine (2026-08-27) : "un simple
+    barplot indiquant le % d'utilisation de chaque type (60 min, 30 min,
+    15 min, 5 min, whirlpool, dry hop…)".
+
+    **Distinct de T99 "Recommended usage" juste au-dessus** (même
+    emplacement fixe "usage" dans l'ordre de la page, mais donnée
+    différente) : T99 croise une part de recettes PAR ÉTAPE LARGE
+    (beer-analytics, Mash/First Wort/Boil/Aroma/Dry Hop) avec un indice
+    CHIMIQUE dérivé de la composition ; ceci est une mesure RECETTE BRUTE
+    à 11 classes fines (temps de boil précis), jamais fusionnée avec T99 --
+    deux questions différentes ("à quelle étape large" vs "à quel moment
+    précis du boil").
+
+    **Seuil de fiabilité, obligatoire (ticket)** : sous
+    `_ADDITION_TIMING_MIN_ADDITIONS` (20) additions pour ce houblon, aucun
+    graphique -- seulement l'effectif réel en `st.caption`, jamais un
+    graphique à 11 classes construit sur une poignée de points (bruit pur,
+    justification chiffrée du ticket : ~8500 additions / ~200 varietys ->
+    médiane basse par variété)."""
+    st.subheader("Hop addition timing")
+    timing = matching.hop_addition_timing(con, variety)
+    if timing is None:
+        st.caption("No addition-timing data (MMuM recipe corpus) for this variety.")
+        return
+    st.caption(f"n = {timing['total_additions']} additions in {timing['total_recipes']} recipes "
+              "(maischemalzundmehr.de recipe corpus).")
+    if timing["total_additions"] < _ADDITION_TIMING_MIN_ADDITIONS:
+        st.caption(f"Fewer than {_ADDITION_TIMING_MIN_ADDITIONS} additions -- not enough data "
+                  "for a reliable breakdown across 11 classes.")
+        return
+    dark = st.context.theme.type == "dark"
+    accent = "#aebf92" if dark else "#7a8a5e"
+    rows = [{"Class": b["bin"], "Share": b["share"], "Count": b["count"]} for b in timing["bins"]]
+    chart = alt.Chart(alt.Data(values=rows)).mark_bar(color=accent).encode(
+        # `labelOverlap=False` (même piège que Survivables/T117) : Vega-Lite
+        # éclaircit silencieusement les libellés d'un axe nominal à cardinalité
+        # moyenne (11 classes) par défaut -- vérifié en direct, "Boil 60+ min"/
+        # "Boil 30 min"/"Boil 15 min"/"Boil 1-5 min"/"Whirlpool" disparaissaient
+        # sans lui malgré des données réelles sur chacune des 11 classes.
+        x=alt.X("Class:N", sort=reference.ADDITION_TIMING_BINS, title=None,
+               axis=alt.Axis(labelAngle=_COMPARE_LABEL_ANGLE, labelOverlap=False)),
+        y=alt.Y("Share:Q", title="Share of this hop's additions", axis=alt.Axis(format="%")),
+        tooltip=["Class:N", alt.Tooltip("Share:Q", format=".1%"), "Count:Q"],
+    ).properties(height=320)
+    st.altair_chart(chart, width="stretch")
+    st.caption(":material/info: This corpus is German-language (maischemalzundmehr.de) -- "
+              "noble European hops are over-represented, and modern US hops are seen mostly "
+              "in IPA-style recipes. This usage profile isn't universal.")
 
 
 _COMPARE_LABEL_ANGLE = -45

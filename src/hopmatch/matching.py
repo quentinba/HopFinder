@@ -1820,3 +1820,37 @@ def frequent_hop_combinations(con, style_id: str | None = None, size: int = 2,
         (size, stage, min_support))
     return [{"varieties": r["combo"].split("|"), "support": r["support"],
              "total_recipes": r["total_recipes"], "lift": r["lift"]} for r in rows]
+
+
+def hop_addition_timing(con, variety: str) -> dict | None:
+    """T126 : répartition RÉELLE des additions de `variety` sur les 11
+    classes chronologiques de `reference.ADDITION_TIMING_BINS` (corpus
+    MMuM, table `hop_addition_timing` pré-calculée par `ingest.compute_
+    hop_addition_timing` -- lecture pure, jamais recalculée à la volée).
+
+    Retourne `{"bins": [{"bin", "count", "share"}, ...], "total_additions",
+    "total_recipes"}` -- `bins` dans l'ORDRE CHRONOLOGIQUE de `reference.
+    ADDITION_TIMING_BINS` (jamais trié par valeur, l'axe est ordonné),
+    n'inclut que les classes RÉELLEMENT observées pour ce houblon (une
+    classe absente n'a pas de ligne en base, voir `schema.HOP_ADDITION_
+    TIMING_SCHEMA`). `share` = fraction de `total_additions` (PAS
+    `total_recipes` -- une même variety ajoutée 3 fois dans une recette à 3
+    moments différents doit compter les 3, c'est l'information demandée par
+    le ticket).
+
+    `None` si aucune addition résolue pour cette variety -- jamais un dict
+    vide qui laisserait croire à une mesure à zéro. Le SEUIL de fiabilité
+    (20 additions minimum pour afficher le graphique, ticket) est une
+    décision d'affichage, appliquée par l'appelant (GUI) sur `total_
+    additions`, jamais ici."""
+    rows = con.execute(
+        "SELECT bin, count, total_additions, total_recipes FROM hop_addition_timing "
+        "WHERE variety=?", (variety,)).fetchall()
+    if not rows:
+        return None
+    total_additions = rows[0]["total_additions"]
+    total_recipes = rows[0]["total_recipes"]
+    counts = {r["bin"]: r["count"] for r in rows}
+    bins = [{"bin": b, "count": counts[b], "share": counts[b] / total_additions}
+           for b in reference.ADDITION_TIMING_BINS if b in counts]
+    return {"bins": bins, "total_additions": total_additions, "total_recipes": total_recipes}
