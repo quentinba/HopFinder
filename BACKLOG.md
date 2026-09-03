@@ -1025,7 +1025,7 @@ Elles sont écrites pour qu'aucune décision implicite ne reste à deviner.
   (410 tests avant le crawl réel -- le crawl lui-même ne touche à aucun
   test, données uniquement).
 
-- [ ] **T92 — Réconciliation nom-de-recette → `variety`**
+- [x] **T92 — Réconciliation nom-de-recette → `variety`**
   *Le ticket qui fait ou casse toute l'épique C.*
 
   Dans les recettes réelles, un houblon s'appelle « Citra », « Citra (US) »,
@@ -1055,6 +1055,83 @@ Elles sont écrites pour qu'aucune décision implicite ne reste à deviner.
   **Test** : liste de ~20 noms réels tirés du corpus, chacun avec son
   `variety` attendu ou `None`. Inclure au moins un Cryo, un blend, deux noms
   allemands, un nom avec ®.
+
+  **FAIT (2026-09-03).** `parsers.parse_beer_analytics_hops_csv` (parseur
+  pur de `recipe_db/data/hops.csv`, vérifié en direct : 435 lignes, 48528
+  octets, exactement ce que documentait déjà BACKLOG.md T85) +
+  `ingest.download_beer_analytics_hops_csv` (cache-first, jamais committé).
+  `ingest._normalize_recipe_hop_name` (pipeline dédié aux noms de recette,
+  bien plus bruts que les slugs déjà couverts par `_normalize_hop_key` --
+  translittération umlaut ä/ö/ü/ß, retrait parenthèses/millésime/%/
+  température/durée/décorations de forme produit "Pellets"/"T90"/"Hopfen"/
+  "Dolden"/"Teil N", frontière lettre-chiffre) + `ingest._recipe_hop_is_cryo`
+  (sous-chaîne, pas frontière de mot -- le corpus colle parfois "Cryo" sans
+  séparateur, ex. "AmarilloCryo") + `ingest.resolve_recipe_hop_name`
+  (Cryo -> jamais la variété de base -> alias manuel -> catalogue direct ->
+  alias beer-analytics) + `ingest.reconcile_mmum_hop_varieties` (pilote,
+  écrit `variety`/`product_form` dans `recipe_hops`, `aromahops.db` lue
+  seule jamais modifiée, garde-fou qui échoue bruyamment si un alias manuel
+  pointe vers une variety inexistante). Colonne `product_form` ajoutée à
+  `schema.RECIPES_SCHEMA` (`ensure_columns`, non destructif) -- un produit
+  Cryo n'écrase JAMAIS `variety` vers la base (concentration ~2x mesurée sur
+  les lots YCH, CLAUDE.md). CLI : `hopmatch reconcile-mmum`.
+
+  **Bug structurel trouvé et corrigé en cours de ticket** (`ingest.
+  _build_recipe_hop_index`, remplace la réutilisation prévue de
+  `_build_hop_name_index`) : (1) cette dernière construit ses clés via
+  `_normalize_hop_key`, qui traite un umlaut BRUT comme un simple séparateur
+  plutôt que de le translittérer -- un nom de catalogue non nettoyé
+  resterait injoignable par un nom de recette à l'orthographe allemande
+  identique ; (2) plus grave, elle prend arbitrairement le PREMIER houblon
+  rencontré (`setdefault`) en cas de nom dupliqué -- acceptable pour
+  BeerMaverick/beer-analytics (résolvent depuis un slug déjà désambiguïsé
+  côté source) mais silencieusement FAUX pour un nom de recette brut :
+  mesuré en détail (pas seulement le taux global), "Saaz"/"Northern Brewer"
+  bruts se voyaient attribués au crop US par pur artefact d'ordre
+  d'itération SQL, alors que ce corpus germanophone (D3) les voulait très
+  majoritairement européens. `_build_recipe_hop_index` (fonction dédiée,
+  clés `_normalize_recipe_hop_name`) exclut désormais toute clé qui
+  correspond à PLUSIEURS varietys distinctes plutôt qu'un choix arbitraire.
+
+  **Décision utilisateur explicite (2026-09-03) sur 3 cas d'ambiguïté à
+  forte fréquence** (la version stricte du garde-fou ci-dessus faisait
+  chuter la résolution de 92,9 % à 86,6 %, question posée nommément avant
+  de trancher) : "Amarillo" (269 lignes) → crop US (`amarillo`, LE sens par
+  défaut international, le crop allemand `amarillo-brand-ama04` est une
+  niche) ; "Saaz" (33 lignes) → crop Tchéquie (`saaz`, houblon noble
+  traditionnel, LE sens par défaut) ; "Northern Brewer" (78 lignes) → crop
+  Allemagne (`northern-brewer-nob03`, moins tranché que les deux précédents
+  mais corpus majoritairement germanophone) -- voir `data/mappings/hop_name_
+  aliases.yaml` pour le détail complet et les cas jumeaux volontairement
+  PAS résolus (ex. "Saazer", variété RÉELLEMENT distincte de "Saaz", jamais
+  confondue).
+
+  **2 potentiels doublons `hops` non fusionnés découverts en curant le
+  fichier d'alias** (même motif que Dolcita/Perle Germany, T117) --
+  **PAS corrigés dans ce ticket** (fusionner une `variety` est une décision
+  de données hors périmètre d'une réconciliation de noms de recette) :
+  "Tettnang Tettnanger" (BarthHaas) vs "Tettnanger" (Yakima, même région),
+  et "Styrian Savinjski Golding" (BarthHaas) vs "Savinjski Golding" (Yakima,
+  même région). À vérifier dans un futur ticket d'audit, pas ouvert
+  automatiquement ici.
+
+  **Résultat final réel (corpus complet, 2026-09-03) : 5935/6395 additions
+  résolues vers une variety (92,8 %), 19 produits Cryo (jamais vers la
+  variété de base), 441 non résolues** -- comparable au taux de résolution
+  BeerMaverick déjà cité ailleurs dans le projet (143/203, 70 %). Cas
+  restants non résolus, pour l'essentiel légitimes : variétés absentes de
+  notre catalogue (Lemondrop, Solero, Strata, Jester, Fantasia, Apollo,
+  Belma -- houblons réels mais jamais mesurés par BarthHaas/Yakima),
+  ambiguïté Golding non tranchée (27+15+9+5 lignes, aucun candidat par
+  défaut aussi clair qu'Amarillo/Saaz), texte libre non-houblon
+  ("Aromahopfen aus dem Garten", listes multi-houblons compactées en une
+  seule chaîne). `recipes.db` réconciliée poussée vers le dépôt privé
+  HopFinder-db.
+
+  20+ nouveaux tests (parseur CSV, normalisation, détection Cryo, index
+  ambiguïté-conscient, résolution paramétrée sur ~20 cas réels/représentatifs
+  du ticket, pilote bout-en-bout, idempotence, garde-fou alias invalide,
+  jamais d'écriture dans aromahops.db), suite verte (445 tests).
 
 - [ ] **T93 — Combinaisons fréquentes : paires, triplets, quadruplets**
 

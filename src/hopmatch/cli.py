@@ -189,6 +189,13 @@ def main(argv=None):
     mm.add_argument("--sleep", type=float, default=1.0)
     mm.add_argument("--limit", type=int)
 
+    mr = sub.add_parser("reconcile-mmum",
+                        help="résout recipe_hops.hop_name -> variety dans recipes.db "
+                             "(dictionnaire d'alias beer-analytics + data/mappings/"
+                             "hop_name_aliases.yaml) -- T92")
+    mr.add_argument("--recipes-db", default="recipes.db")
+    mr.add_argument("--db", default=DEFAULT_DB, help="aromahops.db, lue seule, jamais modifiée")
+
     am = sub.add_parser("amplify", help="cas d'usage : amplify")
     am.add_argument("note")
     am.add_argument("--db", default=DEFAULT_DB)
@@ -275,6 +282,8 @@ def main(argv=None):
         ingest.ingest_hop_usage_stats(a.db, limit=a.limit, sleep=a.sleep); return 0
     if a.cmd == "ingest-mmum":
         ingest.ingest_mmum(a.db, start=a.start, end=a.end, sleep=a.sleep, limit=a.limit); return 0
+    if a.cmd == "reconcile-mmum":
+        ingest.reconcile_mmum_hop_varieties(a.recipes_db, aroma_db=a.db); return 0
 
     con = connect(a.db)
     try:

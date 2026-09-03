@@ -4,6 +4,9 @@ Ingestion des données dans aromahops.db (+ recipes.db pour ingest_mmum, D4).
 RÉEL (tourne ici) :
   - ingest_mmum          : moissonne maischemalzundmehr.de (réseau ; requests seul), corpus
                            BRUT de recettes -> recipes.db (fichier SÉPARÉ, jamais aromahops.db)
+  - reconcile_mmum_hop_varieties : résout recipe_hops.hop_name -> variety dans recipes.db
+                           (réseau pour le dictionnaire d'alias beer-analytics, cache-first ;
+                           aromahops.db lue seule, jamais modifiée)
   - build_from_fixtures : reconstruit la base depuis data/fixtures/{barthhaas,yakima}
   - seed_reference       : charge molécules + amorce note→molécule/descripteur
   - crawl_barthhaas      : moissonne barthhaas.com (réseau ; requests+bs4)
@@ -2184,8 +2187,14 @@ def ingest_mmum(out_db: str = "recipes.db", start: int = 1, end: int = MMUM_DEFA
              r["ibu"], r["ebc"], r["srm"], fetched_at))
         con.execute("DELETE FROM recipe_hops WHERE recipe_uid=?", (r["uid"],))
         for h in parsed["hops"]:
+            # Colonnes NOMMÉES (pas `VALUES (?,?,...)` positionnel) --
+            # `product_form` (T92) reste absent ici (toujours NULL à
+            # l'ingestion, rempli par `reconcile_mmum_hop_varieties`) sans
+            # dépendre de sa position dans `schema.RECIPES_SCHEMA`.
             con.execute(
-                "INSERT OR REPLACE INTO recipe_hops VALUES (?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO recipe_hops "
+                "(recipe_uid, seq, hop_name, variety, stage, addition_type, time_min, "
+                "amount_g, alpha) VALUES (?,?,?,?,?,?,?,?,?)",
                 (r["uid"], h["seq"], h["hop_name"], h["variety"], h["stage"],
                  h["addition_type"], h["time_min"], h["amount_g"], h["alpha"]))
             n_hop_rows += 1
@@ -2199,3 +2208,289 @@ def ingest_mmum(out_db: str = "recipes.db", start: int = 1, end: int = MMUM_DEFA
     print(f"MMuM : {n_recipes} recettes ingérées ({n_holes} trous, {n_errors} erreurs réseau "
          f"sur {len(ids)} ids scannés), {n_hop_rows} additions de houblon ({avg:.1f}/recette)")
     print(f"  répartition des stades : {dict(sorted(stage_counts.items(), key=lambda kv: str(kv[0])))}")
+
+
+# --------------------------------------------------------------------------- #
+# Réconciliation nom-de-recette -> variety (T92, épique C)
+# --------------------------------------------------------------------------- #
+BEER_ANALYTICS_HOPS_CSV_URL = (
+    "https://raw.githubusercontent.com/scheb/beer-analytics/master/recipe_db/data/hops.csv")
+BEER_ANALYTICS_HOPS_CSV_CACHE = "data/cache/beer_analytics_hops.csv"
+
+# Décorations de FORME DE PRODUIT qui ne changent PAS la variété sous-jacente
+# (« Pellets », « T90 »/« Typ 90 », « Hopfen » -- mot allemand générique pour
+# « houblon », jamais un nom de variété -- « Dolden » -- « cônes », houblon en
+# fleur entière -- « Teil »/« TeilN » -- « partie N » d'un houblonnage en
+# plusieurs temps) -- vérifié sur le corpus MMuM réel (T92, 2026-09-03).
+# JAMAIS « Cryo » ici : voir `_recipe_hop_is_cryo`, un produit Cryo N'EST PAS
+# la variété de base (concentration ~2x mesurée sur les lots YCH, CLAUDE.md).
+_RECIPE_HOP_DECORATION_RE = re.compile(
+    r"\b(pellets?|t-?90|typ\s?90|type\s?90|hopfen|hops?|dolden|teil\s?\d*)\b", re.IGNORECASE)
+# Contenu entre parenthèses/crochets ("(US) 2018", "[12% AA]") : quasi
+# toujours une annotation d'origine/millésime/pureté, jamais une partie du
+# nom de variété -- vérifié sur les ~630 noms bruts distincts du corpus.
+_RECIPE_HOP_PAREN_RE = re.compile(r"\([^)]*\)|\[[^\]]*\]")
+# Millésime de récolte HORS parenthèses ("Citra (US) 2017" -> les parens
+# retirées ci-dessus laissent "2017" bare) -- 4 chiffres commençant par 19/20,
+# jamais un code de houblon réel dans ce corpus (vérifié : les codes numériques
+# réels, "HBC 630"/"X07270", ne sont jamais des nombres à 4 chiffres nus
+# commençant par 19/20).
+_RECIPE_HOP_YEAR_RE = re.compile(r"\b(19|20)\d{2}\b")
+# Pourcentage d'alpha-acide ("7.9% Alpha", "[12% AA]" déjà couvert ci-dessus
+# par les crochets, mais aussi hors crochets) et annotations de température/
+# durée ("15min @70°C") -- bruit de brassage, jamais un nom de houblon.
+_RECIPE_HOP_PCT_RE = re.compile(r"\d+[.,]?\d*\s*%(\s*(alpha|aa))?", re.IGNORECASE)
+_RECIPE_HOP_TEMP_TIME_RE = re.compile(r"\d+\s*°?c\b|\d+\s*min\b", re.IGNORECASE)
+# "#1"/"#2" (parties d'un houblonnage fractionné, comme "Teil N" ci-dessus).
+_RECIPE_HOP_HASH_RE = re.compile(r"#\s?\d+")
+# Frontière lettre->chiffre collée sans séparateur ("Idaho7" -> "Idaho 7",
+# "HBC630" -> "HBC 630") -- `_normalize_hop_key` traite déjà les caractères
+# non alphanumériques comme séparateurs, mais un chiffre collé à une lettre
+# reste un seul token sans cette insertion explicite d'espace. Appliquée
+# APRÈS `_RECIPE_HOP_DECORATION_RE` (pas avant) : sinon "T90" ("Typ 90")
+# deviendrait "T 90" AVANT que la décoration ne puisse le reconnaître comme
+# un bloc "t-?90" glué -- bug réel trouvé en écrivant les tests de ce ticket.
+_RECIPE_HOP_LETTER_DIGIT_RE = re.compile(r"(?<=[a-zA-Z])(?=\d)")
+# Translittération allemande standard -- `_normalize_hop_key` ne fait que
+# séparer les caractères non-ASCII (ü/ö/ä/ß traités comme des séparateurs,
+# pas translittérés), ce qui casse le rapprochement entre l'orthographe
+# allemande d'origine ("Hüll Melon") et sa forme déjà translittérée dans
+# notre catalogue ("Huell Melon") -- bug trouvé en mesurant le taux de
+# résolution réel sur le corpus (T92, 2026-09-03).
+_RECIPE_HOP_UMLAUT_MAP = str.maketrans({"ä": "ae", "ö": "oe", "ü": "ue", "ß": "ss"})
+
+
+def _normalize_recipe_hop_name(name: str) -> str:
+    """Normalisation SPÉCIFIQUE à la réconciliation de noms de RECETTE (T92)
+    -- bien plus bruts que les slugs BeerMaverick/beer-analytics déjà
+    couverts par `_normalize_hop_key` (texte libre saisi à la main par des
+    brasseurs amateurs, jamais un slug d'URL structuré). Fonction SÉPARÉE de
+    `_normalize_hop_key` plutôt qu'une extension de celle-ci : les
+    régressions potentielles (translittération, décorations retirées) ne
+    doivent JAMAIS affecter la résolution BeerMaverick/beer-analytics déjà
+    en production et testée séparément.
+
+    Pipeline, dans cet ordre (chaque étape vérifiée nécessaire en mesurant
+    le taux de résolution réel sur le corpus MMuM, jamais ajoutée au
+    jugé) : translittération umlaut -> retrait parenthèses/crochets ->
+    retrait millésime -> retrait %/température/durée -> retrait "#N" ->
+    retrait des décorations de forme de produit -> frontière lettre/chiffre
+    (APRÈS les décorations, voir `_RECIPE_HOP_LETTER_DIGIT_RE`) ->
+    `_normalize_hop_key` (minuscule, symboles déposés, ponctuation ->
+    tirets)."""
+    cleaned = name.lower().translate(_RECIPE_HOP_UMLAUT_MAP)
+    cleaned = _RECIPE_HOP_PAREN_RE.sub(" ", cleaned)
+    cleaned = _RECIPE_HOP_YEAR_RE.sub(" ", cleaned)
+    cleaned = _RECIPE_HOP_PCT_RE.sub(" ", cleaned)
+    cleaned = _RECIPE_HOP_TEMP_TIME_RE.sub(" ", cleaned)
+    cleaned = _RECIPE_HOP_HASH_RE.sub(" ", cleaned)
+    cleaned = _RECIPE_HOP_DECORATION_RE.sub(" ", cleaned)
+    cleaned = _RECIPE_HOP_LETTER_DIGIT_RE.sub(" ", cleaned)
+    return _normalize_hop_key(cleaned)
+
+
+def _recipe_hop_is_cryo(name: str) -> bool:
+    """T92 : un produit Cryo (concentré de lupuline) N'EST PAS la variété de
+    base -- concentration ~2x mesurée sur les lots YCH (CLAUDE.md, section
+    API de lot YCH). Sous-chaîne simple (PAS `\\bcryo\\b`) : le corpus réel
+    colle parfois "Cryo" directement au nom sans séparateur ("AmarilloCryo",
+    "MosaicCryo", vérifié en direct) -- une frontière de mot ne matcherait
+    pas ces cas."""
+    return "cryo" in name.lower()
+
+
+def _build_recipe_hop_index(con) -> dict[str, str]:
+    """T92 : index {clé normalisée -> variety} SPÉCIFIQUE à la résolution de
+    noms de recette, PAS une réutilisation de `_build_hop_name_index`
+    (BeerMaverick/beer-analytics) -- deux différences essentielles, toutes
+    deux trouvées en mesurant le taux de résolution réel sur le corpus MMuM
+    (2026-09-03) :
+
+    1. **Clés construites avec `_normalize_recipe_hop_name`, pas
+       `_normalize_hop_key`.** Un nom de catalogue qui porte encore un
+       umlaut brut (ex. "Hallertauer Mittelfrüh", "Hersbrucker Spät" --
+       toutes nos variétés ne sont pas translittérées comme "Huell Melon")
+       produit deux clés DIFFÉRENTES selon la fonction : `_normalize_hop_key`
+       traite "ü" comme un simple séparateur ("hallertauer-mittelfr-h"),
+       `_normalize_recipe_hop_name` le translittère ("hallertauer-
+       mittelfrueh") -- avec `_build_hop_name_index`, un nom de recette tapé
+       EXACTEMENT comme le catalogue (même orthographe allemande) ne
+       matchait jamais directement, silencieusement.
+    2. **Collision de nom -> AMBIGUË, jamais un choix arbitraire.**
+       `_build_hop_name_index` prend le premier houblon rencontré en cas de
+       nom dupliqué (`setdefault`, ordre d'itération SQL arbitraire) --
+       acceptable pour BeerMaverick/beer-analytics qui résolvent depuis un
+       slug de page déjà désambiguïsé côté source. Pour un nom de recette
+       BRUT sans indication de région ("Saaz", "Northern Brewer" -- 2 lignes
+       chacune, crops US/Europe réellement distincts), ce même mécanisme
+       attribuait silencieusement 111 additions réelles à un crop arbitraire
+       (souvent le crop US, minoritaire, plutôt que le crop traditionnel
+       européen archi-dominant dans ce corpus germanophone -- bug trouvé en
+       vérifiant le détail des lignes résolues, pas seulement le taux
+       global). Une clé qui correspond à PLUSIEURS varietys DISTINCTES est
+       donc exclue de l'index retourné -- jamais résolue, même traitement
+       que "Golding"/"Styrian Golding" (ambiguïté déjà documentée comme
+       volontairement non résolue, voir data/mappings/hop_name_
+       aliases.yaml)."""
+    seen: dict[str, set[str]] = {}
+    for row in con.execute("SELECT variety, name FROM hops"):
+        for raw_key in (row["variety"], row["name"]):
+            key = _normalize_recipe_hop_name(raw_key)
+            if key:
+                seen.setdefault(key, set()).add(row["variety"])
+    return {key: next(iter(varieties)) for key, varieties in seen.items() if len(varieties) == 1}
+
+
+def resolve_recipe_hop_name(index: dict[str, str], alt_name_index: dict[str, str],
+                            manual_index: dict[str, str], raw_name: str | None
+                            ) -> tuple[str | None, str | None]:
+    """T92 : (variety, product_form) pour `raw_name`, un nom de houblon BRUT
+    de recette (MMuM ou futur corpus). Fonction PURE (dicts déjà construits
+    par l'appelant, `reconcile_mmum_hop_varieties`) -- testée séparément de
+    tout accès réseau/DB.
+
+    Ordre de résolution, chacun essayé seulement si le précédent échoue :
+    1. `raw_name` contient "cryo" -> `(None, "cryo")`, JAMAIS résolu vers la
+       variété de base (voir `_recipe_hop_is_cryo`).
+    2. `data/mappings/hop_name_aliases.yaml` (`manual_index`, cas allemands
+       curés à la main -- voir le fichier pour la liste des cas
+       volontairement PAS mappés faute d'une correspondance sans ambiguïté).
+    3. Correspondance DIRECTE contre `index` (notre propre catalogue,
+       `_build_recipe_hop_index` -- variety ET name, ambiguïté-consciente,
+       voir sa docstring).
+    4. `recipe_db/data/hops.csv` (beer-analytics, `alt_name_index` : alias
+       normalisé -> nom CANONIQUE beer-analytics) puis re-résolution de ce
+       nom canonique contre `index` -- un alias qui ne correspond à aucun
+       houblon de NOTRE catalogue n'apporte rien (ex. beer-analytics connaît
+       "Solero" mais notre base ne le mesure pas).
+
+    `raw_name` vide/None ou entièrement composé de décorations (ex. une
+    chaîne qui ne contient QUE "Pellets") -> `(None, None)`, jamais une
+    correspondance fabriquée. Aucune correspondance trouvée à aucune étape
+    -> `(None, None)` -- le nom brut reste dans `recipe_hops.hop_name`,
+    exclu du calcul de combinaisons (T93)."""
+    if not raw_name or not raw_name.strip():
+        return None, None
+    if _recipe_hop_is_cryo(raw_name):
+        return None, "cryo"
+    key = _normalize_recipe_hop_name(raw_name)
+    if not key:
+        return None, None
+    if key in manual_index:
+        return manual_index[key], None
+    variety = index.get(key)
+    if variety:
+        return variety, None
+    canonical = alt_name_index.get(key)
+    if canonical:
+        variety = index.get(_normalize_recipe_hop_name(canonical))
+        if variety:
+            return variety, None
+    return None, None
+
+
+def download_beer_analytics_hops_csv(dest_path: str = BEER_ANALYTICS_HOPS_CSV_CACHE,
+                                     force: bool = False) -> str:
+    """Télécharge (si absent) `recipe_db/data/hops.csv`
+    (`github.com/scheb/beer-analytics`, GPLv3) -- dictionnaire d'alias de
+    noms de houblons curé À LA MAIN par un tiers (435 lignes, colonnes
+    `name;use;origin;substitutes;aromas;alt_names;alt_names_extra`,
+    vérifié en direct le 2026-09-03, 48528 octets -- exactement ce que
+    BACKLOG.md T85 documentait déjà). Jamais committé (même pattern que
+    `download_bjcp_styles`/`download_foodb_dump`), fichier temporaire +
+    `os.replace` pour ne jamais laisser un téléchargement interrompu passer
+    pour un cache valide. Idempotent : ne retélécharge rien si `dest_path`
+    existe déjà (sauf `force=True`)."""
+    import tempfile
+
+    import requests
+
+    if os.path.exists(dest_path) and not force:
+        return dest_path
+    os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+    resp = requests.get(BEER_ANALYTICS_HOPS_CSV_URL, timeout=30,
+                        headers={"User-Agent": "hopmatch/0.1 (research)"})
+    resp.raise_for_status()
+    fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(dest_path))
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(resp.content)
+        os.replace(tmp_path, dest_path)
+    except BaseException:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        raise
+    return dest_path
+
+
+def reconcile_mmum_hop_varieties(recipes_db: str = "recipes.db", aroma_db: str = "aromahops.db",
+                                 hops_csv_path: str | None = None) -> None:
+    """T92 : résout `recipe_hops.hop_name` (brut, MMuM) -> `variety` (notre
+    catalogue) DANS `recipes.db` -- `aromahops.db` n'est JAMAIS modifiée
+    par cette fonction (lue seule pour construire l'index de résolution,
+    voir D4 : les deux bases ne communiquent qu'à la LECTURE, T93/T126/T127
+    liront `recipes.db` réconciliée pour écrire leurs propres résultats
+    dans `aromahops.db`).
+
+    Ajoute la colonne `product_form` à `recipe_hops` si absente
+    (`ensure_columns`, jamais un `init_recipes_db` qui viderait le corpus
+    déjà crawlé) -- distincte de `variety`, voir `schema.RECIPES_SCHEMA`
+    pour pourquoi un produit Cryo ne doit jamais écraser la variété de base.
+
+    Peut être relancée sans risque après un re-crawl `ingest_mmum` partiel
+    (idempotente, réécrit `variety`/`product_form` pour TOUTES les lignes
+    -- jamais un état qui dépend de l'ordre d'exécution)."""
+    from .schema import connect, ensure_columns
+
+    aroma_con = connect(aroma_db)
+    index = _build_recipe_hop_index(aroma_con)
+    valid_varieties = {r[0] for r in aroma_con.execute("SELECT variety FROM hops")}
+    aroma_con.close()
+
+    if hops_csv_path is None:
+        hops_csv_path = download_beer_analytics_hops_csv()
+    with open(hops_csv_path, encoding="utf-8") as f:
+        ba_rows = parsers.parse_beer_analytics_hops_csv(f.read())
+    alt_name_index: dict[str, str] = {}
+    for row in ba_rows:
+        for alias in row["alt_names"]:
+            alt_name_index.setdefault(_normalize_recipe_hop_name(alias), row["name"])
+
+    manual_aliases = _load_yaml_mapping("hop_name_aliases.yaml")
+    bad_targets = {v for v in manual_aliases.values() if v not in valid_varieties}
+    if bad_targets:
+        raise ValueError(
+            f"data/mappings/hop_name_aliases.yaml : variety(s) inexistante(s) dans "
+            f"aromahops.db : {sorted(bad_targets)} -- corriger le fichier, jamais une "
+            f"faute de frappe silencieuse.")
+    manual_index = {_normalize_recipe_hop_name(k): v for k, v in manual_aliases.items()}
+
+    con = connect(recipes_db)
+    ensure_columns(con, "recipe_hops", {"product_form": "TEXT"})
+    rows = con.execute("SELECT recipe_uid, seq, hop_name FROM recipe_hops").fetchall()
+
+    n_resolved = n_cryo = n_unresolved = 0
+    unresolved_counts: dict[str, int] = {}
+    for i, (recipe_uid, seq, hop_name) in enumerate(rows, 1):
+        variety, product_form = resolve_recipe_hop_name(index, alt_name_index, manual_index,
+                                                        hop_name)
+        if variety:
+            n_resolved += 1
+        elif product_form == "cryo":
+            n_cryo += 1
+        else:
+            n_unresolved += 1
+            if hop_name:
+                unresolved_counts[hop_name] = unresolved_counts.get(hop_name, 0) + 1
+        con.execute("UPDATE recipe_hops SET variety=?, product_form=? "
+                   "WHERE recipe_uid=? AND seq=?", (variety, product_form, recipe_uid, seq))
+        if i % 500 == 0:
+            con.commit()
+    con.commit(); con.close()
+
+    total = len(rows)
+    print(f"MMuM réconciliation (T92) : {n_resolved}/{total} additions résolues vers une "
+         f"variety ({n_resolved / total:.1%}), {n_cryo} produits Cryo (jamais vers la variété "
+         f"de base), {n_unresolved} non résolues.")
+    top = sorted(unresolved_counts.items(), key=lambda kv: -kv[1])[:15]
+    print(f"  noms non résolus les plus fréquents : {top}")

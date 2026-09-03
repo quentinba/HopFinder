@@ -1061,3 +1061,39 @@ def parse_mmum_recipe(payload: dict, source_id: str) -> dict:
             "alpha": h.get("Alpha"),
         })
     return {"recipe": recipe, "hops": hops}
+
+
+# --------------------------------------------------------------------------- #
+# beer-analytics.com — dictionnaire d'alias de noms de houblons (T92)
+# --------------------------------------------------------------------------- #
+def parse_beer_analytics_hops_csv(text: str) -> list[dict]:
+    """`recipe_db/data/hops.csv` (beer-analytics, `github.com/scheb/
+    beer-analytics`, colonnes `name;use;origin;substitutes;aromas;
+    alt_names;alt_names_extra`, séparateur `;`) -> une entrée par houblon
+    beer-analytics : `{"name": "Citra", "alt_names": ["HBC 394", "Citr",
+    "Ciara"]}` -- `alt_names`/`alt_names_extra` FUSIONNÉES en une seule
+    liste (T92 ne distingue pas les deux, toutes deux servent le même
+    usage : élargir le nom brut d'une recette vers le `name` canonique
+    beer-analytics, qui est ensuite résolu contre NOTRE PROPRE catalogue
+    par l'appelant -- ce parseur ne connaît rien à `hops.variety`).
+
+    Séparateur d'alias `, ` (vérifié en direct sur le fichier réel,
+    206/435 lignes ont au moins un alias) -- un champ vide donne une liste
+    vide, jamais un alias fabriqué. `name` lui-même n'est PAS ajouté à sa
+    propre liste d'alias (redondant : l'appelant tente déjà `name` en
+    premier via son propre index)."""
+    import csv
+    import io
+
+    out = []
+    for row in csv.DictReader(io.StringIO(text), delimiter=";"):
+        name = (row.get("name") or "").strip()
+        if not name:
+            continue
+        alt_names = []
+        for col in ("alt_names", "alt_names_extra"):
+            raw = (row.get(col) or "").strip()
+            if raw:
+                alt_names.extend(a.strip() for a in raw.split(",") if a.strip())
+        out.append({"name": name, "alt_names": alt_names})
+    return out

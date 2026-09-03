@@ -814,3 +814,29 @@ def test_parse_mmum_recipe_missing_stammwurze_or_farbe_never_crashes():
     recipe = parsers.parse_mmum_recipe(payload, "800")["recipe"]
     assert recipe["og_plato"] is None and recipe["og_sg"] is None
     assert recipe["ebc"] is None and recipe["srm"] is None
+
+
+# --------------------------------------------------------------------------- #
+# beer-analytics.com -- hops.csv, dictionnaire d'alias de noms (T92)
+# --------------------------------------------------------------------------- #
+_BA_HOPS_CSV_SAMPLE = (
+    "name;use;origin;substitutes;aromas;alt_names;alt_names_extra\n"
+    "Citra;dual-purpose;USA;Cascade, Centennial;Citrus, Tropical;HBC 394;Citr, Ciara\n"
+    "Hallertauer Mittelfrüh;aroma;GER;Crystal;Citrus, Floral;;Hallertau Mittelfrüh, Mittelfrüh\n"
+    "Solero;aroma;GER;;Citrus;;\n"
+)
+
+
+def test_parse_beer_analytics_hops_csv_merges_both_alt_name_columns():
+    rows = parsers.parse_beer_analytics_hops_csv(_BA_HOPS_CSV_SAMPLE)
+    citra = next(r for r in rows if r["name"] == "Citra")
+    assert citra["alt_names"] == ["HBC 394", "Citr", "Ciara"]
+
+def test_parse_beer_analytics_hops_csv_empty_alt_names_give_empty_list():
+    rows = parsers.parse_beer_analytics_hops_csv(_BA_HOPS_CSV_SAMPLE)
+    solero = next(r for r in rows if r["name"] == "Solero")
+    assert solero["alt_names"] == []
+
+def test_parse_beer_analytics_hops_csv_row_count():
+    rows = parsers.parse_beer_analytics_hops_csv(_BA_HOPS_CSV_SAMPLE)
+    assert len(rows) == 3
