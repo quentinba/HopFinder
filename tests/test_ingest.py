@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 
 from hopmatch import ingest, parsers
-from hopmatch.schema import connect, init_db
+from hopmatch.schema import connect, init_db, init_recipes_db
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
@@ -1362,3 +1362,263 @@ def test_ingest_mmum_network_error_on_one_id_does_not_stop_the_scan(tmp_path, mo
     uids = {r[0] for r in con.execute("SELECT uid FROM recipes")}
     con.close()
     assert uids == {"mmum-1", "mmum-3"}  # id=2 sauté, le reste de la plage continue
+
+
+# --------------------------------------------------------------------------- #
+# T92 -- réconciliation nom-de-recette -> variety
+# --------------------------------------------------------------------------- #
+def test_normalize_recipe_hop_name_translates_german_umlauts():
+    # "Hüll Melon" (orthographe allemande d'origine) doit rejoindre la
+    # même clé que "Huell Melon" (déjà translittéré dans notre catalogue) --
+    # _normalize_hop_key seul ne le fait pas (traite ü comme un séparateur).
+    assert (ingest._normalize_recipe_hop_name("Hüll Melon")
+            == ingest._normalize_recipe_hop_name("Huell Melon"))
+
+def test_normalize_recipe_hop_name_strips_product_form_decorations():
+    assert (ingest._normalize_recipe_hop_name("Tettnanger Pellets ")
+            == ingest._normalize_recipe_hop_name("Tettnanger"))
+    assert (ingest._normalize_recipe_hop_name("Citra T90 Pellets")
+            == ingest._normalize_recipe_hop_name("Citra"))
+
+def test_normalize_recipe_hop_name_strips_parens_and_percent_annotations():
+    assert (ingest._normalize_recipe_hop_name("Citra (US) 2017")
+            == ingest._normalize_recipe_hop_name("Citra"))
+    assert (ingest._normalize_recipe_hop_name("Columbus [14% AA]")
+            == ingest._normalize_recipe_hop_name("Columbus"))
+
+def test_normalize_recipe_hop_name_inserts_letter_digit_boundary():
+    assert (ingest._normalize_recipe_hop_name("Idaho7")
+            == ingest._normalize_recipe_hop_name("Idaho 7"))
+    assert (ingest._normalize_recipe_hop_name("HBC630")
+            == ingest._normalize_recipe_hop_name("HBC 630"))
+
+def test_recipe_hop_is_cryo_matches_glued_and_separated_forms():
+    # Le corpus réel colle parfois "Cryo" sans séparateur (T92, vérifié en
+    # direct : "AmarilloCryo", "MosaicCryo") -- une frontière de mot ne
+    # matcherait pas ces cas, d'où une simple sous-chaîne.
+    assert ingest._recipe_hop_is_cryo("Citra Cryo")
+    assert ingest._recipe_hop_is_cryo("Simcoe (Cryo)")
+    assert ingest._recipe_hop_is_cryo("AmarilloCryo")
+    assert ingest._recipe_hop_is_cryo("MosaicCRYO")
+    assert not ingest._recipe_hop_is_cryo("Citra")
+
+
+# ~20 noms réels/représentatifs du corpus MMuM (T92, ticket : "au moins un
+# Cryo, un blend, deux noms allemands, un nom avec ®"), chacun avec son
+# variety attendu -- petit index/alt_name_index/manual_index CONSTRUITS À LA
+# MAIN plutôt que la vraie base (fonction pure, testée isolément du réseau/DB).
+_T92_TEST_INDEX = {
+    "citra": "citra", "hbc-630": "hbc-630", "idaho-7": "idaho-7",
+    "tettnanger": "tettnanger", "huell-melon": "huell-melon",
+    "ales-for-als-blend": "ales-for-als-blend", "lublin": "lublin",
+    "cascade": "cascade", "hersbrucker-spaet": "hersbrucker-spaet",
+    "hallertauer-mittelfrueh": "hallertauer-mittelfrueh",
+    "hallertauer-mittelfruher": "hallertauer-mittelfruher",
+    "perle": "perle",
+}
+_T92_TEST_ALT_INDEX = {}  # aucun alias beer-analytics nécessaire pour ces cas
+_T92_TEST_MANUAL_INDEX = {
+    ingest._normalize_recipe_hop_name(k): v for k, v in {
+        "hallertauer perle": "perle", "cascade hallertau": "cascade",
+        "lubelski": "lublin", "hersbrucker": "hersbrucker-spaet",
+        "mittelfrüher": "hallertauer-mittelfruher",
+        "mittelfrüh": "hallertauer-mittelfrueh",
+    }.items()
+}
+
+@pytest.mark.parametrize("raw_name,expected_variety,expected_form", [
+    ("Citra", "citra", None),                                    # direct
+    ("Citra Cryo", None, "cryo"),                                 # Cryo #1
+    ("Simcoe (Cryo)", None, "cryo"),                              # Cryo #2 (jamais mesuré -> pas dans l'index, mais cryo prime de toute façon)
+    ("Citra®", "citra", None),                                    # symbole déposé
+    ("Ales for ALS Blend", "ales-for-als-blend", None),           # blend (variety propre dans notre catalogue)
+    ("Hallertauer Perle", "perle", None),                         # allemand #1 (alias manuel)
+    ("Hüll Melon", "huell-melon", None),                          # allemand #2 (translittération)
+    ("Tettnanger Pellets ", "tettnanger", None),                  # décoration forme produit
+    ("HBC630", "hbc-630", None),                                  # frontière lettre/chiffre
+    ("Idaho7", "idaho-7", None),                                  # frontière lettre/chiffre
+    ("Cascade Hallertau", "cascade", None),                       # préfixe régional (alias manuel)
+    ("Lubelski", "lublin", None),                                 # synonyme polonais (alias manuel)
+    ("Hersbrucker", "hersbrucker-spaet", None),                   # nom court (alias manuel)
+    ("Mittelfrüher", "hallertauer-mittelfruher", None),           # suffixe -er distingué
+    ("Mittelfrüh", "hallertauer-mittelfrueh", None),              # suffixe -er absent
+    ("Golding", None, None),                                      # ambigu (5 candidats réels) -- jamais deviné
+    ("Aromahopfen aus dem Garten", None, None),                   # pas une variété (houblon de jardin, texte libre)
+    ("Lemondrop", None, None),                                    # variété réelle mais absente de notre catalogue
+    ("", None, None),                                             # vide
+    (None, None, None),                                           # absent
+])
+def test_resolve_recipe_hop_name(raw_name, expected_variety, expected_form):
+    variety, form = ingest.resolve_recipe_hop_name(
+        _T92_TEST_INDEX, _T92_TEST_ALT_INDEX, _T92_TEST_MANUAL_INDEX, raw_name)
+    assert variety == expected_variety
+    assert form == expected_form
+
+def test_resolve_recipe_hop_name_uses_beer_analytics_alt_names():
+    # Alias beer-analytics ("Mittelfrüh" listé comme alt_name de "Hallertauer
+    # Mittelfrüh") résolu vers NOTRE catalogue via le nom canonique --
+    # distinct du test ci-dessus qui passe par l'alias MANUEL.
+    index = {"hallertauer-mittelfrueh": "hallertauer-mittelfrueh"}
+    alt_index = {ingest._normalize_recipe_hop_name("H Mittelfrüh"): "Hallertauer Mittelfrüh"}
+    variety, form = ingest.resolve_recipe_hop_name(index, alt_index, {}, "H Mittelfrüh")
+    assert variety == "hallertauer-mittelfrueh"
+    assert form is None
+
+
+def test_build_recipe_hop_index_transliterates_umlauts_unlike_build_hop_name_index(tmp_path):
+    # Bug réel trouvé en vérifiant le crawl complet (T92, 2026-09-03) :
+    # _build_hop_name_index (BeerMaverick/beer-analytics) construit ses clés
+    # via _normalize_hop_key, qui traite "ü" comme un séparateur, pas une
+    # lettre à translittérer. Sur la base réelle, la plupart des `variety`
+    # sont déjà écrites sans umlaut (convention interne du projet) donc
+    # `_build_hop_name_index` retrouve quand même la clé recette VIA la
+    # variety -- mais un houblon dont `variety` porterait encore un umlaut
+    # (variante non nettoyée, pas garanti impossible sur une base réelle)
+    # resterait injoignable par un nom de recette tapé avec l'orthographe
+    # allemande d'origine. `_build_recipe_hop_index` ferme ce trou.
+    con = connect(str(tmp_path / "t.db"))
+    init_db(con)
+    con.execute("INSERT INTO hops (variety, name, region, sources, purpose) "
+               "VALUES ('testvariety', 'Hüllfrüh Spät', 'Germany', 'barthhaas', NULL)")
+    con.commit()
+    index = ingest._build_recipe_hop_index(con)
+    key = ingest._normalize_recipe_hop_name("Hüllfrüh Spät")
+    assert index[key] == "testvariety"
+    # _build_hop_name_index (l'ancienne fonction, toujours utilisée par
+    # BeerMaverick/beer-analytics) ne trouve PAS cette même clé -- documente
+    # la différence de comportement plutôt que de la laisser implicite.
+    old_index = ingest._build_hop_name_index(con)
+    assert key not in old_index
+
+def test_build_recipe_hop_index_excludes_ambiguous_duplicate_names(tmp_path):
+    # 2 lignes "Saaz" distinctes (crops US/Tchéquie réellement différents,
+    # cas réel de la base) -- un nom de recette bare "Saaz" ne doit RÉSOUDRE
+    # VERS AUCUNE DES DEUX plutôt qu'un choix arbitraire (bug réel : 111
+    # additions du corpus MMuM auraient été mal attribuées au crop US,
+    # minoritaire, avant ce garde-fou).
+    con = connect(str(tmp_path / "t.db"))
+    init_db(con)
+    con.execute("INSERT INTO hops (variety, name, region, sources, purpose) "
+               "VALUES ('saaz', 'Saaz', 'Czech Republic', 'yakima', NULL)")
+    con.execute("INSERT INTO hops (variety, name, region, sources, purpose) "
+               "VALUES ('saaz-saz01', 'Saaz', 'United States', 'yakima', NULL)")
+    con.execute("INSERT INTO hops (variety, name, region, sources, purpose) "
+               "VALUES ('citra', 'Citra', 'United States', 'yakima', NULL)")
+    con.commit()
+    index = ingest._build_recipe_hop_index(con)
+    assert ingest._normalize_recipe_hop_name("Saaz") not in index
+    assert index[ingest._normalize_recipe_hop_name("Citra")] == "citra"
+
+def test_reconcile_mmum_hop_varieties_writes_variety_and_product_form(tmp_path, monkeypatch):
+    aroma_path = str(tmp_path / "aromahops.db")
+    con = connect(aroma_path)
+    init_db(con)
+    con.execute("INSERT INTO hops (variety, name, region, sources, purpose) "
+               "VALUES ('citra', 'Citra', 'United States', 'yakima', NULL)")
+    con.execute("INSERT INTO hops (variety, name, region, sources, purpose) "
+               "VALUES ('perle', 'Perle', 'Germany', 'yakima', NULL)")
+    con.commit(); con.close()
+
+    recipes_path = str(tmp_path / "recipes.db")
+    con = connect(recipes_path)
+    init_recipes_db(con)
+    con.execute("INSERT INTO recipes (uid, source, source_id) VALUES ('mmum-1', 'mmum', '1')")
+    con.executemany(
+        "INSERT INTO recipe_hops (recipe_uid, seq, hop_name) VALUES (?,?,?)",
+        [("mmum-1", 1, "Citra"), ("mmum-1", 2, "Citra Cryo"),
+         ("mmum-1", 3, "Hallertauer Perle"), ("mmum-1", 4, "Unknown Hop XYZ")])
+    con.commit(); con.close()
+
+    csv_path = tmp_path / "hops.csv"
+    csv_path.write_text("name;use;origin;substitutes;aromas;alt_names;alt_names_extra\n",
+                        encoding="utf-8")
+    monkeypatch.setattr(ingest, "_load_yaml_mapping",
+                        lambda filename: {"hallertauer perle": "perle"})
+
+    ingest.reconcile_mmum_hop_varieties(recipes_path, aroma_db=aroma_path,
+                                        hops_csv_path=str(csv_path))
+
+    con = connect(recipes_path)
+    rows = {r["seq"]: dict(r) for r in con.execute(
+        "SELECT seq, hop_name, variety, product_form FROM recipe_hops")}
+    con.close()
+    assert rows[1]["variety"] == "citra" and rows[1]["product_form"] is None
+    assert rows[2]["variety"] is None and rows[2]["product_form"] == "cryo"
+    assert rows[3]["variety"] == "perle" and rows[3]["product_form"] is None
+    assert rows[4]["variety"] is None and rows[4]["product_form"] is None
+
+def test_reconcile_mmum_hop_varieties_never_writes_to_aromahops_db(tmp_path, monkeypatch):
+    aroma_path = str(tmp_path / "aromahops.db")
+    con = connect(aroma_path)
+    init_db(con)
+    con.execute("INSERT INTO hops (variety, name, region, sources, purpose) "
+               "VALUES ('citra', 'Citra', 'United States', 'yakima', NULL)")
+    con.commit(); con.close()
+    mtime_before = os.path.getmtime(aroma_path)
+
+    recipes_path = str(tmp_path / "recipes.db")
+    con = connect(recipes_path)
+    init_recipes_db(con)
+    con.execute("INSERT INTO recipes (uid, source, source_id) VALUES ('mmum-1', 'mmum', '1')")
+    con.execute("INSERT INTO recipe_hops (recipe_uid, seq, hop_name) VALUES ('mmum-1', 1, 'Citra')")
+    con.commit(); con.close()
+
+    csv_path = tmp_path / "hops.csv"
+    csv_path.write_text("name;use;origin;substitutes;aromas;alt_names;alt_names_extra\n",
+                        encoding="utf-8")
+    monkeypatch.setattr(ingest, "_load_yaml_mapping", lambda filename: {})
+    ingest.reconcile_mmum_hop_varieties(recipes_path, aroma_db=aroma_path,
+                                        hops_csv_path=str(csv_path))
+    assert os.path.getmtime(aroma_path) == mtime_before
+
+def test_reconcile_mmum_hop_varieties_raises_on_bad_manual_alias_target(tmp_path, monkeypatch):
+    # Garde-fou explicite : une variety inexistante dans data/mappings/
+    # hop_name_aliases.yaml doit échouer BRUYAMMENT, jamais résoudre
+    # silencieusement vers rien (ou pire, une variety plausible mais fausse).
+    aroma_path = str(tmp_path / "aromahops.db")
+    con = connect(aroma_path)
+    init_db(con)
+    con.commit(); con.close()
+
+    recipes_path = str(tmp_path / "recipes.db")
+    con = connect(recipes_path)
+    init_recipes_db(con)
+    con.commit(); con.close()
+
+    csv_path = tmp_path / "hops.csv"
+    csv_path.write_text("name;use;origin;substitutes;aromas;alt_names;alt_names_extra\n",
+                        encoding="utf-8")
+    monkeypatch.setattr(ingest, "_load_yaml_mapping",
+                        lambda filename: {"some hop": "typo-ed-variety-key"})
+    with pytest.raises(ValueError, match="typo-ed-variety-key"):
+        ingest.reconcile_mmum_hop_varieties(recipes_path, aroma_db=aroma_path,
+                                            hops_csv_path=str(csv_path))
+
+def test_reconcile_mmum_hop_varieties_is_idempotent(tmp_path, monkeypatch):
+    aroma_path = str(tmp_path / "aromahops.db")
+    con = connect(aroma_path)
+    init_db(con)
+    con.execute("INSERT INTO hops (variety, name, region, sources, purpose) "
+               "VALUES ('citra', 'Citra', 'United States', 'yakima', NULL)")
+    con.commit(); con.close()
+
+    recipes_path = str(tmp_path / "recipes.db")
+    con = connect(recipes_path)
+    init_recipes_db(con)
+    con.execute("INSERT INTO recipes (uid, source, source_id) VALUES ('mmum-1', 'mmum', '1')")
+    con.execute("INSERT INTO recipe_hops (recipe_uid, seq, hop_name) VALUES ('mmum-1', 1, 'Citra')")
+    con.commit(); con.close()
+
+    csv_path = tmp_path / "hops.csv"
+    csv_path.write_text("name;use;origin;substitutes;aromas;alt_names;alt_names_extra\n",
+                        encoding="utf-8")
+    monkeypatch.setattr(ingest, "_load_yaml_mapping", lambda filename: {})
+    ingest.reconcile_mmum_hop_varieties(recipes_path, aroma_db=aroma_path, hops_csv_path=str(csv_path))
+    ingest.reconcile_mmum_hop_varieties(recipes_path, aroma_db=aroma_path, hops_csv_path=str(csv_path))
+
+    con = connect(recipes_path)
+    n = con.execute("SELECT COUNT(*) FROM recipe_hops").fetchone()[0]
+    variety = con.execute("SELECT variety FROM recipe_hops WHERE seq=1").fetchone()[0]
+    con.close()
+    assert n == 1
+    assert variety == "citra"

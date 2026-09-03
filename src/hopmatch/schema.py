@@ -271,6 +271,22 @@ SCHEMA += HOP_USAGE_STATS_SCHEMA
 # `addition_type` garde toujours la valeur brute allemande, y compris pour
 # un `Typ` non reconnu -- aucune perte d'information même quand `stage`
 # reste NULL.
+# `product_form` (T92, 2026-09-03, colonne ajoutée après le premier
+# passage T91 -- `ensure_columns` dans `ingest.reconcile_mmum_hop_
+# varieties`, jamais un `init_recipes_db` qui viderait le corpus déjà
+# crawlé) : forme de PRODUIT distincte de la variété de base, ex. "cryo" --
+# un houblon Cryo n'a JAMAIS `variety` = la variété de base correspondante
+# (concentration ~2x mesurée sur les lots YCH, CLAUDE.md) : `variety` reste
+# NULL et `product_form="cryo"` le signale explicitement plutôt que de
+# fusionner silencieusement deux compositions différentes.
+# ⚠ `ingest_mmum` écrit `recipe_hops` par colonnes NOMMÉES (pas
+# `VALUES (?,?,...)` positionnel) pour ne jamais dépendre de l'ordre/de la
+# présence de `product_form` -- mais `INSERT OR REPLACE` reste un
+# remplacement COMPLET de la ligne : un RE-crawl MMuM (`ingest_mmum` relancé
+# après un premier passage déjà réconcilié par T92) remet `variety`/
+# `product_form` à NULL pour les recettes retouchées, comme `variety`
+# l'était déjà avant ce ticket -- `reconcile_mmum_hop_varieties` doit être
+# relancé après tout re-crawl, jamais supposé stable entre deux passages.
 RECIPES_SCHEMA = """
 CREATE TABLE IF NOT EXISTS recipes (
     uid TEXT PRIMARY KEY, source TEXT, source_id TEXT,
@@ -282,7 +298,7 @@ CREATE TABLE IF NOT EXISTS recipes (
 CREATE TABLE IF NOT EXISTS recipe_hops (
     recipe_uid TEXT, seq INTEGER, hop_name TEXT, variety TEXT,
     stage TEXT, addition_type TEXT, time_min REAL,
-    amount_g REAL, alpha REAL,
+    amount_g REAL, alpha REAL, product_form TEXT,
     PRIMARY KEY (recipe_uid, seq)
 );
 """

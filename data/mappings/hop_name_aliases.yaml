@@ -1,0 +1,94 @@
+# T92 (2026-09-03) : cas allemands non couverts par recipe_db/data/hops.csv
+# (beer-analytics, github.com/scheb/beer-analytics) -- complétés à la main
+# après examen du corpus MMuM réel (634 noms bruts distincts, 6395 additions).
+# Clé = forme brute observée dans les recettes, normalisée avant comparaison
+# par `ingest._normalize_recipe_hop_name` (casse, umlauts translittérés
+# ä/ö/ü/ß -> ae/oe/ue/ss, ponctuation/parenthèses/pourcentages/temps
+# ignorés) -- écrire la clé en minuscules avec umlauts est une commodité de
+# lecture, pas une contrainte. Valeur = `hops.variety` RÉEL de notre
+# catalogue (`aromahops.db`) -- vérifié programmatiquement à l'exécution
+# (`ingest.reconcile_mmum_hop_varieties` échoue bruyamment sur une valeur
+# qui ne correspond à aucune variety réelle, jamais une faute de frappe
+# silencieuse).
+#
+# Chaque entrée ci-dessous correspond à un cas où le nom de recette omet le
+# préfixe régional complet ("Hallertauer"/"Hallertau"/"Hall.") que porte le
+# nom officiel dans notre catalogue, ou une variante orthographique/anglicisée
+# sans ambiguïté (une seule variété candidate dans notre base).
+#
+# ⚠ Cas d'ambiguïté RÉELLE tranchés par l'UTILISATEUR (2026-09-03, décision
+# explicite au cas par cas -- pas une devinette de l'assistant) : 3 noms bruts
+# à forte fréquence dans le corpus, chacun avec 2 lignes RÉELLEMENT distinctes
+# dans notre catalogue (crops US vs Europe). `_build_recipe_hop_index`
+# (T92, garde-fou ambiguïté) les avait exclus par défaut, faisant chuter la
+# résolution de 92,9 % à 86,6 % -- décision explicite de les rouvrir :
+# - "Amarillo" (269 additions) -> crop US (`amarillo`, sources barthhaas+
+#   yakima) : cultivar propriétaire Yakima Valley, LE sens par défaut
+#   internationalement ; le crop allemand (`amarillo-brand-ama04`, yakima
+#   seul) est une curiosité de niche qu'un brasseur nommerait explicitement.
+# - "Saaz" (33 additions) -> crop Tchéquie (`saaz`) : houblon noble
+#   traditionnel, LE sens par défaut de "Saaz" partout ; le crop US
+#   (`saaz-saz01`) est une rareté qu'un brasseur nommerait explicitement.
+#   "Saazer"/"Deutscher Saazer" restent volontairement PAS mappés : `Saazer`
+#   est une VARIÉTÉ RÉELLEMENT DISTINCTE dans notre catalogue (pas un
+#   synonyme de "Saaz"), confondre les deux serait deviner.
+# - "Northern Brewer" (78 additions) -> crop Allemagne
+#   (`northern-brewer-nob03`) : moins tranché qu'Amarillo/Saaz (les deux
+#   crops sont commercialement significatifs, aucun n'est une rareté), mais
+#   corpus majoritairement germanophone (D3) -- décision explicite de
+#   pencher vers le crop local plutôt que de perdre 78 lignes.
+#   "Nordbrauer" (traduction allemande littérale) reste volontairement PAS
+#   mappé : seulement 3 occurrences, aucune n'a justifié une vérification
+#   utilisateur dédiée.
+#
+# ⚠ Cas volontairement PAS mappés (ambiguïté RÉELLE dans notre catalogue,
+# jamais soumis à l'utilisateur faute d'un candidat par défaut aussi clair --
+# mieux vaut un nom non résolu qu'une variety fausse) :
+# - "Golding"/"Goldings"/"Styrian Golding(s)"/"US Golding" -- 5 variétés
+#   distinctes de la famille Golding en base (East Kent Goldings, Styrian
+#   Savinjski Golding, Whitbread Goldings Variety, Savinjski Golding,
+#   Whitbread Golding), aucune ne s'appelle juste "Golding", et aucune n'a
+#   un statut de "sens par défaut" aussi net qu'Amarillo/Saaz.
+#
+# Certaines de ces ambiguïtés viennent probablement de VRAIS doublons non
+# fusionnés entre BarthHaas et Yakima (même motif que Dolcita/Perle Germany,
+# T117) -- repérés en curant ce fichier, PAS corrigés ici (fusionner une
+# `variety` est une décision de données qui mérite sa propre revue, hors
+# périmètre d'un ticket de réconciliation de NOMS DE RECETTE) :
+# - "Tettnang Tettnanger" (BarthHaas) vs "Tettnanger" (Yakima), même région.
+# - "Hallertauer Mittelfrüh" (BarthHaas) vs "Hallertauer Mittelfrüher"
+#   (Yakima), même région -- RÉSOLU ci-dessous malgré tout : les deux formes
+#   de recette allemandes ("Mittelfrüh" sans -er / "Mittelfrüher" avec -er)
+#   distinguent explicitement le même suffixe que nos deux lignes, donc ce
+#   n'est pas un jugé mais une correspondance textuelle exacte lettre à
+#   lettre une fois le préfixe régional retiré.
+# - "Styrian Savinjski Golding" (BarthHaas) vs "Savinjski Golding" (Yakima).
+# Voir BACKLOG.md T92 pour le détail complet -- nouveau ticket de nettoyage
+# suggéré (audit doublons Tettnanger/Golding), pas ouvert automatiquement ici.
+hallertauer perle: perle
+hallertauer blanc: hallertau-blanc
+hallertauer cascade: cascade
+hallertau cascade: cascade
+hall cascade: cascade
+cascade deutsch: cascade
+cascade hallertau: cascade
+argentinischer cascade: cascade
+cascade de: cascade
+hallertauer comet: comet
+hallertau comet: comet
+comet fresh hop: comet
+hallertauer herkules: herkules
+hallertauer diamant: diamant
+hersbrucker: hersbrucker-spaet
+hallertauer hersbrucker: hersbrucker-spaet
+hallertau hersbrucker: hersbrucker-spaet
+hall hersbrucker: hersbrucker-spaet
+lubelski: lublin
+mittelfrueh: hallertauer-mittelfrueh
+mittelfrüh: hallertauer-mittelfrueh
+hallertau mittelfrüh: hallertauer-mittelfrueh
+mittelfrüher: hallertauer-mittelfruher
+hallertauer mittelfrüher: hallertauer-mittelfruher
+amarillo: amarillo
+saaz: saaz
+northern brewer: northern-brewer-nob03
