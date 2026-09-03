@@ -1338,7 +1338,7 @@ Elles sont écrites pour qu'aucune décision implicite ne reste à deviner.
   suite verte (488 tests). `_RECENT_UPDATES` mis à jour dans le même commit
   (changement visible utilisateur final).
 
-- [ ] **T127 — Compare Hops : le même barplot, groupé par houblon**
+- [x] **T127 — Compare Hops : le même barplot, groupé par houblon**
   *« Dans compare la même chose mais avec autant de barres que de houblons
   comparés. Ici il faudra une couleur par type de "cuisson" qui soit une
   palette différente que celle des houblons déjà utilisée. »*
@@ -1376,6 +1376,41 @@ Elles sont écrites pour qu'aucune décision implicite ne reste à deviner.
   groupement avec le nom du houblon en libellé d'axe. **Choisir la facette**
   si plus de 3 houblons sont comparés — 11 classes × 5 houblons en barres
   groupées font 55 barres sur un axe, illisible.
+
+  **FAIT (2026-09-03).** `app._compare_addition_timing_section`, ajoutée à
+  Compare Hops juste après Blend Explorer -- réutilise `matching.hop_
+  addition_timing`/`reference.ADDITION_TIMING_BINS`/
+  `_ADDITION_TIMING_MIN_ADDITIONS` (T126) TELS QUELS, aucun binning/seuil
+  redéfini. Rampe séquentielle `_ADDITION_TIMING_RAMP` : 5 ancres de
+  l'utilisateur (prune très sombre -> brique -> terracotta -> ambre ->
+  ambre clair, corrigées sur la luminance des deux bouts comme prévu par le
+  ticket) interpolées linéairement en RGB sur les 11 classes (calcul
+  ponctuel, valeurs figées dans le code -- pas de `alt.Scale(scheme=...)`,
+  aucun schéma Vega-Lite nommé ne correspond à ces ancres précises).
+  Double encodage évité : couleur = type d'ajout (`_ADDITION_TIMING_COLORS`),
+  identité du houblon = libellé d'axe (barres groupées, `xOffset`) ou titre
+  de facette (`alt.Facet`), jamais une seconde couche de couleur.
+
+  **Facette au-delà de 3 houblons, barres groupées en dessous** (seuil
+  exact du ticket) -- `resolve_scale(y="shared")` pour que la hauteur des
+  barres reste comparable entre facettes. Libellés d'axe X masqués DANS les
+  facettes (`labels=False`, 11 classes x jusqu'à 5 facettes aurait été
+  illisible) -- la légende couleur PARTAGÉE (une seule, à droite, jamais
+  répétée par facette) porte déjà les 11 noms de classe dans l'ordre
+  chronologique.
+
+  Vérifié en direct (Chrome, 2 thèmes, les 2 tailles de mise en page --
+  1-3 houblons groupés ET 5 houblons facettés avec Citra/Mosaic/Simcoe/
+  Cascade/Amarillo réels) : rampe lisible dans les deux thèmes, facettes à
+  échelle partagée cohérentes, légende unique lisible. Aucun ajustement
+  d'ancre nécessaire (les 5 couleurs proposées passaient déjà les deux
+  thèmes tel quel).
+
+  4 nouveaux tests AppTest (absence de donnée, houblon manquant/sous le
+  seuil listé avec sa raison exacte -- jamais un houblon au-dessus du
+  seuil listé par erreur --, caption de biais seulement quand un graphique
+  s'affiche réellement, cas groupé <=3 houblons sans erreur), suite verte
+  (492 tests). `_RECENT_UPDATES` mis à jour dans le même commit.
 
 - [ ] **T94 — GUI : combinaisons dans le mode « Beer styles »**
 
