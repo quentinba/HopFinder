@@ -1622,3 +1622,152 @@ def test_reconcile_mmum_hop_varieties_is_idempotent(tmp_path, monkeypatch):
     con.close()
     assert n == 1
     assert variety == "citra"
+
+
+# --------------------------------------------------------------------------- #
+# T93 -- combinaisons de houblons fréquentes (ingest.compute_frequent_hop_combinations)
+# --------------------------------------------------------------------------- #
+def _build_t93_recipes_db(path, recipes):
+    """`recipes` : liste de listes de (variety_or_None, stage) -- une entrée
+    par recette. Construit `recipes.db` minimal (uniquement les colonnes
+    utilisées par compute_frequent_hop_combinations)."""
+    con = connect(path)
+    init_recipes_db(con)
+    for i, hops in enumerate(recipes):
+        uid = f"mmum-{i}"
+        con.execute("INSERT INTO recipes (uid, source, source_id) VALUES (?, 'mmum', ?)",
+                   (uid, str(i)))
+        for seq, (variety, stage) in enumerate(hops, 1):
+            con.execute(
+                "INSERT INTO recipe_hops (recipe_uid, seq, hop_name, variety, stage) "
+                "VALUES (?,?,?,?,?)", (uid, seq, variety or "raw", variety, stage))
+    con.commit(); con.close()
+
+def test_compute_frequent_hop_combinations_writes_support_and_lift(tmp_path):
+    recipes_path = str(tmp_path / "recipes.db")
+    # citra+mosaic ensemble dans 3/5 recettes -- support=3, lift calculable à la main.
+    _build_t93_recipes_db(recipes_path, [
+        [("citra", "boil"), ("mosaic", "dry_hop")],
+        [("citra", "boil"), ("mosaic", "dry_hop")],
+        [("citra", "boil"), ("mosaic", "dry_hop")],
+        [("citra", "boil")],
+        [("mosaic", "boil")],
+    ])
+    aroma_path = str(tmp_path / "aromahops.db")
+    con = connect(aroma_path); init_db(con); con.close()
+
+    ingest.compute_frequent_hop_combinations(recipes_path, aroma_path, min_support=1)
+
+    con = connect(aroma_path)
+    row = con.execute(
+        "SELECT support, total_recipes, lift FROM hop_combinations "
+        "WHERE combo='citra|mosaic' AND size=2 AND stage IS NULL").fetchone()
+    con.close()
+    assert row["support"] == 3
+    assert row["total_recipes"] == 5
+    # P(citra)=4/5, P(mosaic)=4/5, P(both)=3/5 -> lift = 0.6 / (0.8*0.8) = 0.9375
+    assert row["lift"] == pytest.approx(0.6 / (0.8 * 0.8))
+
+def test_compute_frequent_hop_combinations_never_derives_triplet_from_pairs(tmp_path):
+    # citra+mosaic, citra+simcoe, mosaic+simcoe apparaissent chacune 20 fois
+    # en PAIRES, mais JAMAIS les 3 ensemble dans une même recette -- aucun
+    # triplet ne doit apparaître, même si les 3 paires sont chacune au-dessus
+    # du seuil.
+    recipes = (
+        [[("citra", "boil"), ("mosaic", "boil")]] * 20
+        + [[("citra", "boil"), ("simcoe", "boil")]] * 20
+        + [[("mosaic", "boil"), ("simcoe", "boil")]] * 20
+    )
+    recipes_path = str(tmp_path / "recipes.db")
+    _build_t93_recipes_db(recipes_path, recipes)
+    aroma_path = str(tmp_path / "aromahops.db")
+    con = connect(aroma_path); init_db(con); con.close()
+
+    ingest.compute_frequent_hop_combinations(recipes_path, aroma_path, min_support=20)
+
+    con = connect(aroma_path)
+    n_pairs = con.execute(
+        "SELECT COUNT(*) FROM hop_combinations WHERE size=2 AND stage IS NULL").fetchone()[0]
+    n_triplets = con.execute(
+        "SELECT COUNT(*) FROM hop_combinations WHERE size=3 AND stage IS NULL").fetchone()[0]
+    con.close()
+    assert n_pairs == 3
+    assert n_triplets == 0
+
+def test_compute_frequent_hop_combinations_excludes_unresolved_varieties(tmp_path):
+    recipes_path = str(tmp_path / "recipes.db")
+    _build_t93_recipes_db(recipes_path, [
+        [("citra", "boil"), (None, "boil")],  # 2e houblon non résolu (T92)
+    ] * 25)
+    aroma_path = str(tmp_path / "aromahops.db")
+    con = connect(aroma_path); init_db(con); con.close()
+
+    ingest.compute_frequent_hop_combinations(recipes_path, aroma_path, min_support=1)
+
+    con = connect(aroma_path)
+    n = con.execute("SELECT COUNT(*) FROM hop_combinations WHERE size=2").fetchone()[0]
+    con.close()
+    assert n == 0  # une seule variety résolue par recette -> aucune paire possible
+
+def test_compute_frequent_hop_combinations_stage_slice_differs_from_all_stages(tmp_path):
+    recipes_path = str(tmp_path / "recipes.db")
+    _build_t93_recipes_db(recipes_path,
+        [[("citra", "boil"), ("mosaic", "dry_hop")]] * 25  # ensemble seulement en "toutes étapes"
+        + [[("simcoe", "dry_hop"), ("azacca", "dry_hop")]] * 25)  # ensemble aussi en dry_hop
+    aroma_path = str(tmp_path / "aromahops.db")
+    con = connect(aroma_path); init_db(con); con.close()
+
+    ingest.compute_frequent_hop_combinations(recipes_path, aroma_path, min_support=20)
+
+    con = connect(aroma_path)
+    all_stage_combos = {r[0] for r in con.execute(
+        "SELECT combo FROM hop_combinations WHERE size=2 AND stage IS NULL")}
+    dry_hop_combos = {r[0] for r in con.execute(
+        "SELECT combo FROM hop_combinations WHERE size=2 AND stage='dry_hop'")}
+    con.close()
+    assert all_stage_combos == {"citra|mosaic", "azacca|simcoe"}
+    # citra+mosaic n'est PAS ensemble EN dry_hop (citra est en boil) --
+    # seul azacca+simcoe (les deux en dry_hop) doit apparaître dans cette tranche.
+    assert dry_hop_combos == {"azacca|simcoe"}
+
+def test_compute_frequent_hop_combinations_is_a_full_recompute_not_incremental(tmp_path):
+    # Rejoue avec un min_support plus strict -- les lignes de la passe
+    # précédente qui ne passent plus le seuil doivent DISPARAÎTRE (DELETE +
+    # recalcul complet, jamais un état qui s'accumule entre deux appels).
+    recipes_path = str(tmp_path / "recipes.db")
+    _build_t93_recipes_db(recipes_path, [[("citra", "boil"), ("mosaic", "boil")]] * 5)
+    aroma_path = str(tmp_path / "aromahops.db")
+    con = connect(aroma_path); init_db(con); con.close()
+
+    ingest.compute_frequent_hop_combinations(recipes_path, aroma_path, min_support=1)
+    con = connect(aroma_path)
+    assert con.execute("SELECT COUNT(*) FROM hop_combinations").fetchone()[0] > 0
+    con.close()
+
+    ingest.compute_frequent_hop_combinations(recipes_path, aroma_path, min_support=20)
+    con = connect(aroma_path)
+    assert con.execute("SELECT COUNT(*) FROM hop_combinations").fetchone()[0] == 0
+    con.close()
+
+def test_compute_frequent_hop_combinations_creates_table_without_wiping_existing_data(tmp_path):
+    # même garde-fou que les autres tickets d'agrégation (T81/T83/T88...) --
+    # hop_combinations doit pouvoir être créée sur une base déjà peuplée
+    # sans passer par init_db.
+    aroma_path = str(tmp_path / "aromahops.db")
+    con = connect(aroma_path); init_db(con)
+    con.execute("INSERT INTO hops (variety, name, region, sources, purpose) "
+               "VALUES ('citra', 'Citra', 'United States', 'yakima', NULL)")
+    con.execute("DROP TABLE hop_combinations")
+    con.commit(); con.close()
+
+    recipes_path = str(tmp_path / "recipes.db")
+    _build_t93_recipes_db(recipes_path, [[("citra", "boil"), ("mosaic", "boil")]] * 5)
+
+    ingest.compute_frequent_hop_combinations(recipes_path, aroma_path, min_support=1)
+
+    con = connect(aroma_path)
+    hops = [r[0] for r in con.execute("SELECT variety FROM hops")]
+    n = con.execute("SELECT COUNT(*) FROM hop_combinations").fetchone()[0]
+    con.close()
+    assert hops == ["citra"]
+    assert n > 0

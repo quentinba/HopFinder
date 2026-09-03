@@ -1712,3 +1712,63 @@ def test_descriptor_sources_groups_by_variety_and_descriptor(db):
     # (jamais une entrée vide inventée) -- `.get(variety, {}).get(d, set())`
     # côté appelant gère ce cas.
     assert "nonexistent" not in src
+
+
+# --------------------------------------------------------------------------- #
+# T93 -- combinaisons de houblons fréquentes (matching.frequent_hop_combinations,
+# lecture pure de hop_combinations -- table déjà créée par init_db, voir schema.py)
+# --------------------------------------------------------------------------- #
+def _insert_combo(con, combo, size, support, total_recipes, lift, stage=None, style_id=None):
+    con.execute(
+        "INSERT OR REPLACE INTO hop_combinations VALUES (?,?,?,?,?,?,?,?,?)",
+        (combo, size, style_id, stage, support, total_recipes, lift, "test", "2026-09-03"))
+    con.commit()
+
+def test_frequent_combinations_ranks_by_lift_not_raw_support(db):
+    # Citra+Mosaic : très fréquent (support 100) mais lift à peine > 1
+    # (co-occurrence proche du hasard pur, pas d'affinité réelle). East Kent
+    # Goldings+Fuggle : bien plus rare (support 25) mais lift élevé (5.0,
+    # vraie affinité). Le second doit sortir EN TÊTE malgré un support 4x
+    # plus faible -- c'est le comportement nommé par ce test.
+    _insert_combo(db, "citra|mosaic", 2, support=100, total_recipes=1000, lift=1.05)
+    _insert_combo(db, "east-kent-goldings|fuggle", 2, support=25, total_recipes=1000, lift=5.0)
+    result = matching.frequent_hop_combinations(db, size=2, min_support=20)
+    assert [r["varieties"] for r in result] == [
+        ["east-kent-goldings", "fuggle"], ["citra", "mosaic"]]
+    db.execute("DELETE FROM hop_combinations"); db.commit()
+
+def test_frequent_combinations_filters_below_min_support(db):
+    _insert_combo(db, "citra|mosaic", 2, support=15, total_recipes=1000, lift=3.0)
+    result = matching.frequent_hop_combinations(db, size=2, min_support=20)
+    assert result == []
+    db.execute("DELETE FROM hop_combinations"); db.commit()
+
+def test_frequent_combinations_filters_by_size(db):
+    _insert_combo(db, "citra|mosaic", 2, support=30, total_recipes=1000, lift=2.0)
+    _insert_combo(db, "citra|mosaic|simcoe", 3, support=25, total_recipes=1000, lift=2.5)
+    assert len(matching.frequent_hop_combinations(db, size=2, min_support=20)) == 1
+    assert len(matching.frequent_hop_combinations(db, size=3, min_support=20)) == 1
+    assert matching.frequent_hop_combinations(db, size=4, min_support=20) == []
+    db.execute("DELETE FROM hop_combinations"); db.commit()
+
+def test_frequent_combinations_filters_by_stage():
+    # base isolée (pas la fixture module-scope db) pour ne pas dépendre de
+    # son état après les tests précédents.
+    path = os.path.join(tempfile.mkdtemp(), "t93.db")
+    con = connect(path); init_db(con)
+    _insert_combo(con, "citra|mosaic", 2, support=30, total_recipes=1000, lift=2.0, stage=None)
+    _insert_combo(con, "citra|mosaic", 2, support=22, total_recipes=400, lift=1.6, stage="dry_hop")
+    all_stages = matching.frequent_hop_combinations(con, size=2, stage=None, min_support=20)
+    dry_hop_only = matching.frequent_hop_combinations(con, size=2, stage="dry_hop", min_support=20)
+    assert all_stages[0]["support"] == 30
+    assert dry_hop_only[0]["support"] == 22
+    con.close()
+
+def test_frequent_combinations_style_id_always_returns_empty_for_now():
+    # T92/T93 : recipes.style_id n'est peuplé par aucun ticket actuel --
+    # jamais un filtre qui ferait semblant de marcher.
+    path = os.path.join(tempfile.mkdtemp(), "t93b.db")
+    con = connect(path); init_db(con)
+    _insert_combo(con, "citra|mosaic", 2, support=30, total_recipes=1000, lift=2.0)
+    assert matching.frequent_hop_combinations(con, size=2, style_id="21B") == []
+    con.close()
