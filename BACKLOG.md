@@ -1133,7 +1133,7 @@ Elles sont écrites pour qu'aucune décision implicite ne reste à deviner.
   du ticket, pilote bout-en-bout, idempotence, garde-fou alias invalide,
   jamais d'écriture dans aromahops.db), suite verte (445 tests).
 
-- [ ] **T93 — Combinaisons fréquentes : paires, triplets, quadruplets**
+- [x] **T93 — Combinaisons fréquentes : paires, triplets, quadruplets**
 
   `matching.frequent_hop_combinations(con, style_id=None, size=2, min_support=…)`.
 
@@ -1171,6 +1171,59 @@ Elles sont écrites pour qu'aucune décision implicite ne reste à deviner.
   calculer les combinaisons **par stade** (les 3 houblons qu'on retrouve
   ensemble *en dry hop*). Le schedule MMuM le permet, et **ni beer-analytics
   ni le hop-finder russe ne le calculent** — c'est l'apport original.
+
+  **FAIT (2026-09-03).** `schema.HOP_COMBINATIONS_SCHEMA` (nouvelle table
+  `hop_combinations` dans `aromahops.db`, `combo` = varietys triées jointes
+  par "|", jamais des colonnes variety_a/b/c/d qui laisseraient des NULL
+  selon `size`). `ingest.compute_frequent_hop_combinations` (lit `recipes.
+  db` réconciliée par T92, écrit dans `aromahops.db` -- D4, jamais
+  l'inverse) : itemset PAR RECETTE = ensemble dédupliqué des `variety` non
+  NULL, `itertools.combinations` directement sur cet ensemble (jamais un
+  triplet synthétisé depuis 3 paires -- une combinaison n'existe dans le
+  résultat QUE si elle apparaît telle quelle dans au moins une recette).
+  5 tranches calculées par run : `stage=None` (toutes étapes confondues,
+  vue principale) + une par valeur réelle de `recipe_hops.stage`
+  (`first_wort`/`boil`/`whirlpool`/`dry_hop`, la "variante" du ticket).
+  Table intégralement DÉRIVÉE -- `DELETE` + recalcul complet à chaque
+  appel, jamais un état qui s'accumule entre deux runs à `min_support`
+  différent (testé explicitement). `matching.frequent_hop_combinations`
+  (lecture pure, triée sur `lift DESC` par défaut, `support`/`total_recipes`
+  affichés à côté) -- CLI `hopmatch compute-hop-combinations`.
+
+  `style_id` structurellement câblé (colonne + paramètre) mais renvoie
+  TOUJOURS une liste vide si fourni : `recipes.style_id` n'est peuplé par
+  aucun ticket actuel (T91 l'a explicitement laissé hors périmètre --
+  vérifié en direct : 0/1844 recettes ont un `style_id`, seul `style_raw`
+  en texte libre allemand est disponible). Une reconciliation `style_raw`
+  → BJCP `style_id` couvrirait 718/1844 recettes en réutilisant tel quel
+  `data/mappings/beer_style_aliases.yaml` (déjà utilisé par beer-analytics,
+  T84/T85) mais laisserait 61 % non couverts (noms de style allemands sans
+  équivalent dans ce fichier orienté anglais) -- **délibérément PAS fait
+  dans ce ticket** (hors périmètre du texte du ticket, qui ne demande que
+  `stage=` comme variante), jamais un filtre qui ferait semblant de
+  marcher : `matching.frequent_hop_combinations` documente l'état actuel
+  explicitement plutôt que de le cacher. Ticket de suivi possible si le
+  besoin se confirme.
+
+  **Résultat réel sur le corpus complet (2026-09-03), `min_support=20` par
+  défaut** : 28 combinaisons écrites, toutes de taille 2 (aucun triplet/
+  quadruplet ne franchit le seuil sur 1844 recettes -- attendu, cf.
+  avertissement du ticket). Le tri par lift fonctionne comme prévu :
+  East Kent Golding+Fuggles (support 38, lift **5,3**) et Amarillo+
+  Centennial (support 27, lift **4,7**) dominent Citra+Mosaic (support 38
+  identique, lift seulement **4,7** -- pas la même valeur, cf. données
+  réelles) malgré une popularité individuelle bien plus grande de ce
+  dernier couple -- exactement le comportement anti-myrcène-ubiquitaire
+  visé. Par stade : `dry_hop` (412 recettes concernées) isole Citra+Mosaic
+  (support 22, lift 1,6) et Amarillo+Citra (support 24, lift 1,4) comme
+  seules paires franchissant le seuil spécifiquement en dry hop ;
+  `whirlpool`/`first_wort` n'ont aucune paire à support suffisant sur ce
+  corpus.
+
+  13 nouveaux tests (5 `matching.frequent_hop_combinations` dont le test
+  nommé obligatoire du ticket, 7 `ingest.compute_frequent_hop_combinations`
+  incluant le garde-fou "jamais de triplet dérivé de 3 paires" et la
+  non-accumulation entre deux runs), suite verte (456 tests).
 
 - [ ] **T126 — Browse : barplot « comment ce houblon est réellement ajouté »**
   *Demande utilisateur (2026-08-27) : « un simple barplot indiquant le %

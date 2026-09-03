@@ -1782,3 +1782,41 @@ def similar_hops(con, variety: str, use_molecular: bool = True, use_aroma_wheel:
         ranked.append(entry)
     ranked.sort(key=lambda r: (-r["similarity"], r["variety"]))
     return ranked[:top]
+
+
+def frequent_hop_combinations(con, style_id: str | None = None, size: int = 2,
+                              stage: str | None = None, min_support: int = 20) -> list[dict]:
+    """T93 : combinaisons de houblons RÉELLEMENT co-observées ensemble dans
+    une même recette (corpus MMuM, `recipes.db` -- table `hop_combinations`,
+    pré-calculée par `ingest.compute_frequent_hop_combinations`, jamais
+    recalculée à la volée ici : lecture pure de `con` = `aromahops.db`,
+    D4 -- `recipes.db` n'existe même pas dans l'environnement déployé).
+
+    `stage` (optionnel) : `None` = toutes étapes confondues (vue par
+    défaut) ; `"boil"`/`"whirlpool"`/`"first_wort"`/`"dry_hop"` pour les
+    combinaisons observées À CE STADE précis (ex. les houblons qu'on
+    retrouve ensemble EN DRY HOP -- apport original signalé par le ticket,
+    ni beer-analytics ni le hop-finder russe ne le calculent).
+
+    `style_id` (optionnel) : structurellement câblé, mais renvoie TOUJOURS
+    une liste vide pour l'instant si fourni -- `recipes.style_id` n'est
+    peuplé par aucun ticket actuel (voir `schema.HOP_COMBINATIONS_SCHEMA`),
+    jamais un filtre qui ferait semblant de marcher.
+
+    **Trié sur le LIFT décroissant PAR DÉFAUT, pas le support brut** (ticket
+    explicite : Citra+Mosaic dominerait partout par pure fréquence, pas
+    parce qu'ils s'accordent réellement -- même logique que la pondération
+    TF-IDF de `molecular_scores` contre le myrcène ubiquitaire). `support`
+    reste dans chaque entrée pour affichage à côté, jamais utilisé seul pour
+    trier. Sous `min_support` recettes (défaut 20, aligné sur le seuil
+    `HOP_MIN_RECIPES` de beer-analytics) -> absent du résultat, jamais une
+    combinaison à support 2 qui donnerait l'illusion d'un signal réel."""
+    if style_id is not None:
+        return []
+    rows = con.execute(
+        "SELECT combo, support, total_recipes, lift FROM hop_combinations "
+        "WHERE size=? AND style_id IS NULL AND stage IS ? AND support>=? "
+        "ORDER BY lift DESC, support DESC, combo ASC",
+        (size, stage, min_support))
+    return [{"varieties": r["combo"].split("|"), "support": r["support"],
+             "total_recipes": r["total_recipes"], "lift": r["lift"]} for r in rows]

@@ -253,6 +253,47 @@ CREATE TABLE hop_usage_stats (
 """
 SCHEMA += HOP_USAGE_STATS_SCHEMA
 
+# T93 (épique C, 2026-09-03) : combinaisons de houblons RÉELLEMENT observées
+# ensemble dans une même recette (`recipes.db`, MMuM, T91/T92) -- table
+# DÉRIVÉE, calculée par `ingest.compute_frequent_hop_combinations` (lit
+# `recipes.db`, écrit ici dans `aromahops.db`, jamais l'inverse -- D4).
+# `combo` : varietys membres TRIÉES alphabétiquement puis jointes par "|"
+# (ex. "citra|mosaic|simcoe") -- forme canonique unique par ensemble, pas de
+# colonnes variety_a/b/c/d qui laisseraient des NULL selon `size`.
+# `size` : 2, 3 ou 4 -- JAMAIS dérivé d'un autre `size` (un triplet n'est
+# JAMAIS reconstruit depuis 3 paires, uniquement compté quand les 3 houblons
+# apparaissent ENSEMBLE dans une même recette, voir BACKLOG.md T93).
+# `style_id` : BJCP style_id, NULL = toutes recettes confondues -- colonne
+# PRÉSENTE mais TOUJOURS NULL pour l'instant (2026-09-03) : `recipes.
+# style_id` n'est peuplé par AUCUN ticket actuel (T91 l'a explicitement
+# laissé hors périmètre), donc un filtre par style ne peut structurellement
+# rien retourner tant qu'une réconciliation style_raw -> style_id n'existe
+# pas -- colonne gardée pour ne pas re-migrer le schéma le jour où elle
+# arrive, jamais un filtre qui ferait semblant de marcher.
+# `stage` : 'boil'/'whirlpool'/'first_wort'/'dry_hop' (vocabulaire
+# `recipe_hops.stage`, T91) ou NULL = toutes étapes confondues (vue
+# PRINCIPALE du ticket). Apport ORIGINAL signalé par le ticket : "les 3
+# houblons qu'on retrouve ensemble EN DRY HOP" -- ni beer-analytics ni le
+# hop-finder russe ne le calculent.
+# `support` : nombre de recettes contenant ce combo (dans la tranche
+# style_id/stage considérée) ; `total_recipes` : dénominateur RÉEL de cette
+# tranche (recettes avec au moins un houblon résolu) -- jamais un nombre
+# global fixe réutilisé entre tranches de tailles différentes.
+# `lift` = P(combo) / product(P(chaque membre seul)) -- MÊME logique que la
+# pondération TF-IDF de `matching.molecular_scores` (le myrcène ubiquitaire
+# ne doit pas dominer par simple fréquence) ; trié dessus par défaut côté
+# `matching.frequent_hop_combinations`, JAMAIS sur le support brut seul
+# (Citra+Mosaic dominerait partout, pas parce qu'ils s'accordent).
+HOP_COMBINATIONS_SCHEMA = """
+CREATE TABLE hop_combinations (
+    combo TEXT, size INTEGER, style_id TEXT, stage TEXT,
+    support INTEGER, total_recipes INTEGER, lift REAL,
+    source TEXT, computed_at TEXT,
+    PRIMARY KEY (combo, size, style_id, stage)
+);
+"""
+SCHEMA += HOP_COMBINATIONS_SCHEMA
+
 # T91 (2026-08-30, D4 tranchée) : corpus BRUT de recettes (MMuM, puis
 # Brewfather/DIY Dog) -- fichier `recipes.db` SÉPARÉ d'`aromahops.db`,
 # jamais référencé par `app._fetch_remote_db`, jamais dans `SCHEMA`/
@@ -343,7 +384,8 @@ def init_db(con: sqlite3.Connection) -> None:
         "DROP TABLE IF EXISTS style_recipe_stats;"
         "DROP TABLE IF EXISTS style_hop_usage;"
         "DROP TABLE IF EXISTS style_hop_pairings;"
-        "DROP TABLE IF EXISTS hop_usage_stats;")
+        "DROP TABLE IF EXISTS hop_usage_stats;"
+        "DROP TABLE IF EXISTS hop_combinations;")
     con.executescript(SCHEMA)
 
 

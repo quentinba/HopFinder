@@ -7,6 +7,9 @@ RÉEL (tourne ici) :
   - reconcile_mmum_hop_varieties : résout recipe_hops.hop_name -> variety dans recipes.db
                            (réseau pour le dictionnaire d'alias beer-analytics, cache-first ;
                            aromahops.db lue seule, jamais modifiée)
+  - compute_frequent_hop_combinations : combinaisons de houblons réellement co-observées
+                           en recette (lit recipes.db, écrit hop_combinations dans
+                           aromahops.db -- pas de réseau)
   - build_from_fixtures : reconstruit la base depuis data/fixtures/{barthhaas,yakima}
   - seed_reference       : charge molécules + amorce note→molécule/descripteur
   - crawl_barthhaas      : moissonne barthhaas.com (réseau ; requests+bs4)
@@ -2494,3 +2497,107 @@ def reconcile_mmum_hop_varieties(recipes_db: str = "recipes.db", aroma_db: str =
          f"de base), {n_unresolved} non résolues.")
     top = sorted(unresolved_counts.items(), key=lambda kv: -kv[1])[:15]
     print(f"  noms non résolus les plus fréquents : {top}")
+
+
+# --------------------------------------------------------------------------- #
+# Combinaisons de houblons fréquentes (T93, épique C)
+# --------------------------------------------------------------------------- #
+_RECIPE_STAGES = ("first_wort", "boil", "whirlpool", "dry_hop")
+
+
+def compute_frequent_hop_combinations(recipes_db: str = "recipes.db", out_db: str = "aromahops.db",
+                                      sizes: tuple[int, ...] = (2, 3, 4),
+                                      min_support: int = 20) -> None:
+    """T93 : combinaisons de houblons RÉELLEMENT co-observées dans une même
+    recette -- lit `recipe_hops` (déjà réconciliée, T92 ; `variety IS NULL`
+    exclues) dans `recipes_db`, écrit `hop_combinations` dans `out_db`
+    (D4 : jamais l'inverse, `aromahops.db` reste la seule base servie par
+    l'app). Table intégralement DÉRIVÉE -- `DELETE FROM hop_combinations`
+    puis recalcul complet à chaque appel, jamais une mise à jour partielle
+    qui dépendrait de l'état d'un appel précédent.
+
+    **Une recette = un ENSEMBLE de varietys distinctes** (dédupliqué -- un
+    Citra en boil ET en dry hop compte une fois dans la tranche `stage=
+    None`, voir ci-dessous pour les tranches par stade).
+
+    **5 tranches calculées** : `stage=None` (toutes étapes confondues,
+    tranche PRINCIPALE du ticket) + une par valeur RÉELLE de
+    `recipe_hops.stage` (`_RECIPE_STAGES` -- "les 3 houblons qu'on retrouve
+    ensemble EN DRY HOP", apport signalé par le ticket comme absent de
+    beer-analytics et du hop-finder russe). Pour une tranche par stade,
+    l'ensemble d'une recette ne contient QUE les varietys utilisées à CE
+    stade précis -- une recette sans aucune addition à ce stade n'y
+    contribue simplement pas (ni au numérateur ni au dénominateur).
+
+    **Algorithme** : énumération DIRECTE des sous-ensembles de taille
+    `size` RÉELLEMENT présents dans chaque itemset de recette
+    (`itertools.combinations` sur l'ensemble trié de la recette) --
+    **jamais un triplet dérivé de 3 paires** (garde-fou explicite du
+    ticket) : un triplet n'existe dans le résultat QUE s'il apparaît tel
+    quel dans au moins `min_support` recettes.
+
+    **`lift`** = P(combo) / produit(P(chaque membre seul)), calculé sur le
+    `total_recipes` RÉEL de la tranche (dénominateur propre à chaque
+    tranche stade/taille, jamais un total global réutilisé partout) -- même
+    logique que la pondération TF-IDF de `matching.molecular_scores` (le
+    houblon ubiquitaire ne doit pas dominer par simple fréquence brute).
+
+    `style_id` toujours NULL dans cette passe (voir `schema.
+    HOP_COMBINATIONS_SCHEMA` : `recipes.style_id` n'est peuplé par aucun
+    ticket actuel)."""
+    import itertools
+    from collections import Counter
+    from datetime import datetime, timezone
+
+    from .schema import connect, ensure_table, HOP_COMBINATIONS_SCHEMA
+
+    recipes_con = connect(recipes_db)
+    rows = recipes_con.execute(
+        "SELECT recipe_uid, variety, stage FROM recipe_hops WHERE variety IS NOT NULL").fetchall()
+    recipes_con.close()
+
+    slices: dict[str | None, dict[str, set[str]]] = {None: {}}
+    for stage in _RECIPE_STAGES:
+        slices[stage] = {}
+    for recipe_uid, variety, stage in rows:
+        slices[None].setdefault(recipe_uid, set()).add(variety)
+        if stage in _RECIPE_STAGES:
+            slices[stage].setdefault(recipe_uid, set()).add(variety)
+
+    con = connect(out_db)
+    ensure_table(con, "hop_combinations", HOP_COMBINATIONS_SCHEMA)
+    con.execute("DELETE FROM hop_combinations")
+    computed_at = datetime.now(timezone.utc).isoformat()
+
+    n_rows = 0
+    for stage, itemsets_by_recipe in slices.items():
+        itemsets = list(itemsets_by_recipe.values())
+        total_recipes = len(itemsets)
+        if total_recipes == 0:
+            continue
+        singleton_counts: Counter = Counter()
+        for items in itemsets:
+            singleton_counts.update(items)
+        for size in sizes:
+            combo_counts: Counter = Counter()
+            for items in itemsets:
+                if len(items) < size:
+                    continue
+                for combo in itertools.combinations(sorted(items), size):
+                    combo_counts[combo] += 1
+            for combo, support in combo_counts.items():
+                if support < min_support:
+                    continue
+                p_joint = support / total_recipes
+                p_product = 1.0
+                for v in combo:
+                    p_product *= singleton_counts[v] / total_recipes
+                lift = p_joint / p_product
+                con.execute(
+                    "INSERT OR REPLACE INTO hop_combinations VALUES (?,?,?,?,?,?,?,?,?)",
+                    ("|".join(combo), size, None, stage, support, total_recipes, lift,
+                     "mmum", computed_at))
+                n_rows += 1
+    con.commit(); con.close()
+    print(f"T93 : {n_rows} combinaisons écrites (min_support={min_support}, tailles={sizes}, "
+         f"{len(slices)} tranches stade dont 'toutes étapes confondues')")
