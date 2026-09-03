@@ -239,6 +239,13 @@ _TOOL_SUMMARY_BY_MODE = {t["mode"]: t for t in _TOOL_SUMMARIES}
 # un `git log` en direct exigerait aussi que `.git` soit présent dans le
 # conteneur déployé, ce qui n'est pas garanti.
 _RECENT_UPDATES = [
+    ("2026-09-03", "Compare Hops gained the same \"Hop addition timing\" "
+                   "breakdown as Browse, grouped by hop: bars side by side "
+                   "for up to 3 hops, small multiples (one mini-chart per "
+                   "hop, same scale) beyond that -- colored by a dedicated "
+                   "chronological ramp (dark plum to light amber) so it's "
+                   "never confused with the hop-identity colors used "
+                   "elsewhere on this page."),
     ("2026-09-03", "Browse a hop now has a \"Hop addition timing\" card, "
                    "right after Recommended usage: a real breakdown of "
                    "when this hop is actually added in published recipes "
@@ -3623,6 +3630,30 @@ def _recommended_usage_panel(con, hops: dict, comp: dict, variety: str) -> None:
 
 _ADDITION_TIMING_MIN_ADDITIONS = 20
 
+# T127 (2026-09-03) : rampe séquentielle pour les 11 classes de
+# `reference.ADDITION_TIMING_BINS`, DISTINCTE de `_COMPARE_PALETTE`
+# (couleurs discrètes par houblon) et de `_CATEGORY_CLASS_COLORS`
+# (catégories chimiques) -- ticket explicite : "ne PAS réutiliser". Ici la
+# couleur encode un axe ORDONNÉ (chronologique), une rampe continue le dit,
+# des swatches discrets non ordonnés induiraient en erreur.
+# Proposition de départ de l'utilisateur : « du noir (60 min) au jaune (DH)
+# en passant par le rouge » -- corrigée sur la luminance des deux bouts (le
+# noir pur disparaît en thème sombre, le jaune pur disparaît en thème
+# clair, règle du projet : jamais une couleur non testée dans les deux
+# thèmes) en gardant la progression chaud/sombre -> chaud/clair : prune
+# très sombre -> brique -> terracotta vif -> ambre -> ambre clair.
+# Interpolation RGB linéaire entre les 5 ancres, 11 valeurs calculées une
+# fois (pas un `alt.Scale(scheme=...)` -- aucun schéma nommé Vega-Lite ne
+# correspond à ces ancres précises). Ancres vérifiées en direct dans les
+# deux thèmes (Chrome) avant intégration -- voir BACKLOG.md T127 si les
+# ancres doivent être réajustées un jour : ajuster les ANCRES, jamais la
+# logique d'interpolation.
+_ADDITION_TIMING_RAMP = [
+    "#2b1b2e", "#4c232c", "#6d2b2b", "#8b362b", "#a6432c", "#c1502e",
+    "#cd672d", "#da7e2c", "#e29332", "#e5a63f", "#e8b84b",
+]
+_ADDITION_TIMING_COLORS = dict(zip(reference.ADDITION_TIMING_BINS, _ADDITION_TIMING_RAMP))
+
 
 def _addition_timing_panel(con, hops: dict, variety: str) -> None:
     """T126 : "comment ce houblon est réellement ajouté" -- répartition
@@ -5305,6 +5336,87 @@ def _compare(con):
             if missing_blend:
                 st.caption(":material/info: No survivable-compound data for: " +
                           ", ".join(missing_blend))
+
+    # T127 : "Hop addition timing", groupé par houblon -- réutilise l'agrégat
+    # T126 tel quel (matching.hop_addition_timing), aucun seuil/binning
+    # redéfini ici.
+    with _panel():
+        st.subheader("Hop addition timing")
+        _compare_addition_timing_section(con, hops, selected)
+
+
+def _compare_addition_timing_section(con, hops: dict, selected: list[str]) -> None:
+    """T127 : barplot "comment ce houblon est réellement ajouté" (T126),
+    GROUPÉ PAR HOUBLON pour Compare Hops -- même agrégat/binning/seuil que
+    Browse (`matching.hop_addition_timing`, `reference.ADDITION_TIMING_
+    BINS`, `_ADDITION_TIMING_MIN_ADDITIONS`), jamais redéfinis ici (ticket
+    explicite : "Dépend de T126... les réutiliser, ne pas les redéfinir").
+
+    **Double encodage évité (piège du ticket)** : la couleur encode le TYPE
+    D'AJOUT (`_ADDITION_TIMING_COLORS`, rampe séquentielle chronologique --
+    PAS `_COMPARE_PALETTE`/`_CATEGORY_CLASS_COLORS`, ticket explicite),
+    donc n'est plus disponible pour distinguer les houblons entre eux --
+    l'identité du houblon passe par l'AXE (nom en libellé de facette ou de
+    groupe), jamais par une seconde couche de couleur.
+
+    **Facette au-delà de 3 houblons** (ticket explicite, chiffré : "11
+    classes x 5 houblons en barres groupées font 55 barres sur un axe,
+    illisible") -- un mini-barplot par houblon, même échelle Y PARTAGÉE
+    (`resolve_scale(y="shared")`, sinon la hauteur des barres entre houblons
+    ne serait pas comparable visuellement). **Barres groupées** (houblon en
+    axe X, sous-groupe `xOffset` = classe) pour 1 à 3 houblons -- forme
+    "compacte" demandée en premier par le ticket, reste lisible à ce
+    nombre."""
+    timing_by_hop: dict[str, dict] = {}
+    missing = []
+    for v in selected:
+        t = matching.hop_addition_timing(con, v)
+        if t is None:
+            missing.append(hops[v]["name"])
+        elif t["total_additions"] < _ADDITION_TIMING_MIN_ADDITIONS:
+            missing.append(f"{hops[v]['name']} ({t['total_additions']} additions, under the "
+                          f"{_ADDITION_TIMING_MIN_ADDITIONS}-addition threshold)")
+        else:
+            timing_by_hop[hops[v]["name"]] = t
+
+    if not timing_by_hop:
+        st.write("No hop addition timing data for the selected hops.")
+        if missing:
+            st.caption(":material/info: " + "; ".join(missing))
+        return
+
+    rows = [{"Hop": hop_name, "Class": b["bin"], "Share": b["share"], "Count": b["count"]}
+           for hop_name, t in timing_by_hop.items() for b in t["bins"]]
+    color_enc = alt.Color("Class:N", title="Addition type", legend=alt.Legend(columns=1),
+                          scale=alt.Scale(domain=reference.ADDITION_TIMING_BINS,
+                                         range=_ADDITION_TIMING_RAMP))
+    tooltip = ["Hop:N", "Class:N", alt.Tooltip("Share:Q", format=".1%"), "Count:Q"]
+
+    if len(timing_by_hop) > 3:
+        chart = alt.Chart(alt.Data(values=rows)).mark_bar().encode(
+            x=alt.X("Class:N", sort=reference.ADDITION_TIMING_BINS, title=None,
+                   axis=alt.Axis(labelAngle=_COMPARE_LABEL_ANGLE, labelOverlap=False, labels=False)),
+            y=alt.Y("Share:Q", title="Share of additions", axis=alt.Axis(format="%")),
+            color=color_enc,
+            tooltip=tooltip,
+        ).properties(width=200, height=240).facet(
+            facet=alt.Facet("Hop:N", title=None), columns=3
+        ).resolve_scale(y="shared")
+    else:
+        chart = alt.Chart(alt.Data(values=rows)).mark_bar().encode(
+            x=alt.X("Hop:N", title=None),
+            xOffset=alt.XOffset("Class:N", sort=reference.ADDITION_TIMING_BINS),
+            y=alt.Y("Share:Q", title="Share of additions", axis=alt.Axis(format="%")),
+            color=color_enc,
+            tooltip=tooltip,
+        ).properties(width=_COMPARE_CHART_WIDTH, height=380)
+    st.altair_chart(chart, width="content")
+
+    if missing:
+        st.caption(":material/info: No addition-timing data: " + "; ".join(missing))
+    st.caption(":material/info: This corpus is German-language (maischemalzundmehr.de) -- "
+              "noble European hops are over-represented, and modern US hops are seen mostly "
+              "in IPA-style recipes. This usage profile isn't universal.")
 
 
 # --------------------------------------------------------------------------- #

@@ -1528,3 +1528,77 @@ def test_addition_timing_panel_renders_chart_above_threshold(toy_cwd):
     assert not any("Fewer than 20 additions" in c.value for c in at.caption)
     assert any("German-language" in c.value for c in at.caption)
     assert len([n for n in at.main if isinstance(n, UnknownElement)]) >= 1
+
+# --------------------------------------------------------------------------- #
+# T127 -- "Hop addition timing" grouped by hop (Compare Hops)
+# --------------------------------------------------------------------------- #
+def test_compare_addition_timing_honest_when_no_selected_hop_has_data(toy_cwd):
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("compare").run()
+    at.multiselect[0].select("Hopa").run()
+    assert not at.exception
+    assert any(s.value == "Hop addition timing" for s in at.subheader)
+    assert any("No hop addition timing data for the selected hops" in m.value
+              for m in at.markdown)
+
+def test_compare_addition_timing_flags_missing_and_below_threshold_hops(toy_cwd):
+    # hopa : 25 additions (au-dessus du seuil) -- contribue au graphique.
+    # hopb : 5 additions (sous le seuil de 20, T126) -- listé comme manquant
+    # avec la raison, jamais silencieusement inclus.
+    # hopc : aucune ligne du tout -- listé comme manquant, sans effectif.
+    from streamlit.testing.v1.element_tree import UnknownElement
+    con = connect(os.path.join(os.getcwd(), "aromahops.db"))
+    con.executemany(
+        "INSERT INTO hop_addition_timing VALUES (?,?,?,?,?,?,?)",
+        [("hopa", "First wort", 5, 25, 20, "test", "2026-09-03"),
+         ("hopa", "Dry hop", 20, 25, 20, "test", "2026-09-03"),
+         ("hopb", "Dry hop", 5, 5, 4, "test", "2026-09-03")])
+    con.commit(); con.close()
+
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("compare").run()
+    at.multiselect[0].select("Hopa").select("Hopb").select("Hopc").run()
+    assert not at.exception
+    caption = next(c.value for c in at.caption if "No addition-timing data:" in c.value)
+    assert "Hopb (5 additions, under the 20-addition threshold)" in caption
+    assert "Hopc" in caption
+    assert "Hopa" not in caption  # hopa a bien assez de données, jamais listé comme manquant
+    assert len([n for n in at.main if isinstance(n, UnknownElement)]) >= 1
+
+def test_compare_addition_timing_bias_caption_only_when_chart_renders(toy_cwd):
+    con = connect(os.path.join(os.getcwd(), "aromahops.db"))
+    con.executemany(
+        "INSERT INTO hop_addition_timing VALUES (?,?,?,?,?,?,?)",
+        [("hopa", "First wort", 5, 25, 20, "test", "2026-09-03"),
+         ("hopa", "Dry hop", 20, 25, 20, "test", "2026-09-03")])
+    con.commit(); con.close()
+
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("compare").run()
+    at.multiselect[0].select("Hopa").run()
+    assert not at.exception
+    assert any("German-language" in c.value for c in at.caption)
+
+def test_compare_addition_timing_uses_grouped_bars_up_to_three_hops(toy_cwd):
+    # Sous le seuil de facettage (>3 houblons, T127) -- pas de crash, un
+    # graphique unique groupé par houblon (vérifié indirectement : pas de
+    # sous-titre "Hopa"/"Hopb"/"Hopc" par facette côté st.markdown/subheader,
+    # Altair rend son propre libellé de facette hors de portée d'AppTest).
+    con = connect(os.path.join(os.getcwd(), "aromahops.db"))
+    con.executemany(
+        "INSERT INTO hop_addition_timing VALUES (?,?,?,?,?,?,?)",
+        [("hopa", "First wort", 5, 25, 20, "test", "2026-09-03"),
+         ("hopa", "Dry hop", 20, 25, 20, "test", "2026-09-03"),
+         ("hopb", "Boil 60+ min", 25, 25, 20, "test", "2026-09-03"),
+         ("hopc", "Whirlpool", 25, 25, 20, "test", "2026-09-03")])
+    con.commit(); con.close()
+
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("compare").run()
+    at.multiselect[0].select("Hopa").select("Hopb").select("Hopc").run()
+    assert not at.exception
+    assert not any("No addition-timing data:" in c.value for c in at.caption)
