@@ -220,6 +220,8 @@ def test_merge_hop_varieties_migrates_beer_analytics_tables(tmp_path):
                 "test", "2026"))
     con.execute("INSERT INTO style_hop_pairings VALUES (?,?,?,?,?,?,?,?,?,?)",
                ("hazy-ipa", "21A", "Dolcita", "dolcita", 0.1, 0.2, 0.3, 0.2, "test", "2026"))
+    con.execute("INSERT INTO hop_typical_styles VALUES (?,?,?,?,?,?,?)",
+               ("dolcita", "Dolcita", "Hazy IPA", "21A", 0.4, "test", "2026"))
     con.commit()
     ingest.merge_hop_varieties(con, keep="dolcita-hops", drop="dolcita")
     assert con.execute("SELECT 1 FROM hops WHERE variety='dolcita'").fetchone() is None
@@ -239,6 +241,10 @@ def test_merge_hop_varieties_migrates_beer_analytics_tables(tmp_path):
     ).fetchone()["variety"] == "dolcita-hops"
     assert con.execute(
         "SELECT variety FROM style_hop_pairings WHERE hop_name='Dolcita'"
+    ).fetchone()["variety"] == "dolcita-hops"
+    # T131 : hop_typical_styles suit le même schéma UPDATE.
+    assert con.execute(
+        "SELECT variety FROM hop_typical_styles WHERE hop_name='Dolcita'"
     ).fetchone()["variety"] == "dolcita-hops"
 
 def test_merge_hop_varieties_idempotent_when_already_merged(tmp_path):
@@ -1263,6 +1269,96 @@ def test_ingest_hop_usage_stats_creates_table_without_wiping_existing_data(tmp_p
     con.close()
     assert hops == ["citra"]
     assert n == 5  # 5 use_type
+
+
+# --------------------------------------------------------------------------- #
+# T131 -- beer-analytics.com (hop_typical_styles, relation inverse de T86)
+# --------------------------------------------------------------------------- #
+_BA_HOP_PAGE_WITH_TYPICAL_STYLES_FIXTURE = (
+    "<html><body><h1>Citra Hops</h1>"
+    '<div data-chart="/hops/dual-purpose/citra/charts/usage-types.json"></div>'
+    '<div data-chart="/hops/dual-purpose/citra/charts/typical-styles-relative.json"></div>'
+    "</body></html>")
+
+# gabarit trimmé d'un vrai typical-styles-relative.json (Citra, 2026-08-28,
+# voir BACKLOG.md T131 -- "Hazy IPA" la plus haute part, vérifié en direct).
+_BA_TYPICAL_STYLES_FIXTURE = json.dumps({
+    "data": [{"x": ["Hazy IPA", "IPA", "White IPA"], "y": [0.55, 0.30, 0.10], "type": "bar"}],
+    "layout": {},
+})
+
+_BA_TYPICAL_STYLES_FIXTURES = {
+    "/sitemap.xml": _BA_HOP_SITEMAP_FIXTURE,
+    "/hops/dual-purpose/citra/": _BA_HOP_PAGE_WITH_TYPICAL_STYLES_FIXTURE,
+    "/hops/dual-purpose/citra/charts/typical-styles-relative.json": _BA_TYPICAL_STYLES_FIXTURE,
+}
+
+
+def test_ingest_hop_typical_styles_writes_relative_share_per_style(tmp_path, monkeypatch):
+    monkeypatch.setattr(ingest, "_beer_analytics_fetch",
+                        lambda path, **kw: _BA_TYPICAL_STYLES_FIXTURES[path])
+    monkeypatch.setattr(ingest, "_beer_analytics_get",
+                        lambda path, **kw: json.loads(_BA_TYPICAL_STYLES_FIXTURES[path]))
+    monkeypatch.setattr(ingest, "_load_yaml_mapping", lambda filename: {"Hazy IPA": "21C"})
+
+    db_path = str(tmp_path / "t.db")
+    ingest.ingest_hop_typical_styles(db_path)
+
+    con = connect(db_path)
+    rows = {r["style_label"]: dict(r) for r in con.execute(
+        "SELECT * FROM hop_typical_styles WHERE hop_name='Citra'")}
+    con.close()
+    assert set(rows) == {"Hazy IPA", "IPA", "White IPA"}
+    assert rows["Hazy IPA"]["relative_share"] == 0.55
+    assert rows["Hazy IPA"]["style_id"] == "21C"
+    # "IPA"/"White IPA" absents du mapping monkeypatché -- restent NULL,
+    # jamais un style_id deviné, la ligne reste écrite quand même.
+    assert rows["IPA"]["style_id"] is None
+    assert rows["White IPA"]["style_id"] is None
+
+def test_ingest_hop_typical_styles_resolves_variety_and_strips_hops_suffix(tmp_path, monkeypatch):
+    monkeypatch.setattr(ingest, "_beer_analytics_fetch",
+                        lambda path, **kw: _BA_TYPICAL_STYLES_FIXTURES[path])
+    monkeypatch.setattr(ingest, "_beer_analytics_get",
+                        lambda path, **kw: json.loads(_BA_TYPICAL_STYLES_FIXTURES[path]))
+    monkeypatch.setattr(ingest, "_load_yaml_mapping", lambda filename: {})
+
+    con = connect(str(tmp_path / "t.db"))
+    init_db(con)
+    con.execute("INSERT INTO hops (variety, name, region, sources, purpose) "
+               "VALUES ('citra', 'Citra', 'United States', 'yakima', NULL)")
+    con.commit(); con.close()
+
+    ingest.ingest_hop_typical_styles(str(tmp_path / "t.db"))
+
+    con = connect(str(tmp_path / "t.db"))
+    row = con.execute("SELECT * FROM hop_typical_styles WHERE style_label='Hazy IPA'").fetchone()
+    con.close()
+    # "Citra Hops" -> "Citra" (suffixe "Hops" retiré) -> résolu vers 'citra'
+    assert row["hop_name"] == "Citra"
+    assert row["variety"] == "citra"
+
+def test_ingest_hop_typical_styles_creates_table_without_wiping_existing_data(tmp_path, monkeypatch):
+    con = connect(str(tmp_path / "t.db"))
+    init_db(con)
+    con.execute("INSERT INTO hops (variety, name, region, sources, purpose) "
+               "VALUES ('citra', 'Citra', 'United States', 'yakima', NULL)")
+    con.execute("DROP TABLE hop_typical_styles")
+    con.commit(); con.close()
+
+    monkeypatch.setattr(ingest, "_beer_analytics_fetch",
+                        lambda path, **kw: _BA_TYPICAL_STYLES_FIXTURES[path])
+    monkeypatch.setattr(ingest, "_beer_analytics_get",
+                        lambda path, **kw: json.loads(_BA_TYPICAL_STYLES_FIXTURES[path]))
+    monkeypatch.setattr(ingest, "_load_yaml_mapping", lambda filename: {})
+    ingest.ingest_hop_typical_styles(str(tmp_path / "t.db"))
+
+    con = connect(str(tmp_path / "t.db"))
+    hops = [r[0] for r in con.execute("SELECT variety FROM hops")]
+    n = con.execute("SELECT COUNT(*) FROM hop_typical_styles").fetchone()[0]
+    con.close()
+    assert hops == ["citra"]
+    assert n == 3  # 3 styles dans la fixture
 
 
 # --------------------------------------------------------------------------- #

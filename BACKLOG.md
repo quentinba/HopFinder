@@ -3455,7 +3455,7 @@ Mais la transparence doit être RÉELLE, pas un simple adverbe :
   à jour en place (même entrée révisée, pas une 2e ligne pour la même
   fonctionnalité corrigée le jour même).
 
-- [ ] **T131 — `hop_typical_styles` : dans quels styles un houblon est-il utilisé**
+- [x] **T131 — `hop_typical_styles` : dans quels styles un houblon est-il utilisé**
 
   **Origine** : découvert en implémentant T88 (2026-08-28/29). Chaque page
   houblon beer-analytics.com porte un chart `typical-styles-relative.json`
@@ -3498,6 +3498,45 @@ Mais la transparence doit être RÉELLE, pas un simple adverbe :
 
   **Statut** : opportuniste, comme T130 -- ne bloque rien, découvert en
   marge d'un autre ticket plutôt que planifié.
+
+  **FAIT (2026-09-08).** Schéma implémenté tel que proposé, sans déviation.
+  `ingest.ingest_hop_typical_styles` (CLI `hopmatch ingest-hop-typical-
+  styles`) réutilise EXACTEMENT la même boucle de crawl que T88
+  (`ingest_hop_usage_stats`) -- mêmes 435 pages houblon déjà énumérées et
+  cachées par T88, aucun nouveau fetch HTML nécessaire, seul le chart
+  `typical-styles-relative.json` (nouveau) est fetché. `style_id` résolu
+  PAR LABEL de style (une page houblon porte PLUSIEURS styles typiques,
+  contrairement à T87 où la résolution se fait une fois par page style) via
+  le même `data/mappings/beer_style_aliases.yaml`.
+
+  **Résultat réel du crawl complet (2026-09-08)** : 435/435 pages houblon
+  (2 timeouts réseau au premier passage -- Strisselspalt, Pacific Gem --
+  remplis proprement par un second passage cache-first, même schéma de
+  flakiness déjà documenté sur ce projet). **143/435 houblons résolus vers
+  une variety** (même taux que T88, cohérent). **5478 lignes écrites,
+  3842 style_id résolus (70,2 %), 1636 non résolus** (labels beer-analytics
+  sans équivalent BJCP curé -- ligne conservée quand même, jamais omise).
+  Vérifié en direct sur Citra : "Hazy IPA" en tête (0,554), suivi de "IPA"
+  (0,371, `style_id=NULL` -- notre propre entrée ambiguë), "White IPA"
+  (0,363, 21B) -- cohérent avec la vérification manuelle qui a motivé le
+  ticket.
+
+  `merge_hop_varieties` étendue (même schéma `UPDATE OR IGNORE` que
+  `style_hop_usage`/`style_hop_pairings` -- `variety` hors clé primaire).
+
+  ⚠ **Pas de GUI ajoutée dans ce ticket** -- même précédent que T87
+  (`style_hop_pairings`, données réelles mais jamais consommées par une
+  page tant qu'aucun ticket GUI dédié n'existe) : le texte du ticket ne
+  demandait qu'ingestion + table, "opportuniste... découvert en marge",
+  aucune section `st.*` listée contrairement à T94. Lecture pure
+  `matching.hop_typical_styles(con, variety)` prête à être branchée (ex.
+  Browse, à côté de "Recommended usage" T99) dès qu'un ticket GUI le
+  demande explicitement.
+
+  17 nouveaux tests (ingest crawl + résolution, matching lecture triée,
+  merge_hop_varieties étendu), suite verte (542 tests). `hop_typical_
+  styles` (aromahops.db) poussée vers HopFinder-db + reboot Streamlit Cloud
+  nécessaire (aucun changement recipes.db cette fois).
 
 - [ ] **T132 — Revue de licence : CC-BY-SA 4.0 (beer-analytics.com)**
 

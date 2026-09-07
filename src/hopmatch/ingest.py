@@ -263,6 +263,9 @@ def merge_hop_varieties(con, keep: str, drop: str) -> None:
         "FROM hop_beer_styles WHERE variety=?", (keep, drop))
     con.execute("UPDATE OR IGNORE style_hop_usage SET variety=? WHERE variety=?", (keep, drop))
     con.execute("UPDATE OR IGNORE style_hop_pairings SET variety=? WHERE variety=?", (keep, drop))
+    # T131 : même schéma UPDATE que style_hop_usage/style_hop_pairings
+    # ci-dessus (`variety` hors clé primaire, PK sur hop_name/style_label).
+    con.execute("UPDATE OR IGNORE hop_typical_styles SET variety=? WHERE variety=?", (keep, drop))
 
     srcs = sorted(set(keep_row["sources"].split(",")) | set(drop_row["sources"].split(",")))
     purpose = keep_row["purpose"] if keep_row["purpose"] is not None else drop_row["purpose"]
@@ -2078,6 +2081,90 @@ def ingest_hop_usage_stats(out_db: str, limit: int | None = None, sleep: float =
             con.commit()
     con.commit(); con.close()
     print(f"  {n_variety_resolved}/{n_variety_total} houblons résolus vers une variety, "
+         f"{n_rows} lignes écrites")
+
+
+def ingest_hop_typical_styles(out_db: str, limit: int | None = None, sleep: float = 1.0,
+                              timeout: float = 30.0) -> None:
+    """T131 (2026-09-08, découvert en marge de T88) : relation INVERSE de
+    `style_hop_usage` (T86, "pour ce style, quels houblons") -- ici "pour
+    CE houblon, dans quels styles est-il populaire", empirique. Table
+    `hop_typical_styles` (voir `schema.HOP_TYPICAL_STYLES_SCHEMA`).
+
+    Réutilise EXACTEMENT la même boucle de crawl que `ingest_hop_usage_
+    stats` ci-dessus (mêmes 435 pages houblon, sitemap `_BA_HOP_PAGE_RE`,
+    cache `_beer_analytics_fetch` déjà rempli par T88 -- aucun nouveau
+    fetch de page HTML nécessaire, seul le chart `typical-styles-relative.
+    json` est nouveau) plutôt qu'un second parcours de sitemap séparé.
+
+    `typical-styles-relative.json` : MÊME format Plotly `bar` que
+    `usage-types.json` (T88) -- `x` = nom de style (vocabulaire brut
+    beer-analytics, ex. "Hazy IPA"), `y` = part relative. `parsers.
+    plotly_traces` réutilisé tel quel (aucun nouveau parseur, vérifié en
+    direct sur Citra avant d'écrire ce ticket). `style_id` résolu PAR
+    LABEL (chaque hop a plusieurs styles typiques, contrairement à T87 où
+    la résolution se fait une fois par page) via `data/mappings/
+    beer_style_aliases.yaml` (même fichier que T84/T85/T87)."""
+    from datetime import datetime, timezone
+    from .schema import connect, ensure_table, HOP_TYPICAL_STYLES_SCHEMA
+
+    con = connect(out_db)
+    if not con.execute("SELECT name FROM sqlite_master WHERE name='hops'").fetchone():
+        init_db(con); seed_reference(con); con.commit()
+    else:
+        ensure_table(con, "hop_typical_styles", HOP_TYPICAL_STYLES_SCHEMA)  # base existante
+    index = _build_hop_name_index(con)
+    style_aliases = _load_yaml_mapping("beer_style_aliases.yaml")
+
+    sitemap = _beer_analytics_fetch("/sitemap.xml", timeout=timeout, sleep=sleep)
+    hop_paths = sorted(set(_BA_HOP_PAGE_RE.findall(sitemap)))
+    if limit:
+        hop_paths = hop_paths[:limit]
+    print(f"beer-analytics (hop typical styles) : {len(hop_paths)} pages houblon (sitemap)")
+
+    fetched_at = datetime.now(timezone.utc).isoformat()
+    n_variety_resolved = n_variety_total = n_rows = 0
+    n_resolved_style = n_unresolved_style = 0
+    for i, hop_path in enumerate(hop_paths, 1):
+        try:
+            html = _beer_analytics_fetch(hop_path, timeout=timeout, sleep=sleep)
+        except Exception as e:  # noqa
+            print(f"  !! {hop_path}: {e}"); continue
+        charts = parsers.discover_beer_analytics_charts(html)
+        hop_name = parsers.parse_beer_analytics_hop_name(html)
+        if not hop_name:
+            continue
+        variety = _resolve_hop_variety(index, hop_name)
+        n_variety_total += 1
+        if variety:
+            n_variety_resolved += 1
+
+        typical_path = charts.get("typical-styles-relative")
+        if not typical_path:
+            continue
+        try:
+            payload = _beer_analytics_get(typical_path, timeout=timeout, sleep=sleep)
+        except Exception as e:  # noqa
+            print(f"  !! {typical_path}: {e}"); continue
+        traces = parsers.plotly_traces(payload)
+        if traces:
+            style_shares = dict(zip(traces[0].get("x") or [], traces[0].get("y") or []))
+            for style_label, relative_share in style_shares.items():
+                style_id = style_aliases.get(style_label)
+                if style_id:
+                    n_resolved_style += 1
+                else:
+                    n_unresolved_style += 1
+                con.execute(
+                    "INSERT OR REPLACE INTO hop_typical_styles VALUES (?,?,?,?,?,?,?)",
+                    (variety, hop_name, style_label, style_id, relative_share,
+                     "beer-analytics", fetched_at))
+                n_rows += 1
+        if i % 10 == 0:
+            con.commit()
+    con.commit(); con.close()
+    print(f"  {n_variety_resolved}/{n_variety_total} houblons résolus vers une variety, "
+         f"{n_resolved_style} style_id résolus, {n_unresolved_style} non résolus, "
          f"{n_rows} lignes écrites")
 
 

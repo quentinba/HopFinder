@@ -1977,6 +1977,30 @@ def frequent_hop_combinations(con, style_id: str | None = None, size: int = 2,
              "total_recipes": r["total_recipes"], "lift": r["lift"]} for r in rows]
 
 
+def hop_typical_styles(con, variety: str) -> list[dict]:
+    """T131 : dans quels styles BJCP `variety` est-il RÉELLEMENT populaire
+    (corpus de recettes beer-analytics.com, table `hop_typical_styles`
+    pré-calculée par `ingest.ingest_hop_typical_styles` -- lecture pure).
+    Relation INVERSE de `style_hop_frequency` ci-dessus ("pour ce style,
+    quels houblons" -> "pour ce houblon, quels styles"), à ne jamais
+    confondre avec `hop_beer_styles` (T83, éditorial Yakima/BeerMaverick,
+    pas une mesure de fréquence de recettes réelles).
+
+    Retourne `[{"style_label", "style_id", "relative_share"}, ...] trié
+    par `relative_share` DÉCROISSANT (le style le plus typique en premier)
+    -- `style_id` peut être `None` si `style_label` (nom brut beer-
+    analytics) n'a pas d'équivalent BJCP défendable (`data/mappings/
+    beer_style_aliases.yaml`), la ligne reste incluse (le libellé brut
+    reste une information réelle même sans résolution BJCP). Liste vide
+    si `variety` n'est pas résolue dans cette source -- jamais une entrée
+    fabriquée."""
+    rows = con.execute(
+        "SELECT style_label, style_id, relative_share FROM hop_typical_styles "
+        "WHERE variety=? ORDER BY relative_share DESC", (variety,)).fetchall()
+    return [{"style_label": r["style_label"], "style_id": r["style_id"],
+             "relative_share": r["relative_share"]} for r in rows]
+
+
 def hop_addition_timing(con, variety: str) -> dict | None:
     """T126 : répartition RÉELLE des additions de `variety` sur les 11
     classes chronologiques de `reference.ADDITION_TIMING_BINS` (corpus

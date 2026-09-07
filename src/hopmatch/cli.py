@@ -180,6 +180,13 @@ def main(argv=None):
     hus.add_argument("--sleep", type=float, default=1.0)
     hus.add_argument("--limit", type=int)
 
+    hts = sub.add_parser("ingest-hop-typical-styles",
+                         help="dans quels styles un houblon est réellement utilisé "
+                              "(beer-analytics.com, relation inverse de style_hop_usage) -- T131")
+    hts.add_argument("--db", default=DEFAULT_DB)
+    hts.add_argument("--sleep", type=float, default=1.0)
+    hts.add_argument("--limit", type=int)
+
     mm = sub.add_parser("ingest-mmum",
                         help="corpus BRUT de recettes (maischemalzundmehr.de) : "
                              "recipes.db, JAMAIS aromahops.db (D4) -- T91")
@@ -303,6 +310,8 @@ def main(argv=None):
         ingest.ingest_style_hop_pairings(a.db, limit=a.limit, sleep=a.sleep); return 0
     if a.cmd == "ingest-hop-usage-stats":
         ingest.ingest_hop_usage_stats(a.db, limit=a.limit, sleep=a.sleep); return 0
+    if a.cmd == "ingest-hop-typical-styles":
+        ingest.ingest_hop_typical_styles(a.db, limit=a.limit, sleep=a.sleep); return 0
     if a.cmd == "ingest-mmum":
         ingest.ingest_mmum(a.db, start=a.start, end=a.end, sleep=a.sleep, limit=a.limit); return 0
     if a.cmd == "reconcile-mmum":

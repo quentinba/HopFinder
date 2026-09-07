@@ -241,8 +241,8 @@ SCHEMA += STYLE_HOP_PAIRINGS_SCHEMA
 # le reste de cette table (c'est une relation houblon->style, pas houblon->
 # étape) -- le `CREATE TABLE` du ticket ne lui réservait aucune place.
 # Donnée réelle et valable (vérifiée en direct), mais hors du schéma tel
-# qu'écrit -- voir T131 (nouveau ticket, backlog) plutôt qu'une table
-# inventée ici sans le demander.
+# qu'écrit -- voir `HOP_TYPICAL_STYLES_SCHEMA` ci-dessous (T131, table
+# séparée, implémentée).
 HOP_USAGE_STATS_SCHEMA = """
 CREATE TABLE hop_usage_stats (
     variety TEXT, hop_name TEXT, use_type TEXT, recipes_count INTEGER,
@@ -252,6 +252,33 @@ CREATE TABLE hop_usage_stats (
 );
 """
 SCHEMA += HOP_USAGE_STATS_SCHEMA
+
+# T131 (2026-09-08, découvert en marge de T88 ci-dessus) : relation INVERSE
+# de `style_hop_usage` (T86, "pour ce style, quels houblons sont
+# populaires") -- ici "pour CE houblon, dans quels styles est-il
+# populaire", empirique (recettes réelles beer-analytics), à ne jamais
+# confondre avec `hop_beer_styles` (T83, éditorial -- suggestion Yakima/
+# BeerMaverick, pas une mesure de fréquence) ni avec `hop_usage_stats`
+# ci-dessus (axe houblon->ÉTAPE de procédé, pas houblon->style). Les trois
+# restent des relations séparées, jamais fusionnées (même règle que les
+# trois relations houblon<->houblon établie en T25/T109).
+# `typical-styles-relative.json`, page `/hops/<purpose>/<slug>/` -- MÊME
+# format Plotly `bar` que `usage-types.json` (T88 ci-dessus), `x` = nom de
+# style (vocabulaire brut beer-analytics, ex. "Hazy IPA"), `y` = part
+# relative -- `parsers.plotly_traces` réutilisé tel quel, aucun nouveau
+# parseur. `style_id` résolu via `data/mappings/beer_style_aliases.yaml`
+# (même fichier que T84/T85/T87, `style_label` = nom brut non modifié).
+# PK sur `(hop_name, style_label)` et pas `variety` (comme `hop_usage_
+# stats` ci-dessus) : `hop_name` identifie la page source de façon fiable
+# même quand `variety` reste NULL (non résolu).
+HOP_TYPICAL_STYLES_SCHEMA = """
+CREATE TABLE hop_typical_styles (
+    variety TEXT, hop_name TEXT, style_label TEXT, style_id TEXT,
+    relative_share REAL, source TEXT, fetched_at TEXT,
+    PRIMARY KEY (hop_name, style_label)
+);
+"""
+SCHEMA += HOP_TYPICAL_STYLES_SCHEMA
 
 # T93 (épique C, 2026-09-03) : combinaisons de houblons RÉELLEMENT observées
 # ensemble dans une même recette (`recipes.db`, MMuM, T91/T92) -- table

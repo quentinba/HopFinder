@@ -1808,6 +1808,38 @@ def test_frequent_combinations_style_id_with_stage_never_crosses_tranches():
 
 
 # --------------------------------------------------------------------------- #
+# T131 -- matching.hop_typical_styles (lecture pure de hop_typical_styles)
+# --------------------------------------------------------------------------- #
+def _insert_typical_style(con, variety, hop_name, style_label, style_id, relative_share):
+    con.execute(
+        "INSERT OR REPLACE INTO hop_typical_styles VALUES (?,?,?,?,?,?,?)",
+        (variety, hop_name, style_label, style_id, relative_share, "test", "2026-09-08"))
+    con.commit()
+
+def test_hop_typical_styles_returns_empty_list_when_no_data(db):
+    assert matching.hop_typical_styles(db, "nonexistent-variety") == []
+
+def test_hop_typical_styles_sorts_by_relative_share_descending(db):
+    _insert_typical_style(db, "citra", "Citra", "IPA", "21A", 0.30)
+    _insert_typical_style(db, "citra", "Citra", "Hazy IPA", "21C", 0.55)
+    _insert_typical_style(db, "citra", "Citra", "White IPA", "21B", 0.10)
+    result = matching.hop_typical_styles(db, "citra")
+    assert [r["style_label"] for r in result] == ["Hazy IPA", "IPA", "White IPA"]
+    assert result[0]["relative_share"] == 0.55
+    con = db
+    con.execute("DELETE FROM hop_typical_styles"); con.commit()
+
+def test_hop_typical_styles_includes_unresolved_style_id(db):
+    # Un style_label sans équivalent BJCP défendable garde sa ligne (le
+    # libellé brut reste une information réelle) -- jamais omis en silence.
+    _insert_typical_style(db, "citra", "Citra", "Some Obscure Label", None, 0.20)
+    result = matching.hop_typical_styles(db, "citra")
+    assert result == [{"style_label": "Some Obscure Label", "style_id": None,
+                       "relative_share": 0.20}]
+    db.execute("DELETE FROM hop_typical_styles"); db.commit()
+
+
+# --------------------------------------------------------------------------- #
 # T126 -- matching.hop_addition_timing (lecture pure de hop_addition_timing)
 # --------------------------------------------------------------------------- #
 def _insert_timing(con, variety, bin_, count, total_additions, total_recipes):
