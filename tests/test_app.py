@@ -142,6 +142,12 @@ def _build_toy_db(path):
         ("test-lager-style", "2A", "Hopa", "hopa", "any", 0.4, 0.35, None, None, None,
          "test", "2026"),
     ])
+    # T94 : combinaison jouet pour "2A" uniquement -- "10A" reste SANS
+    # AUCUNE ligne (teste le message honnête "not enough recipes", pas un
+    # tableau vide silencieux, voir app._styles).
+    con.executemany("INSERT INTO hop_combinations VALUES (?,?,?,?,?,?,?,?,?)", [
+        ("hopa|hopb", 2, "2A", None, 22, 30, 3.1, "test", "2026"),
+    ])
     # T106 : métadonnées d'identité -- hopa porte tout (cultivar/breeder/
     # release_year/pedigree + is_experimental=1), hopb seulement is_organic=1,
     # hopc rien du tout (teste l'omission silencieuse de la ligne entière,
@@ -1356,6 +1362,45 @@ def test_styles_search_switching_query_clears_stale_disambiguation_pick(toy_cwd)
     at.text_input(key="styles_search").set_value("Test Wheat Style").run()
     assert not at.exception
     assert at.selectbox(key="styles_style").value == ("10A", "Test Wheat Style")
+
+def test_styles_shows_frequent_hop_combinations_with_display_names(toy_cwd):
+    # T94 : "2A" a une combinaison jouet (hopa+hopb, support 22, lift 3.1) --
+    # doit s'afficher avec les NOMS AFFICHÉS ("Hopa"/"Hopb"), pas les
+    # varietys brutes ("hopa"/"hopb").
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("styles").run()
+    at.selectbox(key="styles_category").set_value(("2", "Test Lager")).run()
+    at.selectbox(key="styles_style").set_value(("2A", "Test Lager Style")).run()
+    assert not at.exception
+    df = next(df.value for df in at.dataframe if "Hops" in df.value.columns)
+    assert list(list(df["Hops"])[0]) == ["Hopa", "Hopb"]
+    assert list(df["Support (recipes)"])[0] == 22
+    assert list(df["Lift"])[0] == pytest.approx(3.1)
+
+def test_styles_shows_honest_message_when_no_combination_meets_threshold(toy_cwd):
+    # T94 : "10A" n'a AUCUNE ligne hop_combinations dans la fixture --
+    # message honnête attendu, jamais un tableau vide silencieux.
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("styles").run()
+    at.selectbox(key="styles_category").set_value(("10", "Test Wheat")).run()
+    assert not at.exception
+    assert any("Not enough recipes in this style for 2-hop combinations" in c.value
+              for c in at.caption)
+
+def test_styles_combination_size_toggle_switches_query(toy_cwd):
+    # La fixture n'a QUE des combinaisons de taille 2 -- passer à "3 hops"
+    # doit retomber sur le message honnête, pas garder l'ancien résultat.
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("styles").run()
+    at.selectbox(key="styles_category").set_value(("2", "Test Lager")).run()
+    at.selectbox(key="styles_style").set_value(("2A", "Test Lager Style")).run()
+    at.segmented_control(key="styles_combo_size").set_value("3 hops").run()
+    assert not at.exception
+    assert any("Not enough recipes in this style for 3-hop combinations" in c.value
+              for c in at.caption)
 
 def test_style_hops_highlights_relevant_hop_absent_from_real_usage(toy_cwd):
     # T103 : "2A" -- descripteurs pré-remplis ("citrus"/"floral", trouvés

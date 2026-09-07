@@ -1946,10 +1946,19 @@ def frequent_hop_combinations(con, style_id: str | None = None, size: int = 2,
     retrouve ensemble EN DRY HOP -- apport original signalé par le ticket,
     ni beer-analytics ni le hop-finder russe ne le calculent).
 
-    `style_id` (optionnel) : structurellement câblé, mais renvoie TOUJOURS
-    une liste vide pour l'instant si fourni -- `recipes.style_id` n'est
-    peuplé par aucun ticket actuel (voir `schema.HOP_COMBINATIONS_SCHEMA`),
-    jamais un filtre qui ferait semblant de marcher.
+    `style_id` (T94, 2026-09-07) : combinaisons observées SEULEMENT au sein
+    des recettes de ce style BJCP (`recipes.style_id`, résolu depuis le
+    texte libre allemand de MMuM par `ingest.reconcile_mmum_style_ids` --
+    voir `data/mappings/beer_style_aliases.yaml`, section "MMuM recipe
+    corpus"). Repli honnête si le style n'a jamais assez de recettes pour
+    franchir `min_support` à cette taille : liste vide, jamais une
+    combinaison fabriquée. ⚠ **Les tranches par style sont calculées
+    `stage=None` UNIQUEMENT** (pas de croisement style+stage, T94 ne le
+    demande pas -- voir `ingest.compute_frequent_hop_combinations`) :
+    passer `style_id` ET un `stage` non-`None` en même temps renvoie
+    toujours `[]` (aucune ligne n'existe pour cette combinaison de
+    filtres), pas une erreur, pas un filtre silencieusement ignoré -- la
+    requête SQL reflète littéralement ce qui a été calculé.
 
     **Trié sur le LIFT décroissant PAR DÉFAUT, pas le support brut** (ticket
     explicite : Citra+Mosaic dominerait partout par pure fréquence, pas
@@ -1959,13 +1968,11 @@ def frequent_hop_combinations(con, style_id: str | None = None, size: int = 2,
     trier. Sous `min_support` recettes (défaut 20, aligné sur le seuil
     `HOP_MIN_RECIPES` de beer-analytics) -> absent du résultat, jamais une
     combinaison à support 2 qui donnerait l'illusion d'un signal réel."""
-    if style_id is not None:
-        return []
     rows = con.execute(
         "SELECT combo, support, total_recipes, lift FROM hop_combinations "
-        "WHERE size=? AND style_id IS NULL AND stage IS ? AND support>=? "
+        "WHERE size=? AND style_id IS ? AND stage IS ? AND support>=? "
         "ORDER BY lift DESC, support DESC, combo ASC",
-        (size, stage, min_support))
+        (size, style_id, stage, min_support))
     return [{"varieties": r["combo"].split("|"), "support": r["support"],
              "total_recipes": r["total_recipes"], "lift": r["lift"]} for r in rows]
 

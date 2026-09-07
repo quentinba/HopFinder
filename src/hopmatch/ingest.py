@@ -2505,6 +2505,72 @@ def reconcile_mmum_hop_varieties(recipes_db: str = "recipes.db", aroma_db: str =
     print(f"  noms non résolus les plus fréquents : {top}")
 
 
+def reconcile_mmum_style_ids(recipes_db: str = "recipes.db") -> None:
+    """T94 : résout `recipes.style_raw` (texte libre, MMuM, majoritairement
+    en allemand) -> `recipes.style_id` (BJCP 2021) DANS `recipes_db` --
+    aucune autre base touchée (même isolation D4 que `reconcile_mmum_hop_
+    varieties`, T92 : lecture pure de `data/mappings/beer_style_aliases.
+    yaml`, écriture uniquement dans `recipes.db`).
+
+    Nécessaire pour que `matching.frequent_hop_combinations(style_id=...)`
+    (T93) retourne autre chose qu'une liste vide -- vérifié en direct
+    (2026-09-07) que `recipes.style_id` était TOUJOURS NULL avant ce
+    ticket (0/1844), documenté comme tel dans `schema.HOP_COMBINATIONS_
+    SCHEMA` et le docstring de `matching.frequent_hop_combinations` (les
+    deux mis à jour par ce même ticket). C'était un suivi explicitement
+    anticipé par `beer_style_aliases.yaml` lui-même (section "MMuM recipe
+    corpus", écrite dès T84 avant même que T91/l'ingestion MMuM n'ait
+    tourné une seule fois) -- pas une nouvelle idée.
+
+    **Réutilise EXACTEMENT le même fichier** que T84/T130 (une seule
+    source de vérité par label éditorial->BJCP, jamais un second fichier
+    parallèle) -- une passe **insensible à la casse** en plus de la
+    correspondance exacte déjà utilisée par `ingest_beer_style_aliases`
+    (T130) : nécessaire ici parce que plusieurs strings MMuM ne diffèrent
+    des clés déjà présentes QUE par la casse (ex. "California common" vs
+    "California Common" déjà résolu au-dessus dans le même fichier) --
+    jamais une correspondance floue/partielle, une seule normalisation
+    (`str.strip().lower()`) des deux côtés.
+
+    Idempotente (réécrit `style_id` pour TOUTES les lignes à chaque appel,
+    jamais un état qui dépend d'un run précédent -- même convention que
+    T92)."""
+    from .schema import connect
+
+    aliases = _load_yaml_mapping("beer_style_aliases.yaml")
+    aliases_lower = {k.strip().lower(): v for k, v in aliases.items()}
+
+    con = connect(recipes_db)
+    rows = con.execute(
+        "SELECT uid, style_raw FROM recipes WHERE style_raw IS NOT NULL").fetchall()
+
+    n_resolved = n_known_ambiguous = n_unknown = 0
+    unknown_counts: dict[str, int] = {}
+    for uid, style_raw in rows:
+        key = style_raw.strip().lower()
+        if key in aliases_lower:
+            style_id = aliases_lower[key]
+            if style_id:
+                n_resolved += 1
+            else:
+                n_known_ambiguous += 1
+        else:
+            style_id = None
+            n_unknown += 1
+            unknown_counts[style_raw] = unknown_counts.get(style_raw, 0) + 1
+        con.execute("UPDATE recipes SET style_id=? WHERE uid=?", (style_id, uid))
+    con.commit(); con.close()
+
+    total = len(rows)
+    print(f"MMuM style_id réconciliation (T94) : {n_resolved}/{total} recettes résolues vers "
+         f"un style_id ({n_resolved / total:.1%}), {n_known_ambiguous} avec un style_raw connu "
+         f"mais sans équivalent BJCP défendable (voir beer_style_aliases.yaml), {n_unknown} "
+         f"jamais revus (style_raw absent du fichier).")
+    if unknown_counts:
+        top = sorted(unknown_counts.items(), key=lambda kv: -kv[1])[:15]
+        print(f"  style_raw jamais revus les plus fréquents : {top}")
+
+
 # --------------------------------------------------------------------------- #
 # Combinaisons de houblons fréquentes (T93, épique C)
 # --------------------------------------------------------------------------- #
@@ -2548,9 +2614,16 @@ def compute_frequent_hop_combinations(recipes_db: str = "recipes.db", out_db: st
     logique que la pondération TF-IDF de `matching.molecular_scores` (le
     houblon ubiquitaire ne doit pas dominer par simple fréquence brute).
 
-    `style_id` toujours NULL dans cette passe (voir `schema.
-    HOP_COMBINATIONS_SCHEMA` : `recipes.style_id` n'est peuplé par aucun
-    ticket actuel)."""
+    `style_id` (T94, 2026-09-07) : une tranche PAR style RÉSOLU
+    (`recipes.style_id`, peuplé par `reconcile_mmum_style_ids` -- appeler
+    cette fonction AVANT celle-ci pour que ces tranches ne soient pas
+    vides) EN PLUS des tranches par stade ci-dessus -- jamais CROISÉES
+    (pas de tranche style+stage à la fois, T94 ne le demande pas) : une
+    tranche par style ignore le stade (même dédoublonnage `stage=None`
+    que la tranche "toutes étapes confondues"), et réciproquement les
+    tranches par stade restent `style_id IS NULL`. Une recette sans
+    `style_id` résolu ne contribue à AUCUNE tranche par style (ni
+    numérateur ni dénominateur) -- jamais un style fabriqué par défaut."""
     import itertools
     from collections import Counter
     from datetime import datetime, timezone
@@ -2560,30 +2633,37 @@ def compute_frequent_hop_combinations(recipes_db: str = "recipes.db", out_db: st
     recipes_con = connect(recipes_db)
     rows = recipes_con.execute(
         "SELECT recipe_uid, variety, stage FROM recipe_hops WHERE variety IS NOT NULL").fetchall()
+    style_by_recipe = dict(recipes_con.execute(
+        "SELECT uid, style_id FROM recipes WHERE style_id IS NOT NULL").fetchall())
     recipes_con.close()
 
     slices: dict[str | None, dict[str, set[str]]] = {None: {}}
     for stage in _RECIPE_STAGES:
         slices[stage] = {}
+    style_slices: dict[str, dict[str, set[str]]] = {}
     for recipe_uid, variety, stage in rows:
         slices[None].setdefault(recipe_uid, set()).add(variety)
         if stage in _RECIPE_STAGES:
             slices[stage].setdefault(recipe_uid, set()).add(variety)
+        style_id = style_by_recipe.get(recipe_uid)
+        if style_id:
+            style_slices.setdefault(style_id, {}).setdefault(recipe_uid, set()).add(variety)
 
     con = connect(out_db)
     ensure_table(con, "hop_combinations", HOP_COMBINATIONS_SCHEMA)
     con.execute("DELETE FROM hop_combinations")
     computed_at = datetime.now(timezone.utc).isoformat()
 
-    n_rows = 0
-    for stage, itemsets_by_recipe in slices.items():
+    def _write_slice(itemsets_by_recipe: dict[str, set[str]], style_id: str | None,
+                     stage: str | None) -> int:
         itemsets = list(itemsets_by_recipe.values())
         total_recipes = len(itemsets)
         if total_recipes == 0:
-            continue
+            return 0
         singleton_counts: Counter = Counter()
         for items in itemsets:
             singleton_counts.update(items)
+        n = 0
         for size in sizes:
             combo_counts: Counter = Counter()
             for items in itemsets:
@@ -2601,11 +2681,24 @@ def compute_frequent_hop_combinations(recipes_db: str = "recipes.db", out_db: st
                 lift = p_joint / p_product
                 con.execute(
                     "INSERT OR REPLACE INTO hop_combinations VALUES (?,?,?,?,?,?,?,?,?)",
-                    ("|".join(combo), size, None, stage, support, total_recipes, lift,
+                    ("|".join(combo), size, style_id, stage, support, total_recipes, lift,
                      "mmum", computed_at))
-                n_rows += 1
+                n += 1
+        return n
+
+    n_rows = 0
+    for stage, itemsets_by_recipe in slices.items():
+        n_rows += _write_slice(itemsets_by_recipe, None, stage)
+    n_style_slices = 0
+    for style_id, itemsets_by_recipe in style_slices.items():
+        written = _write_slice(itemsets_by_recipe, style_id, None)
+        n_rows += written
+        if written:
+            n_style_slices += 1
+    print(f"  {n_style_slices}/{len(style_slices)} styles avec au moins une combinaison "
+         f"au-dessus de min_support={min_support}")
     con.commit(); con.close()
-    print(f"T93 : {n_rows} combinaisons écrites (min_support={min_support}, tailles={sizes}, "
+    print(f"T93/T94 : {n_rows} combinaisons écrites (min_support={min_support}, tailles={sizes}, "
          f"{len(slices)} tranches stade dont 'toutes étapes confondues')")
 
 

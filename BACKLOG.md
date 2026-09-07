@@ -1412,7 +1412,7 @@ Elles sont écrites pour qu'aucune décision implicite ne reste à deviner.
   s'affiche réellement, cas groupé <=3 houblons sans erreur), suite verte
   (492 tests). `_RECENT_UPDATES` mis à jour dans le même commit.
 
-- [ ] **T94 — GUI : combinaisons dans le mode « Beer styles »**
+- [x] **T94 — GUI : combinaisons dans le mode « Beer styles »**
 
   **Dépend de T93 et T82.** Section ajoutée à la page d'un style.
 
@@ -1429,6 +1429,74 @@ Elles sont écrites pour qu'aucune décision implicite ne reste à deviner.
   ⚠ Distinguer visuellement les combinaisons issues de **T93** (corpus MMuM,
   toutes tailles) de celles de **T87** (beer-analytics, paires uniquement) :
   deux sources, deux volumes, deux fiabilités.
+
+  **FAIT (2026-09-07).** Bloqué en pratique par un préalable non anticipé par
+  le texte du ticket : `matching.frequent_hop_combinations(style_id=...)`
+  était structurellement câblée depuis T93 mais renvoyait TOUJOURS `[]` --
+  vérifié en direct que `recipes.style_id` était 0/1844 peuplé (`recipes.
+  style_raw` reste du texte libre ALLEMAND, MMuM, jamais réconcilié vers un
+  `style_id` BJCP par aucun ticket antérieur). Ce suivi était déjà anticipé
+  par `data/mappings/beer_style_aliases.yaml` lui-même (section écrite dès
+  T84, avant même que T91/l'ingestion MMuM n'ait tourné une seule fois) --
+  traité DANS ce même ticket plutôt que d'ouvrir un nouveau numéro, la
+  section T94 étant inerte sans lui.
+
+  - `beer_style_aliases.yaml` : 72 `style_raw` distincts du corpus MMuM
+    (1844 recettes) revus à la main un par un contre les 110 styles BJCP
+    réels -- même standard que les sections T84/T130 existantes (un seul
+    match BJCP défendable -> résolu, toute ambiguïté réelle -> `null`,
+    jamais deviné). 29 résolus en clés neuves (ex. "Helles Hefeweizen"->
+    Weissbier 10A, "Robust Porter"->American Porter 20A, "Dinkel-, Emmer-
+    oder Mehrkornbier"->Alternative Grain Beer 31A), 23 laissés `null` avec
+    justification (ex. "Dunkles Lager" recoupe 4 styles distincts), le
+    reste déjà couvert tel quel par les sections existantes (ex. "Helles"->
+    "4A", "Stout"->`null`) via une nouvelle passe insensible à la casse
+    (`ingest.reconcile_mmum_style_ids`, sinon "California common" aurait
+    raté "California Common" déjà résolu).
+  - `ingest.reconcile_mmum_style_ids(recipes_db)` (nouvelle fonction,
+    isolation D4 identique à T92 : lit le yaml, écrit UNIQUEMENT dans
+    `recipes.db`) -- CLI `hopmatch reconcile-mmum-styles`. Résultat réel sur
+    le corpus complet : **962/1844 recettes résolues (52,2 %)**, 882 avec un
+    `style_raw` connu mais explicitement sans équivalent BJCP défendable, 0
+    jamais revues (les 72 valeurs distinctes sont toutes couvertes).
+  - `ingest.compute_frequent_hop_combinations` étendue : une tranche PAR
+    STYLE résolu (dédoublonnage `stage=None`, comme la tranche globale) EN
+    PLUS des tranches par stade -- **jamais croisées** (pas de tranche
+    style+stage, hors périmètre du ticket) : `matching.
+    frequent_hop_combinations(style_id=X, stage="dry_hop")` renvoie
+    honnêtement `[]` plutôt que de fabriquer un croisement jamais calculé.
+    `matching.frequent_hop_combinations` : le court-circuit "`style_id`
+    fourni -> toujours `[]`" retiré, requête réelle sur `style_id IS ?`.
+  - **Résultat réel, honnête** : au seuil par défaut `min_support=20`
+    (inchangé, aligné `HOP_MIN_RECIPES` de beer-analytics, jamais abaissé
+    arbitrairement pour "faire apparaître" un résultat), **0/37 styles
+    résolus atteignent le seuil pour la moindre paire qui leur soit
+    propre** -- même le style le mieux couvert (Weissbier 10A, 111
+    recettes) n'a aucune paire répétée 20 fois DANS ce sous-ensemble.
+    Vérifié en direct (Chrome, 2 thèmes) : le message d'absence explicite du
+    ticket ("Not enough recipes in this style for N-hop combinations...")
+    s'affiche correctement -- c'est le comportement honnête attendu à cette
+    taille de corpus (1844 recettes MMuM au total), pas un signe d'échec. La
+    fonctionnalité montera en utilité si le corpus MMuM grandit (T91 n'a
+    couvert qu'une plage d'ids, voir son propre ticket) ou si un futur
+    ticket revisite le seuil avec une justification sourcée -- délibérément
+    PAS fait ici (pas de seuil inventé sans source).
+  - Réserve T87 : vérifié (déjà noté dans `matching.py` par T104) que
+    `style_hop_pairings` (T87) ne porte AUCUNE relation houblon<->houblon
+    (juste des quartiles PAR HOUBLON dans le style, malgré son nom
+    "Pairings" côté beer-analytics) -- n'est affiché NULLE PART dans la GUI
+    à ce jour, donc rien à distinguer visuellement pour de vrai
+    aujourd'hui. La carte T94 porte quand même une phrase de distinction
+    explicite contre la stat par-houblon déjà affichée dans "Hops for a
+    style" (T86/T103), qui est le risque de confusion réel actuel.
+  - `schema.HOP_COMBINATIONS_SCHEMA`/docstrings mis à jour (`style_id` n'est
+    plus "toujours NULL"). `app._RECENT_UPDATES` mis à jour dans le même
+    commit. 22 nouveaux tests (ingest T94 réconciliation + tranches par
+    style, matching filtre par style, AppTest GUI avec/sans donnée), suite
+    verte (535 tests). `hop_combinations` (aromahops.db) recalculée avec
+    les nouvelles tranches par style (28 lignes, comme avant -- 0 ligne par
+    style au seuil 20) -- poussée vers HopFinder-db + reboot Streamlit
+    Cloud nécessaire après ce commit (même procédure que d'habitude).
 
 - [ ] **T118 — Import Brewfather (recettes personnelles)**
 

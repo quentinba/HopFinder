@@ -249,3 +249,116 @@
 # in our ingested beerjson/bjcp-json set (BJCP 2021's real category 33).
 "Specialty Wood-Aged Beer": null
 "Wood-Aged Beer": null
+
+# =============================================================================
+# MMuM recipe corpus (T91/T92, GERMAN/mixed free text) -- SECOND usage of this
+# file materializing (see file header, point 2, written back in T84 before
+# T91 had even run). T94 needs `recipes.style_id` populated to filter
+# `hop_combinations` per style (verified live, 2026-09-07: 0/1844 recipes had
+# a style_id before this section -- `frequent_hop_combinations(style_id=...)`
+# was structurally wired but always returned [] for lack of any resolved
+# style_id at all, see matching.py). All 72 distinct `style_raw` values in
+# the corpus reviewed by hand against the same 110 real BJCP styles, same
+# standard as the two sections above (single defensible match -> resolved,
+# ANY genuine ambiguity across several BJCP ids -> null, never guessed).
+# Reused BY VALUE against the two sections above where the literal string
+# already exists there (case/accent-sensitive key match, e.g. "Helles"->
+# "4A", "Kölsch"->"5B", "Stout"->null already present) -- this section only
+# adds MMuM-specific strings not already covered verbatim, PLUS ingest.
+# reconcile_mmum_style_ids does one case-INSENSITIVE pass over the whole
+# merged dict (e.g. "California common" here matches "California Common"
+# above without a redundant duplicate key).
+#
+# Counts = number of MMuM recipes carrying that exact `style_raw` string
+# (live query against recipes.db, 2026-09-07) -- traceability only.
+
+# --- Resolved (29) ----------------------------------------------------------
+"Helles Hefeweizen": "10A"       # 111 -- pale wheat beer w/ yeast = Weissbier (Dunkles
+                                  #        Weissbier 10B is the dark counterpart, see below)
+"Deutsches Pilsner": "5D"        # 52  -- German Pils, same style under its German name
+"Märzen/Oktoberfest": "6A"       # 50  -- same style as "Märzen" above, historical dual name
+"India Pale Ale (NEIPA)": "21C"  # 43  -- Hazy IPA, same reasoning as "NEIPA" above
+"India Pale Ale (West Coast)": "21A" # 34 -- West Coast IPA = the classic hoppy/dry style = American IPA
+"Dunkles Hefeweizen": "10B"      # 32  -- dark wheat beer w/ yeast = Dunkles Weissbier
+"Belgisches Witbier/Blanche": "24A" # 31 -- Witbier, German/French dual name for the same style
+"Mild Ale": "13A"                # 29  -- Dark Mild is the ONLY "Mild"-named BJCP 2021 style_id
+                                  #        in our 110 (no separate Pale/Light Mild entry)
+"Amber Ale": "19A"                # 27 -- same precedent as "Blonde Ale"->18A above: bare name
+                                  #        resolves to the American-style entry, the Belgian one
+                                  #        keeps its own "Belgisch..." qualifier (see below)
+"Wiener Lager": "7A"              # 21 -- Vienna Lager, exact match under its German name
+"Irish Ale": "15A"                # 21 -- Irish Red Ale is the only Irish-Ale-named BJCP style
+                                  #        (Irish Stout/Extra Stout are named "Stout", not "Ale")
+"Maibock": "4C"                   # 18 -- traditional name for Helles Bock, BJCP's own guideline
+                                  #        text lists "Maibock" as a synonym
+"Milk Stout": "16A"                # 16 -- historical/still-common name for Sweet Stout, listed
+                                  #        as a synonym in BJCP's own 16A guideline text
+"Dunkler Doppelbock": "9A"         # 16 -- BJCP 2021 has ONE Doppelbock id covering the whole
+                                  #        pale-to-dark color range (see "Heller Doppelbock" below)
+"Robust Porter": "20A"             # 15 -- BJCP's own pre-2015 name for American Porter
+"Belgisches Tripel": "26C"         # 15 -- Belgian Tripel, German/French dual name
+"Belgisches Dubbel": "26B"         # 15 -- Belgian Dubbel, same
+"Belgisches Blonde Ale": "25A"     # 15 -- Belgian Blond Ale, same spelling variance already
+                                  #        accepted for "Belgian Style Blonde" above
+"Helles Bockbier": "4C"            # 13 -- Helles Bock, "-bier" suffix doesn't change the style
+"Dinkel-, Emmer- oder Mehrkornbier": "31A" # 13 -- spelt/emmer/multigrain = exactly what
+                                  #        Alternative Grain Beer (31A) covers
+"Böhmisches Pilsner": "3A"         # 13 -- Bohemian Pilsner, BJCP's own historical name for
+                                  #        Czech Pale Lager (renamed in the 2021 guidelines)
+"Brown Porter": "13C"              # 13 -- BJCP's own pre-2015 name for English Porter
+"Dunkles Bockbier": "6C"           # 10 -- Dunkles Bock, "-bier" suffix doesn't change the style
+"Maisbier": "31A"                  # 8  -- corn/maize beer, same Alternative Grain Beer bucket
+                                  #        as the spelt/emmer entry above
+# "Old Ale" (7 recipes) matches "Old Ale" -> "17B" already resolved above
+# under the beer-analytics section -- reused as-is via the case-insensitive
+# pass, deliberately NOT re-added as a duplicate YAML key here.
+"Cascadian Dark Ale": "21B"        # 7  -- historical name for Black IPA, same 21B mapping already
+                                  #        accepted for "Black IPA" above
+"Französisches Ale": "24C"         # 6  -- Bière de Garde is the ONLY French-named BJCP style
+                                  #        in our 110
+"Reisbier": "31A"                  # 5  -- rice beer, same Alternative Grain Beer bucket
+"Ingwerbier/Ginger beer": "30A"    # 5  -- ginger = spice/herb ingredient -> Spice, Herb, or
+                                  #        Vegetable Beer
+"Heller Doppelbock": "9A"          # 4  -- pale Doppelbock, same single BJCP id as "Dunkler
+                                  #        Doppelbock" above (BJCP covers the whole color range)
+
+# --- No defensible single BJCP match (23) ------------------------------------
+"India Pale Ale": null             # 94 -- bare, spans the same ids as "IPA" above -- the
+                                  #        qualified variants (NEIPA/West Coast/sonstige) are
+                                  #        handled separately, this is deliberately the
+                                  #        unqualified leftover
+"...außer Kategorie": null         # 76 -- literally "...outside of category" -- MMuM's own
+                                  #        catch-all bucket, not a style at all
+"Frucht-, Gewürz- und Kräuterbiere": null # 51 -- "fruit, spice, and herb beers" -- spans
+                                  #        BOTH category 29 (Fruit) and 30 (Spice/Herb/Veg)
+"India Pale Ale (sonstige)": null  # 50 -- "IPA (other/misc)", MMuM's own explicit catch-all
+"Dunkles Lager": null              # 39 -- "dark lager" -- spans International Dark Lager 2C,
+                                  #        Czech Dark Lager 3D, Munich Dunkel 8A, Schwarzbier 8B
+"Sauerbier": null                  # 32 -- "sour beer" -- spans most of category 23 and 28
+"Export": null                     # 19 -- spans German Helles Exportbier 5C and Scottish
+                                  #        Export 14C, genuinely ambiguous unqualified
+"Amber Lager": null                # 14 -- spans International Amber Lager 2B AND Czech Amber
+                                  #        Lager 3C, both literally named "___ Amber Lager"
+"Kveik": null                      # 13 -- a yeast/fermentation tradition, not tied to one BJCP
+                                  #        style id (no farmhouse-ale category in our 110 besides
+                                  #        Saison, which Kveik beers aren't specifically)
+"Alkoholfreies/-armes": null       # 13 -- "alcohol-free/low-alcohol" is a strength descriptor,
+                                  #        not a style, spans arbitrarily many base styles
+"Belgisches Dunkel": null          # 11 -- "Belgian dark" without "Dubbel"/"Strong" qualifier --
+                                  #        spans Belgian Dark Strong Ale 26D, Dubbel 26B, Oud
+                                  #        Bruin 23C
+"Scottish Ale": null               # 9  -- BJCP's 3-tier system (Light/Heavy/Export, 14A/B/C)
+                                  #        has no single generic "Scottish Ale" id
+"Böhmisches Lager": null           # 8  -- "Bohemian lager" without "Pilsner"/"Pale" qualifier --
+                                  #        spans all 4 Czech lager styles (3A/3B/3C/3D)
+"India Pale Lager (IPL)": null     # 7  -- no BJCP 2021 style id for this hybrid among our 110
+"Strong Ale": null                 # 6  -- spans British 17A, American 22B, Belgian Golden
+                                  #        Strong 25C, Belgian Dark Strong 26D
+"American Pilsner": null           # 6  -- no clean single BJCP match among our 110
+"Nürnberger Rotbier": null         # 4  -- niche historical regional style, no BJCP 2021 id
+"Malzbier": null                   # 2  -- non-alcoholic malty beverage, no BJCP style id
+"Imperial Pilsner": null           # 2  -- no BJCP 2021 style id for this combination
+"Met": null                        # 1  -- mead, not a beer style at all
+"Merseburger Bier": null           # 1  -- niche historical regional style, no BJCP 2021 id
+"India Dark Lager (IDL)": null     # 1  -- no BJCP 2021 style id for this hybrid among our 110
+"Braggot": null                    # 1  -- mead/beer hybrid, not a standard BJCP beer style id

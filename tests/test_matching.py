@@ -1764,13 +1764,46 @@ def test_frequent_combinations_filters_by_stage():
     assert dry_hop_only[0]["support"] == 22
     con.close()
 
-def test_frequent_combinations_style_id_always_returns_empty_for_now():
-    # T92/T93 : recipes.style_id n'est peuplé par aucun ticket actuel --
-    # jamais un filtre qui ferait semblant de marcher.
-    path = os.path.join(tempfile.mkdtemp(), "t93b.db")
+def test_frequent_combinations_filters_by_style_id():
+    # T94 : une tranche par style (recipes.style_id résolu par
+    # ingest.reconcile_mmum_style_ids) coexiste avec la tranche globale
+    # (style_id=NULL) sans jamais se mélanger.
+    path = os.path.join(tempfile.mkdtemp(), "t94.db")
     con = connect(path); init_db(con)
     _insert_combo(con, "citra|mosaic", 2, support=30, total_recipes=1000, lift=2.0)
-    assert matching.frequent_hop_combinations(con, size=2, style_id="21B") == []
+    _insert_combo(con, "citra|mosaic", 2, support=22, total_recipes=60, lift=3.1,
+                  style_id="21A")
+    global_view = matching.frequent_hop_combinations(con, size=2, style_id=None, min_support=20)
+    style_view = matching.frequent_hop_combinations(con, size=2, style_id="21A", min_support=20)
+    assert global_view[0]["support"] == 30
+    assert style_view[0]["support"] == 22
+    assert style_view[0]["total_recipes"] == 60
+    con.close()
+
+
+def test_frequent_combinations_unknown_style_id_returns_empty_not_an_error():
+    # Style jamais assez de recettes (ou jamais résolu) pour franchir
+    # min_support à cette taille -- liste vide, JAMAIS une combinaison
+    # fabriquée pour faire semblant d'avoir un résultat.
+    path = os.path.join(tempfile.mkdtemp(), "t94b.db")
+    con = connect(path); init_db(con)
+    _insert_combo(con, "citra|mosaic", 2, support=30, total_recipes=1000, lift=2.0)
+    assert matching.frequent_hop_combinations(con, size=2, style_id="9Z", min_support=20) == []
+    con.close()
+
+
+def test_frequent_combinations_style_id_with_stage_never_crosses_tranches():
+    # Les tranches par style sont calculées `stage=None` UNIQUEMENT
+    # (ingest.compute_frequent_hop_combinations, T94 docstring) -- passer
+    # `style_id` ET un `stage` non-None en même temps ne doit jamais
+    # retomber sur la tranche globale par erreur : aucune ligne n'existe
+    # pour ce croisement, le résultat est honnêtement vide.
+    path = os.path.join(tempfile.mkdtemp(), "t94c.db")
+    con = connect(path); init_db(con)
+    _insert_combo(con, "citra|mosaic", 2, support=22, total_recipes=60, lift=3.1,
+                  style_id="21A", stage=None)
+    assert matching.frequent_hop_combinations(
+        con, size=2, style_id="21A", stage="dry_hop", min_support=20) == []
     con.close()
 
 

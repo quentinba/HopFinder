@@ -239,6 +239,16 @@ _TOOL_SUMMARY_BY_MODE = {t["mode"]: t for t in _TOOL_SUMMARIES}
 # un `git log` en direct exigerait aussi que `.git` soit présent dans le
 # conteneur déployé, ce qui n'est pas garanti.
 _RECENT_UPDATES = [
+    ("2026-09-07", "A style's page now shows \"Frequent hop combinations\": "
+                   "hops REALLY found together in the same real recipe for "
+                   "that style (MMuM corpus), pick 2/3/4-hop combinations, "
+                   "sorted by how much more often they appear together than "
+                   "chance alone would predict -- distinct from the "
+                   "per-hop usage-share stats in \"Hops for a style\", which "
+                   "never says which hops were actually combined. Many "
+                   "styles won't have enough matching recipes yet at this "
+                   "corpus size -- an honest note explains that rather "
+                   "than showing an empty table."),
     ("2026-09-07", "Beer styles gained a \"Search by name\" box: type any "
                    "part of a real BJCP 2021 name (\"IPA\", \"Pale Ale\") "
                    "or a finer beer-analytics.com name (\"Black IPA\") and "
@@ -5864,6 +5874,56 @@ def _styles(con) -> None:
             # `_source_chips` (gris neutre, même mécanisme d'enroulement que
             # `_descriptor_chips` ci-dessus -- voir son commentaire).
             st.markdown(_source_chips(examples))
+
+    # T94 (2026-09-07, dépend de T93/T82) : combinaisons de houblons
+    # RÉELLEMENT co-observées dans une même recette pour CE style
+    # (`matching.frequent_hop_combinations(style_id=...)`, corpus MMuM,
+    # `hop_combinations`) -- nécessitait `recipes.style_id` peuplé
+    # (`ingest.reconcile_mmum_style_ids`, même ticket, voir CLAUDE.md/
+    # BACKLOG.md pour le compte rendu complet : la fonction était
+    # structurellement câblée depuis T93 mais renvoyait TOUJOURS []
+    # jusqu'ici faute de la moindre recette avec un `style_id` résolu).
+    # `st.segmented_control` pour la taille (T94, ergonomie T76) --
+    # `min_support` reste au défaut (20, aligné beer-analytics `HOP_MIN_
+    # RECIPES`), JAMAIS abaissé arbitrairement pour "faire apparaître" un
+    # résultat : sur le corpus MMuM actuel (1844 recettes), aucun style
+    # n'atteint ce seuil pour un pair/triplet/quadruplet propre à lui
+    # seul (vérifié en direct, voir BACKLOG.md) -- le message d'absence
+    # explicite du ticket EST le comportement honnête attendu ici, pas un
+    # signe d'échec.
+    with _panel():
+        st.write("**Frequent hop combinations in this style**")
+        st.caption(
+            "Hops REALLY found together in the same real recipe (MMuM corpus, "
+            "T93) — a genuinely different signal from the per-hop usage-share "
+            "stats in \"Hops for a style\" (T86/T103), which never says which "
+            "hops were actually combined together in the same brew.")
+        combo_size_label = st.segmented_control(
+            "Combination size", ["2 hops", "3 hops", "4 hops"], default="2 hops",
+            key="styles_combo_size", required=True)
+        combo_size = int(combo_size_label[0])
+        combos = matching.frequent_hop_combinations(con, style_id=style_id, size=combo_size)
+        if combos:
+            hop_names = {r["variety"]: dict(r) for r in con.execute("SELECT * FROM hops")}
+            matching._disambiguate_hop_names(hop_names)
+            st.dataframe(
+                [{"Hops": [hop_names[v]["name"] if v in hop_names else v
+                          for v in c["varieties"]],
+                  "Support (recipes)": c["support"], "Lift": c["lift"]}
+                 for c in combos],
+                width="stretch", hide_index=True,
+                column_config={"Hops": st.column_config.ListColumn(),
+                              "Lift": st.column_config.NumberColumn(format="%.2f")})
+            st.caption(
+                f"Sorted by lift (how much more often these hops appear together than "
+                f"chance alone would predict from each hop's own popularity), not raw "
+                f"recipe count — support shown next to each row, out of "
+                f"{combos[0]['total_recipes']} recipes resolved to this style.")
+        else:
+            st.caption(
+                f"Not enough recipes in this style for {combo_size}-hop combinations — "
+                f"the MMuM corpus needs at least 20 recipes sharing the exact same "
+                f"combination, not just the same style.")
 
 
 _STYLE_HOPS_USAGE_TYPES = {"Any": "any", "Bittering": "bittering", "Aroma": "aroma",

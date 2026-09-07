@@ -196,6 +196,11 @@ def main(argv=None):
     mr.add_argument("--recipes-db", default="recipes.db")
     mr.add_argument("--db", default=DEFAULT_DB, help="aromahops.db, lue seule, jamais modifiée")
 
+    msr = sub.add_parser("reconcile-mmum-styles",
+                         help="résout recipes.style_raw -> style_id BJCP dans recipes.db "
+                              "(data/mappings/beer_style_aliases.yaml) -- T94")
+    msr.add_argument("--recipes-db", default="recipes.db")
+
     fc = sub.add_parser("compute-hop-combinations",
                         help="combinaisons de houblons réellement co-observées en recette "
                              "(recipes.db -> hop_combinations dans aromahops.db) -- T93")
@@ -302,6 +307,8 @@ def main(argv=None):
         ingest.ingest_mmum(a.db, start=a.start, end=a.end, sleep=a.sleep, limit=a.limit); return 0
     if a.cmd == "reconcile-mmum":
         ingest.reconcile_mmum_hop_varieties(a.recipes_db, aroma_db=a.db); return 0
+    if a.cmd == "reconcile-mmum-styles":
+        ingest.reconcile_mmum_style_ids(a.recipes_db); return 0
     if a.cmd == "compute-hop-combinations":
         ingest.compute_frequent_hop_combinations(a.recipes_db, a.db, min_support=a.min_support)
         return 0

@@ -1625,6 +1625,97 @@ def test_reconcile_mmum_hop_varieties_is_idempotent(tmp_path, monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
+# T94 -- réconciliation recipes.style_raw -> style_id (ingest.reconcile_mmum_style_ids)
+# --------------------------------------------------------------------------- #
+def test_reconcile_mmum_style_ids_writes_resolved_style_id(tmp_path, monkeypatch):
+    recipes_path = str(tmp_path / "recipes.db")
+    con = connect(recipes_path); init_recipes_db(con)
+    con.execute("INSERT INTO recipes (uid, source, source_id, style_raw) "
+               "VALUES ('mmum-1', 'mmum', '1', 'Weizenbock')")
+    con.commit(); con.close()
+    monkeypatch.setattr(ingest, "_load_yaml_mapping",
+                        lambda filename: {"Weizenbock": "10C"})
+
+    ingest.reconcile_mmum_style_ids(recipes_path)
+
+    con = connect(recipes_path)
+    style_id = con.execute("SELECT style_id FROM recipes WHERE uid='mmum-1'").fetchone()[0]
+    con.close()
+    assert style_id == "10C"
+
+def test_reconcile_mmum_style_ids_is_case_insensitive(tmp_path, monkeypatch):
+    recipes_path = str(tmp_path / "recipes.db")
+    con = connect(recipes_path); init_recipes_db(con)
+    con.execute("INSERT INTO recipes (uid, source, source_id, style_raw) "
+               "VALUES ('mmum-1', 'mmum', '1', 'California common')")
+    con.commit(); con.close()
+    monkeypatch.setattr(ingest, "_load_yaml_mapping",
+                        lambda filename: {"California Common": "19B"})
+
+    ingest.reconcile_mmum_style_ids(recipes_path)
+
+    con = connect(recipes_path)
+    style_id = con.execute("SELECT style_id FROM recipes WHERE uid='mmum-1'").fetchone()[0]
+    con.close()
+    assert style_id == "19B"
+
+def test_reconcile_mmum_style_ids_leaves_known_ambiguous_null(tmp_path, monkeypatch):
+    # "Pale Ale" est un `style_raw` CONNU (présent dans le mapping) mais
+    # explicitement mappé à `null` (ambigu, plusieurs styles BJCP
+    # défendables) -- doit rester NULL, jamais un choix arbitraire.
+    recipes_path = str(tmp_path / "recipes.db")
+    con = connect(recipes_path); init_recipes_db(con)
+    con.execute("INSERT INTO recipes (uid, source, source_id, style_raw) "
+               "VALUES ('mmum-1', 'mmum', '1', 'Pale Ale')")
+    con.commit(); con.close()
+    monkeypatch.setattr(ingest, "_load_yaml_mapping",
+                        lambda filename: {"Pale Ale": None})
+
+    ingest.reconcile_mmum_style_ids(recipes_path)
+
+    con = connect(recipes_path)
+    style_id = con.execute("SELECT style_id FROM recipes WHERE uid='mmum-1'").fetchone()[0]
+    con.close()
+    assert style_id is None
+
+def test_reconcile_mmum_style_ids_leaves_unknown_style_raw_null(tmp_path, monkeypatch):
+    # style_raw absent du fichier de mapping (jamais revu) -- même
+    # résultat NULL qu'un cas ambigu connu, jamais un style fabriqué.
+    recipes_path = str(tmp_path / "recipes.db")
+    con = connect(recipes_path); init_recipes_db(con)
+    con.execute("INSERT INTO recipes (uid, source, source_id, style_raw) "
+               "VALUES ('mmum-1', 'mmum', '1', 'Some Never-Reviewed Style')")
+    con.commit(); con.close()
+    monkeypatch.setattr(ingest, "_load_yaml_mapping", lambda filename: {})
+
+    ingest.reconcile_mmum_style_ids(recipes_path)
+
+    con = connect(recipes_path)
+    style_id = con.execute("SELECT style_id FROM recipes WHERE uid='mmum-1'").fetchone()[0]
+    con.close()
+    assert style_id is None
+
+def test_reconcile_mmum_style_ids_is_idempotent(tmp_path, monkeypatch):
+    recipes_path = str(tmp_path / "recipes.db")
+    con = connect(recipes_path); init_recipes_db(con)
+    con.execute("INSERT INTO recipes (uid, source, source_id, style_raw) "
+               "VALUES ('mmum-1', 'mmum', '1', 'Weizenbock')")
+    con.commit(); con.close()
+    monkeypatch.setattr(ingest, "_load_yaml_mapping",
+                        lambda filename: {"Weizenbock": "10C"})
+
+    ingest.reconcile_mmum_style_ids(recipes_path)
+    ingest.reconcile_mmum_style_ids(recipes_path)
+
+    con = connect(recipes_path)
+    n = con.execute("SELECT COUNT(*) FROM recipes").fetchone()[0]
+    style_id = con.execute("SELECT style_id FROM recipes WHERE uid='mmum-1'").fetchone()[0]
+    con.close()
+    assert n == 1
+    assert style_id == "10C"
+
+
+# --------------------------------------------------------------------------- #
 # T93 -- combinaisons de houblons fréquentes (ingest.compute_frequent_hop_combinations)
 # --------------------------------------------------------------------------- #
 def _build_t93_recipes_db(path, recipes):
@@ -1729,6 +1820,84 @@ def test_compute_frequent_hop_combinations_stage_slice_differs_from_all_stages(t
     # citra+mosaic n'est PAS ensemble EN dry_hop (citra est en boil) --
     # seul azacca+simcoe (les deux en dry_hop) doit apparaître dans cette tranche.
     assert dry_hop_combos == {"azacca|simcoe"}
+
+def _set_recipe_style_ids(recipes_path, style_by_index):
+    """`style_by_index` : {i: style_id} pour les recettes "mmum-{i}" créées
+    par `_build_t93_recipes_db` -- indices absents laissés à NULL (non
+    résolu, même sémantique que `reconcile_mmum_style_ids`)."""
+    con = connect(recipes_path)
+    for i, style_id in style_by_index.items():
+        con.execute("UPDATE recipes SET style_id=? WHERE uid=?", (style_id, f"mmum-{i}"))
+    con.commit(); con.close()
+
+def test_compute_frequent_hop_combinations_writes_per_style_slice(tmp_path):
+    # T94 : une tranche PAR STYLE en plus des tranches par stade -- citra+
+    # mosaic ensemble dans 22 recettes du style "21A", jamais dans le style
+    # "5B" (aucune recette de ce style dans ce jeu de données).
+    recipes_path = str(tmp_path / "recipes.db")
+    _build_t93_recipes_db(recipes_path, [[("citra", "boil"), ("mosaic", "boil")]] * 22)
+    _set_recipe_style_ids(recipes_path, {i: "21A" for i in range(22)})
+    aroma_path = str(tmp_path / "aromahops.db")
+    con = connect(aroma_path); init_db(con); con.close()
+
+    ingest.compute_frequent_hop_combinations(recipes_path, aroma_path, min_support=20)
+
+    con = connect(aroma_path)
+    row = con.execute(
+        "SELECT support, total_recipes, lift FROM hop_combinations "
+        "WHERE combo='citra|mosaic' AND size=2 AND style_id='21A' AND stage IS NULL").fetchone()
+    other_style = con.execute(
+        "SELECT COUNT(*) FROM hop_combinations WHERE style_id='5B'").fetchone()[0]
+    con.close()
+    assert row is not None
+    assert row["support"] == 22
+    assert row["total_recipes"] == 22
+    assert other_style == 0
+
+def test_compute_frequent_hop_combinations_recipe_without_style_id_excluded_from_style_slices(tmp_path):
+    # Une recette sans style_id résolu ne doit contribuer à AUCUNE tranche
+    # par style (ni numérateur ni dénominateur) -- jamais un style fabriqué
+    # par défaut. Les tranches par stade/globale, elles, restent inchangées.
+    recipes_path = str(tmp_path / "recipes.db")
+    _build_t93_recipes_db(recipes_path, [[("citra", "boil"), ("mosaic", "boil")]] * 20)
+    # aucun style_id assigné -- toutes les recettes restent style_id NULL
+    aroma_path = str(tmp_path / "aromahops.db")
+    con = connect(aroma_path); init_db(con); con.close()
+
+    ingest.compute_frequent_hop_combinations(recipes_path, aroma_path, min_support=20)
+
+    con = connect(aroma_path)
+    n_style_rows = con.execute(
+        "SELECT COUNT(*) FROM hop_combinations WHERE style_id IS NOT NULL").fetchone()[0]
+    global_row = con.execute(
+        "SELECT support FROM hop_combinations WHERE style_id IS NULL AND stage IS NULL "
+        "AND combo='citra|mosaic'").fetchone()
+    con.close()
+    assert n_style_rows == 0
+    assert global_row["support"] == 20
+
+def test_compute_frequent_hop_combinations_style_slice_ignores_stage(tmp_path):
+    # Une tranche par style dédoublonne les varietys sur TOUTES les étapes
+    # (même logique que la tranche globale stage=None) -- un houblon en
+    # boil et un autre en dry_hop DANS LA MÊME RECETTE ET LE MÊME STYLE
+    # comptent ensemble, même si aucune tranche par STADE ne les verrait
+    # co-occurrer.
+    recipes_path = str(tmp_path / "recipes.db")
+    _build_t93_recipes_db(recipes_path,
+        [[("citra", "boil"), ("mosaic", "dry_hop")]] * 20)
+    _set_recipe_style_ids(recipes_path, {i: "21A" for i in range(20)})
+    aroma_path = str(tmp_path / "aromahops.db")
+    con = connect(aroma_path); init_db(con); con.close()
+
+    ingest.compute_frequent_hop_combinations(recipes_path, aroma_path, min_support=20)
+
+    con = connect(aroma_path)
+    row = con.execute(
+        "SELECT support FROM hop_combinations WHERE combo='citra|mosaic' AND size=2 "
+        "AND style_id='21A' AND stage IS NULL").fetchone()
+    con.close()
+    assert row is not None
+    assert row["support"] == 20
 
 def test_compute_frequent_hop_combinations_is_a_full_recompute_not_incremental(tmp_path):
     # Rejoue avec un min_support plus strict -- les lignes de la passe

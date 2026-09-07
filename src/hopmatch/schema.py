@@ -263,13 +263,16 @@ SCHEMA += HOP_USAGE_STATS_SCHEMA
 # `size` : 2, 3 ou 4 -- JAMAIS dérivé d'un autre `size` (un triplet n'est
 # JAMAIS reconstruit depuis 3 paires, uniquement compté quand les 3 houblons
 # apparaissent ENSEMBLE dans une même recette, voir BACKLOG.md T93).
-# `style_id` : BJCP style_id, NULL = toutes recettes confondues -- colonne
-# PRÉSENTE mais TOUJOURS NULL pour l'instant (2026-09-03) : `recipes.
-# style_id` n'est peuplé par AUCUN ticket actuel (T91 l'a explicitement
-# laissé hors périmètre), donc un filtre par style ne peut structurellement
-# rien retourner tant qu'une réconciliation style_raw -> style_id n'existe
-# pas -- colonne gardée pour ne pas re-migrer le schéma le jour où elle
-# arrive, jamais un filtre qui ferait semblant de marcher.
+# `style_id` : BJCP style_id, NULL = toutes recettes confondues. Peuplé
+# depuis T94 (2026-09-07) : `ingest.reconcile_mmum_style_ids` résout
+# `recipes.style_raw` (texte libre allemand, MMuM) -> `recipes.style_id`
+# via `data/mappings/beer_style_aliases.yaml` (section "MMuM recipe
+# corpus"), et `compute_frequent_hop_combinations` calcule ensuite une
+# tranche PAR style résolu, EN PLUS des tranches par stade -- jamais
+# croisées (une tranche par style est TOUJOURS `stage IS NULL`, voir son
+# docstring). Une recette dont le `style_raw` reste sans équivalent BJCP
+# défendable (ambigu ou jamais revu) garde `style_id IS NULL` et ne
+# contribue à aucune tranche par style -- jamais un style fabriqué.
 # `stage` : 'boil'/'whirlpool'/'first_wort'/'dry_hop' (vocabulaire
 # `recipe_hops.stage`, T91) ou NULL = toutes étapes confondues (vue
 # PRINCIPALE du ticket). Apport ORIGINAL signalé par le ticket : "les 3
