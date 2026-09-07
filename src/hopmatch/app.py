@@ -6337,7 +6337,20 @@ def _coverage(con) -> None:
         else:
             plain = [r for r in not_covered if not r["precursor_by"]]
             precursor_only = [r for r in not_covered if r["precursor_by"]]
+            # Deux catégories bien distinctes (2026-09-07, retour utilisateur
+            # explicite : "c'est pas clair quels sont les molécules
+            # manquantes, et pourquoi on a 2 catégories... avec des fonds
+            # orange ou gris") -- avant ce correctif, seule la catégorie GRISE
+            # avait une légende introductive (`st.caption` juste au-dessus des
+            # badges), la catégorie ORANGE démarrait directement sur les
+            # badges sans explication, laissant deviner ce que la couleur
+            # signifiait. Les deux ont désormais une légende introductive au
+            # MÊME niveau (`st.write` en gras, style pair), jamais une
+            # asymétrie qui laisserait une catégorie moins expliquée que
+            # l'autre.
             if plain:
+                st.write("**Missing entirely** — never delivered by any addition in this "
+                        "plan, at any stage:")
                 with st.container(horizontal=True):
                     for r in plain:
                         label = _compound_display_label(r["compound"])
@@ -6349,8 +6362,9 @@ def _coverage(con) -> None:
                             help_text = "a priori not delivered by any addition in this plan."
                         st.badge(label, color="orange", help=help_text)
             if precursor_only:
-                st.caption("Generate a related aroma through oxidation instead of being "
-                          "delivered directly (see the grid above):")
+                st.write("**Present, but only as an oxidation precursor** — generate a "
+                        "related aroma through oxidation instead of being delivered "
+                        "directly (see the grid above):")
                 with st.container(horizontal=True):
                     for r in precursor_only:
                         st.badge(_compound_display_label(r["compound"]), color="gray",
@@ -6358,7 +6372,8 @@ def _coverage(con) -> None:
             st.write("**Where would these come from?**")
             plan_varieties = {v for v, _ in plan}
             for r in not_covered:
-                st.caption(f"**{_compound_display_label(r['compound'])}** — " +
+                category = "missing entirely" if not r["precursor_by"] else "precursor only"
+                st.caption(f"**{_compound_display_label(r['compound'])}** ({category}) — " +
                           _coverage_source_suggestions(hops, comp, r["compound"], plan_varieties))
 
     with _panel_expander("Why \"a priori\"? What does each compound's coverage look like?"):

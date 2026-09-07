@@ -1480,6 +1480,35 @@ def test_coverage_shows_where_would_this_come_from_panel(toy_cwd):
     assert any("Linalool" in c.value and "already in your plan: Hopa" in c.value
               for c in at.caption)
 
+def test_coverage_distinguishes_missing_entirely_from_precursor_only(toy_cwd):
+    # 2026-09-07, retour utilisateur direct : "c'est pas clair quels sont
+    # les molécules manquantes, et pourquoi on a 2 catégories... avec des
+    # fonds orange ou gris" -- les deux catégories doivent maintenant porter
+    # une légende introductive symétrique (pas seulement la catégorie grise
+    # comme avant ce correctif), et la ligne "Where would these come from?"
+    # doit annoter chaque composé de sa catégorie.
+    # hopa (fixture) n'a QUE linalool mesuré (T119 : "lost" au boil, jamais
+    # "precursor") -- aucun composé de la fixture ne tombe naturellement
+    # dans la catégorie "precursor only" pour hopa. Humulène ajouté ici pour
+    # obtenir un vrai cas precursor (state="precursor" au boil, T119).
+    con = connect(os.path.join(os.getcwd(), "aromahops.db"))
+    con.execute("INSERT INTO hop_composition VALUES "
+               "('hopa', 'humulene', 5, 5, 'pct_oil', 'toy', 'ok', '')")
+    con.commit(); con.close()
+
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("coverage").run()
+    at.multiselect(key="coverage_hops").select("Hopa").run()
+    at.segmented_control(key="coverage_stage_hopa").set_value(["Boil"]).run()
+    assert not at.exception
+    assert any("Missing entirely" in m.value for m in at.markdown)
+    assert any("Present, but only as an oxidation precursor" in m.value for m in at.markdown)
+    # Myrcène : jamais mesuré chez hopa -- catégorie "missing entirely".
+    # Humulène : mesuré mais precursor au boil (T119) -- "precursor only".
+    assert any("Myrcene" in c.value and "missing entirely" in c.value for c in at.caption)
+    assert any("Humulene" in c.value and "precursor only" in c.value for c in at.caption)
+
 # --------------------------------------------------------------------------- #
 # T126 -- "Hop addition timing" (Browse, matching.hop_addition_timing)
 # --------------------------------------------------------------------------- #
