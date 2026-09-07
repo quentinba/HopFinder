@@ -1536,6 +1536,57 @@ Elles sont écrites pour qu'aucune décision implicite ne reste à deviner.
     HopFinder-db (`aromahops.db` ET `recipes.db`, ce dernier déjà versionné
     dans ce dépôt) + reboot Streamlit Cloud nécessaire.
 
+  **BUG RÉEL trouvé et corrigé (2026-09-07, même jour, retour utilisateur
+  en direct) : « American Pale Ale, étrange qu'il n'y ait jamais de
+  résultat ».** Pas un problème de `min_support` -- `"Pale Ale"` (SANS
+  qualificatif) est le `style_raw` le PLUS FRÉQUENT de tout le corpus MMuM
+  (222/1844 recettes, 12 %), laissé `null` dans le suivi précédent en
+  réutilisant tel quel le verdict "ambigu" déjà présent dans la section
+  Yakima du même fichier (`beer_style_aliases.yaml`) -- sans revérifier si
+  cette ambiguïté tenait aussi pour MMuM. Elle ne tenait pas : vérifié en
+  direct que les 222 recettes "Pale Ale" de MMuM sont très majoritairement
+  houblonnées en variétés américaines (Cascade 159, Citra 117, Amarillo
+  58, Simcoe 56, Chinook/Galaxy/Centennial/Mosaic 27-29 chacune -- aucune
+  variété anglaise classique à un volume comparable). Résultat concret :
+  **American Pale Ale (18B) avait 0 recette résolue**, donc structurellement
+  aucune combinaison possible, quel que soit `min_support`.
+
+  Tension identifiée avant de corriger : le fichier a une règle explicite
+  (« une étiquette, une valeur partagée, jamais scindée par source ») posée
+  lors de T84 -- or la même étiquette "Pale Ale" sert aussi de tag éditorial
+  générique Yakima (44 variétés) + BeerMaverick (61 variétés), où
+  l'ambiguïté anglais/américain reste, elle, réellement défendable.
+  **Décision utilisateur (2026-09-07, question posée en direct)** : résoudre
+  "Pale Ale" -> "18B" PARTOUT (garde la règle "un fichier, jamais scindé"
+  intacte), accepté comme une légère perte de précision sur les ~105
+  variétés Yakima/BeerMaverick concernées (suggestion éditoriale, pas une
+  entrée de score).
+
+  - `beer_style_aliases.yaml` : `"Pale Ale": null` déplacé de la section
+    "no defensible match" vers "Resolved" -> `"18B"`, commentaire complet
+    documentant le raisonnement et le compromis accepté.
+  - `hop_beer_styles` (105 lignes `style_label='Pale Ale'`, sources yakima+
+    beermaverick) : mis à jour rétroactivement par `UPDATE` direct plutôt
+    qu'un re-crawl complet (les deux sources sont lentes/anti-bot) --
+    `style_label` déjà stocké permet de retrouver exactement les lignes
+    concernées sans ambiguïté.
+  - `ingest.reconcile_mmum_style_ids` + `ingest.compute_frequent_hop_
+    combinations` relancées : **couverture MMuM 52,2 % -> 64,2 %** (962 ->
+    1184/1844 recettes résolues), **6/38 styles** avec au moins une
+    combinaison au seuil par défaut (contre 5/37 avant). American Pale Ale
+    a maintenant 219 recettes résolues et des combinaisons réelles
+    plausibles (Amarillo+Simcoe lift 2.70, Cascade+Magnum+Perle lift 6.26
+    en taille 3...) -- vérifié en direct (Chrome, thème sombre).
+  - Aucun changement de code (fix 100 % données + doc) -- suite verte
+    inchangée (536 tests). `aromahops.db`/`recipes.db` repoussées vers
+    HopFinder-db + reboot Streamlit Cloud nécessaire.
+  - **Leçon retenue pour le reste du fichier** : les ~30 autres entrées
+    `null` de la section Yakima n'ont PAS été revérifiées empiriquement
+    contre le corpus MMuM (seul "Pale Ale" a été signalé et creusé) -- un
+    futur signalement similaire sur un autre style bare (`"Stout"`,
+    `"Lager"`, `"IPA"`...) mériterait la même vérification empirique avant
+    de conclure à un simple manque de données.
+
 - [ ] **T118 — Import Brewfather (recettes personnelles)**
 
   **API** : `https://api.brewfather.app/v2/recipes` (documentation :

@@ -31,8 +31,27 @@
 # Counts = number of Yakima varieties carrying that exact label (live
 # Algolia fetch, 2026-08-27) -- for traceability only, not used at runtime.
 
-# --- Resolved (15) ---------------------------------------------------------
+# --- Resolved (16) ---------------------------------------------------------
 "American Pale Ale": "18B"       # 17 -- exact BJCP name match
+# "Pale Ale" (bare, T94 2026-09-07 -- decision, user, after live report
+# "American Pale Ale shows nothing, weird?") : originally left null here
+# (spans 18B American/11C/12C English, no defensible single match on this
+# label ALONE) -- correct call for THIS section (Yakima's editorial "beer
+# types" tag, marketing copy, genuinely could mean several pale-ale
+# substyles). But the exact same literal string is ALSO MMuM's single
+# largest style_raw bucket (222/1844 recipes, 12% of the whole corpus) --
+# reused blindly there without re-checking, which is what actually caused
+# "American Pale Ale" to show 0 recipes (not a min_support problem, see
+# BACKLOG.md T94 follow-up). Checked empirically: the 222 MMuM "Pale Ale"
+# recipes are overwhelmingly American-hopped (Cascade 159, Citra 117,
+# Amarillo 58, Simcoe 56, Chinook/Galaxy/Centennial/Mosaic 27-29 each --
+# not a single classic English variety anywhere near that volume). Given
+# this file's own rule (one label, one shared value, never split per
+# source, see file header) and this real evidence, resolved to "18B"
+# HERE TOO rather than carving out a source-specific exception -- accepted
+# as a minor precision trade for the ~44 Yakima varieties generically
+# tagged "Pale Ale" (editorial suggestion field, not a scored input).
+"Pale Ale": "18B"                # 45 (Yakima) + 222 (MMuM, see above)
 "Saison": "25B"                  # 13 -- exact BJCP name match
 "Biere De Saison": "25B"         # 1  -- same style, alternate spelling
 "Kolsch": "5B"                   # 7  -- Kölsch, exact match modulo accent
@@ -53,10 +72,9 @@
 "Blonde Ale": "18A"              # 2  -- exact BJCP name match (vs. Belgian Blond Ale 25A, see above)
 "Belgian Style Lambic": "23D"    # 1  -- Lambic (bare style, not Gueuze/Fruit Lambic specifically)
 
-# --- No defensible single BJCP match (32) -----------------------------------
+# --- No defensible single BJCP match (31) -----------------------------------
 "Lager": null                    # 65 -- spans 1A/1B/2A/3A/4A/... no single style
 "IPA": null                      # 56 -- spans 21A/21B/21C/12C/22A -- see "American IPA" would be a guess
-"Pale Ale": null                 # 45 -- spans 18B (American)/11C/12C (English) -- distinct from "American Pale Ale" above
 "Pilsner": null                  # 40 -- spans 2A/3A/3B/5D -- no single "Pilsner" BJCP id
 "Wheat": null                    # 23 -- American Wheat Beer 1D vs Weissbier 10A, both defensible (ticket's own example)
 "Stout": null                    # 22 -- spans 15B/15C/16A/16B/16C/16D/20B/20C
