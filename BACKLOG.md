@@ -2291,7 +2291,7 @@ Elles sont écrites pour qu'aucune décision implicite ne reste à deviner.
   thèmes, console sans `WARN` Vega-Lite, et les 5 brackets visibles sur une
   comparaison incluant Ella.
 
-- [ ] **T111 — Séparer `recipes.db` de `aromahops.db`** *(D4 tranchée)*
+- [x] **T111 — Séparer `recipes.db` de `aromahops.db`** *(D4 tranchée)*
 
   Les recettes brutes (T91, T118) vivent dans **`recipes.db`**, un fichier
   distinct. `aromahops.db` ne reçoit que les **agrégats** (T93, T126, T127).
@@ -2310,6 +2310,18 @@ Elles sont écrites pour qu'aucune décision implicite ne reste à deviner.
   démarrage de l'app. ⚠ Rappel : **reboot Streamlit Cloud obligatoire après
   tout push de base** (le téléchargement ne se redéclenche que si le fichier
   local du conteneur est absent).
+
+  **FAIT rétroactivement (2026-09-07)** -- ce ticket décrivait exactement ce
+  que T91 (crawl MMuM), T92 (réconciliation) et T93/T126 (agrégats) avaient
+  déjà implémenté au fil de l'eau, sans ticket dédié : `recipes.db` fichier
+  séparé (`ingest.ingest_mmum`/`reconcile_mmum_hop_varieties`), les 3
+  commandes CLI d'agrégation (`compute-hop-combinations`, `compute-
+  addition-timing`, `reconcile-mmum`) prennent bien `--recipes-db` (défaut
+  `recipes.db`) + `--db` (défaut `aromahops.db`, lu/écrit séparément),
+  `app._fetch_remote_db`/`_DB_SOURCE_URL_SECRET` jamais touchés. Vérifié en
+  direct (2026-09-07) : `aromahops.db` (6,1 Mo) et `recipes.db` (958 Ko)
+  existent bien comme deux fichiers distincts sur disque. Fermé sans code
+  nouveau -- doublon reconnu après coup plutôt que refait.
 
 - [ ] **T112 — `INGREDIENT_DESCRIPTORS` face au vocabulaire élargi**
 
