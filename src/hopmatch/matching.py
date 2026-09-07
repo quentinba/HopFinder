@@ -1210,6 +1210,41 @@ _AROMATIC_ROLE = {"aromatic", "both"}
 _BITTERING_ROLE = {"bittering", "both"}
 
 
+def _style_restricted_pool(con, style_id: str | None) -> set[str] | None:
+    """T104 : ensemble des varietys RÉELLEMENT utilisées dans `style_id`
+    (beer-analytics, `style_hop_usage`, `usage_type="any"` -- "utilisé
+    À CE STYLE", sans restreindre à un stade de procédé particulier,
+    cohérent avec le défaut de `style_hop_frequency`).
+
+    Retourne `None` si `style_id` est `None`, ou si le style n'a AUCUNE
+    ligne résolue vers une variety (style inconnu/non couvert par
+    beer-analytics, ou nom de style non résolu -- voir T85, `data/
+    mappings/beer_style_aliases.yaml`) -- signal explicite pour l'appelant
+    de retomber sur le pool générique non restreint (repli silencieux,
+    même pattern que `purpose_by_variety`/T49), JAMAIS une erreur ni un
+    pool vide qui bloquerait tout blend.
+
+    ⚠ **Pas de seuil de support supplémentaire au-delà de ce que beer-
+    analytics fournit déjà.** Le ticket d'origine envisageait un seuil sur
+    un NOMBRE DE RECETTES ABSOLU ("support >= N recettes") -- vérifié en
+    direct (2026-09-07) que `style_hop_usage` ne porte AUCUNE colonne de
+    compte absolu, seulement des pourcentages (`recipes_pct_latest`/
+    `recipes_pct_avg24m`). Vérifié aussi que la source elle-même
+    (`popular-hops.json`, T86) livre déjà une liste top-N CURÉE côté
+    beer-analytics, pas une liste exhaustive bruitée : max 11 houblons par
+    style, médiane 7, MÊME SANS AUCUN FILTRE de pourcentage sur les 952
+    lignes réelles de la base. Un seuil supplémentaire ici rétrécirait
+    encore un pool déjà petit sans filtrer de bruit réel -- utiliser TOUTE
+    ligne résolue est la lecture honnête de ce que la source fournit,
+    jamais un nombre inventé pour imiter le "N recettes" du ticket."""
+    if style_id is None:
+        return None
+    pool = {r["variety"] for r in con.execute(
+        "SELECT DISTINCT variety FROM style_hop_usage "
+        "WHERE style_id=? AND usage_type='any' AND variety IS NOT NULL", (style_id,))}
+    return pool or None
+
+
 def _grow_pick(pool: list[dict], partner_source: list[str], blend_varieties: list[str],
               target: set[str], by_variety: dict, freq: dict[tuple[str, str], float],
               pairing_top_n: int) -> tuple[dict, str]:
@@ -1374,7 +1409,8 @@ def _pairing_grown_blends(con, candidates: list[dict], target: set[str], max_hop
 
 def contrast_blend(con, note: str | None = None, descriptors: list[str] | None = None,
                    target_descriptors: list[str] | None = None, purposes: list[str] | None = None,
-                   max_hops: int = 5, top_candidates: int = 30, base_variety: str | None = None):
+                   max_hops: int = 5, top_candidates: int = 30, base_variety: str | None = None,
+                   style_id: str | None = None):
     """
     Propose des blends de taille croissante (1..max_hops) plutôt qu'un seul
     blend "optimal" — voir `_pairing_grown_blends` pour le mécanisme complet
@@ -1399,23 +1435,53 @@ def contrast_blend(con, note: str | None = None, descriptors: list[str] | None =
     seul), le pool n'a simplement plus de candidat du rôle complémentaire,
     et le mécanisme retombe sur son repli générique déjà existant (documenté
     dans `_pairing_grown_blends`), pas une erreur.
+
+    `style_id` (T104, 2026-09-07, optionnel) : restreint le pool de
+    candidats aux houblons RÉELLEMENT utilisés dans ce style BJCP
+    (`_style_restricted_pool`, beer-analytics `style_hop_usage`) -- **la
+    croissance par pairing reste le pairing BeerMaverick GLOBAL**
+    (`_pairing_grown_blends`, inchangé), pas un pairing "du style" : vérifié
+    en direct (2026-09-07) que `style_hop_pairings` (T87) ne porte AUCUNE
+    donnée de paire houblon<->houblon (seulement une part de charge PAR
+    HOUBLON dans le style, aucune colonne de second houblon) -- utiliser
+    cette table comme s'il s'agissait d'un pairing aurait fabriqué une
+    relation qui n'existe pas dans la source, décision utilisateur explicite
+    de ne PAS le faire.
+
+    **Repli silencieux** si le style est inconnu/non résolu par
+    beer-analytics (`_style_restricted_pool` renvoie `None`) -- comportement
+    IDENTIQUE à `style_id=None` (pool générique, jamais restreint), même
+    pattern que `purpose_by_variety`/T49. Si le style EST connu mais
+    qu'aucun candidat pertinent (déjà filtré par le score contrast) n'est
+    utilisé dans ce style, ce N'EST PAS un repli silencieux : `blends`
+    reste vide plutôt que de fabriquer un résultat qui ignorerait la
+    contrainte demandée -- l'absence de recoupement est une information
+    réelle, pas une erreur à masquer.
+
+    ⚠ `style_id=None` (défaut) produit EXACTEMENT le comportement d'avant
+    ce ticket -- vérifié par les tests existants, inchangés.
     """
     r = contrast(con, note=note, descriptors=descriptors,
                 target_descriptors=target_descriptors, purposes=purposes, top=top_candidates)
     target = set(r["affinity_target"])
     candidates = [dict(h, covers=set(h["contrast_via"])) for h in r["ranked"]]
+    style_pool = _style_restricted_pool(con, style_id)
+    style_restricted = style_pool is not None
+    if style_pool is not None:
+        candidates = [c for c in candidates if c["variety"] in style_pool]
     hops, _, _, _ = load(con)
     purpose_by_variety = {v: h.get("purpose") for v, h in hops.items()}
     blends = _pairing_grown_blends(con, candidates, target, max_hops=max_hops,
                                    base_variety=base_variety,
                                    purpose_by_variety=purpose_by_variety)
     return {"mode": "contrast_blend", "note": r["note"], "affinity_target": r["affinity_target"],
-           "unmapped": r["unmapped"], "blends": blends}
+           "unmapped": r["unmapped"], "blends": blends, "style_id": style_id,
+           "style_restricted": style_restricted}
 
 
 def amplify_blend(con, note: str, w_mol: float = 0.5, w_desc: float = 0.5, use_oav=False,
                   max_hops: int = 5, top_candidates: int = 30, descriptors: list[str] | None = None,
-                  base_variety: str | None = None):
+                  base_variety: str | None = None, style_id: str | None = None):
     """
     Équivalent de `contrast_blend` pour `amplify` (T31/T32 backlog, décision
     utilisateur explicite) : propose des blends de taille croissante (1..max_hops),
@@ -1437,12 +1503,20 @@ def amplify_blend(con, note: str, w_mol: float = 0.5, w_desc: float = 0.5, use_o
     `note_descriptors` peuplé, comme `amplify`) : sans descripteurs, il n'y a
     rien à couvrir par un blend — renvoie `blends: []` avec `has_descriptors:
     False` plutôt qu'une erreur, cohérent avec le repli honnête d'`amplify`.
+
+    `style_id` (T104, 2026-09-07, optionnel) : voir la docstring de
+    `contrast_blend` pour le détail complet -- même mécanisme
+    (`_style_restricted_pool`, pool restreint aux houblons RÉELLEMENT
+    utilisés dans ce style, croissance toujours sur le pairing BeerMaverick
+    GLOBAL, repli silencieux si le style est inconnu, `style_id=None`
+    inchangé par rapport à avant ce ticket).
     """
     r = amplify(con, note, w_mol=w_mol, w_desc=w_desc, use_oav=use_oav,
                top=top_candidates, descriptors=descriptors)
     if not r["has_descriptors"]:
         return {"mode": "amplify_blend", "note": note, "target_descriptors": [],
-               "has_descriptors": False, "blends": []}
+               "has_descriptors": False, "blends": [], "style_id": style_id,
+               "style_restricted": False}
     hops, _, hop_desc, _ = load(con)
     ndesc = _normalize_descriptors(descriptors) if descriptors else get_note_descriptors(con, note)
     target = set(ndesc)
@@ -1451,12 +1525,17 @@ def amplify_blend(con, note: str, w_mol: float = 0.5, w_desc: float = 0.5, use_o
         covers = target & hop_desc.get(h["variety"], set())
         if covers:
             candidates.append(dict(h, covers=covers))
+    style_pool = _style_restricted_pool(con, style_id)
+    style_restricted = style_pool is not None
+    if style_pool is not None:
+        candidates = [c for c in candidates if c["variety"] in style_pool]
     purpose_by_variety = {v: h.get("purpose") for v, h in hops.items()}
     blends = _pairing_grown_blends(con, candidates, target, max_hops=max_hops,
                                    base_variety=base_variety,
                                    purpose_by_variety=purpose_by_variety)
     return {"mode": "amplify_blend", "note": note, "target_descriptors": sorted(target),
-           "has_descriptors": True, "blends": blends}
+           "has_descriptors": True, "blends": blends, "style_id": style_id,
+           "style_restricted": style_restricted}
 
 
 # --------------------------------------------------------------------------- #

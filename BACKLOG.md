@@ -1840,7 +1840,7 @@ Elles sont écrites pour qu'aucune décision implicite ne reste à deviner.
   identique, plutôt que deux blocs de texte nu à côté d'une carte encadrée.
   Vérifié en direct (Chrome, 21A American IPA, clair ET sombre).
 
-- [ ] **T104 — Blends contraints par le style**
+- [x] **T104 — Blends contraints par le style**
 
   `contrast_blend` / `amplify_blend` acceptent un `style_id` optionnel :
   - le pool de candidats est restreint aux houblons réellement utilisés dans
@@ -1854,6 +1854,65 @@ Elles sont écrites pour qu'aucune décision implicite ne reste à deviner.
   ⚠ Ne pas casser la signature existante : `style_id=None` doit produire
   exactement le comportement d'aujourd'hui, vérifié par les tests existants
   qui doivent rester verts sans modification.
+
+  **FAIT (2026-09-07).** `matching._style_restricted_pool(con, style_id)`
+  (lecture `style_hop_usage`, `usage_type="any"`) + paramètre `style_id`
+  ajouté à `contrast_blend`/`amplify_blend`.
+
+  ⚠ **Prémisse du ticket révisée avant implémentation, sur question posée
+  à l'utilisateur.** "La croissance par pairing privilégie les paires du
+  style (T87)" supposait que `style_hop_pairings` porte une vraie relation
+  houblon<->houblon -- vérifié en direct (2026-09-07) que ce n'est PAS le
+  cas : la table n'a qu'UNE colonne houblon (`share_q1/median/q3/mean` =
+  part de charge de CE houblon dans les recettes multi-houblons du style,
+  PAS une fréquence de paire, confirmé par la docstring de `ingest.
+  ingest_style_hop_pairings` elle-même). Utiliser cette table comme un
+  pairing aurait fabriqué une relation absente de la source. Décision
+  utilisateur explicite (question posée, réponse choisie) : **pool restreint
+  par le style, croissance INCHANGÉE sur le pairing BeerMaverick global**
+  (`_pairing_grown_blends`, aucune modification) -- pas la version "pairing
+  du style" du ticket d'origine.
+
+  ⚠ **"Support >= N recettes" également révisé.** `style_hop_usage` ne
+  porte AUCUN compte absolu de recettes (seulement `recipes_pct_latest`/
+  `recipes_pct_avg24m`, des pourcentages) -- vérifié en direct. Vérifié
+  aussi que la source (`popular-hops.json`, T86) livre déjà une liste
+  top-N CURÉE par style (max 11 houblons/style, médiane 7, MÊME sans aucun
+  filtre de pourcentage sur les 952 lignes réelles) : un seuil
+  supplémentaire aurait rétréci un pool déjà petit sans filtrer de bruit
+  réel. `_style_restricted_pool` utilise donc TOUTE ligne résolue vers une
+  variety pour ce `style_id`, sans seuil inventé pour imiter le "N
+  recettes" du ticket.
+
+  **Repli silencieux vs. vide honnête, distingués** : style inconnu/non
+  résolu par beer-analytics -> pool générique inchangé
+  (`style_restricted=False`, même pattern que `purpose_by_variety`/T49).
+  Style CONNU mais aucun candidat pertinent n'y est utilisé -> `blends: []`
+  (PAS un repli sur le pool générique, qui masquerait silencieusement
+  l'absence de recoupement réel entre la cible et ce style). Deux nouvelles
+  clés informatives sur le retour (`style_id`, `style_restricted`) --
+  ajout de champs seulement, jamais un champ existant modifié.
+
+  **`style_id=None` vérifié inchangé** : les 502 tests existants passent
+  SANS modification (aucun test touché pour le faire passer), preuve
+  structurelle que le comportement par défaut n'a pas bougé.
+
+  **Vérifié sur la base réelle** (`aromahops.db`, style '21A' American
+  IPA) : pool restreint à 8 houblons réellement utilisés dans ce style
+  (citra/mosaic/simcoe/amarillo/cascade/columbus/centennial/chinook) --
+  `contrast_blend(descriptors=["citrus","tropical"], style_id="21A")`
+  produit un blend authentique au style (amarillo/chinook/columbus) là où
+  la version non restreinte tirait sur des houblons amérisants génériques
+  hors style (millennium/warrior, pas caractéristiques d'une American IPA).
+
+  10 nouveaux tests (`style_id=None` inchangé pour les deux fonctions,
+  restriction de pool effective, repli silencieux sur style inconnu, style
+  connu sans recoupement -> vide et non un repli, `has_descriptors=False`
+  porte quand même les nouveaux champs, `_style_restricted_pool` isolée),
+  suite verte (502 tests). Aucun changement GUI (fonctions `matching.py`
+  seules, pas de mode/carte T104 dans le ticket) -- pas d'entrée
+  `_RECENT_UPDATES`, pas de changement `aromahops.db` (code seul, aucun
+  push HopFinder-db nécessaire).
 
 - [x] **T105 — Ranges officiels vs ranges observés, côte à côte**
 

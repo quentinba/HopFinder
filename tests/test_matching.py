@@ -1813,3 +1813,96 @@ def test_hop_addition_timing_only_includes_bins_actually_observed(db):
     result = matching.hop_addition_timing(db, "citra")
     assert len(result["bins"]) == 1
     db.execute("DELETE FROM hop_addition_timing"); db.commit()
+
+
+# --------------------------------------------------------------------------- #
+# T104 -- contrast_blend/amplify_blend contraints par le style
+# (style_hop_usage, beer-analytics -- pool restriction, croissance
+# INCHANGÉE sur le pairing BeerMaverick global : vérifié en direct que
+# style_hop_pairings (T87) ne porte aucune donnée de paire réelle, décision
+# utilisateur explicite de ne pas l'utiliser comme si c'en était une)
+# --------------------------------------------------------------------------- #
+def _insert_style_hop_usage(con, style_id, varieties, usage_type="any"):
+    con.executemany(
+        "INSERT INTO style_hop_usage VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        [(f"test-{style_id}", style_id, v, v, usage_type, 0.5, 0.5, None, None, None,
+         "test", "2026-09-07") for v in varieties])
+    con.commit()
+
+def test_contrast_blend_style_id_none_matches_pre_t104_behavior(db):
+    # style_id=None (défaut) doit produire EXACTEMENT le comportement
+    # d'avant ce ticket -- même liste de blends que le test T33 existant
+    # (test_contrast_blend_grows_to_pool_exhaustion), plus les 2 nouvelles
+    # clés informatives.
+    r = matching.contrast_blend(db, descriptors=["citrus", "floral"], max_hops=5)
+    assert [b["size"] for b in r["blends"]] == [1, 2, 3, 4]
+    assert r["style_id"] is None
+    assert r["style_restricted"] is False
+
+def test_contrast_blend_restricts_pool_to_style_hop_usage(db):
+    # Sur "citrus,floral" (fixture), les 4 candidats pertinents sont
+    # saazer/simcoe/citra/mosaic (voir test_contrast_blend_grows_to_pool_
+    # exhaustion) -- restreindre le style à {citra, mosaic} ne doit plus
+    # jamais faire apparaître saazer/simcoe dans AUCUNE taille de blend.
+    _insert_style_hop_usage(db, "TEST-T104", ["citra", "mosaic"])
+    r = matching.contrast_blend(db, descriptors=["citrus", "floral"], max_hops=5,
+                                style_id="TEST-T104")
+    assert r["style_restricted"] is True
+    all_varieties = {h["variety"] for b in r["blends"] for h in b["hops"]}
+    assert all_varieties <= {"citra", "mosaic"}
+    assert all_varieties  # au moins un blend produit, pas vide
+    db.execute("DELETE FROM style_hop_usage"); db.commit()
+
+def test_contrast_blend_falls_back_silently_for_unknown_style(db):
+    # Style totalement absent de style_hop_usage -- repli sur le pool
+    # générique, jamais une erreur ni un blend vide.
+    r = matching.contrast_blend(db, descriptors=["citrus", "floral"], max_hops=5,
+                                style_id="NO-SUCH-STYLE-ID")
+    assert r["style_restricted"] is False
+    assert [b["size"] for b in r["blends"]] == [1, 2, 3, 4]  # comportement générique intact
+
+def test_contrast_blend_known_style_with_zero_relevant_overlap_returns_empty_not_fallback(db):
+    # Style CONNU (a bien des lignes style_hop_usage) mais dont le seul
+    # houblon n'a AUCUN rapport avec les candidats pertinents pour cette
+    # cible -- ne doit PAS retomber silencieusement sur le pool générique
+    # (ça masquerait une vraie absence de recoupement) : blends vide.
+    _insert_style_hop_usage(db, "TEST-T104-EMPTY", ["nonexistent-variety"])
+    r = matching.contrast_blend(db, descriptors=["citrus", "floral"], max_hops=5,
+                                style_id="TEST-T104-EMPTY")
+    assert r["style_restricted"] is True
+    assert r["blends"] == []
+    db.execute("DELETE FROM style_hop_usage"); db.commit()
+
+def test_amplify_blend_style_id_none_matches_pre_t104_behavior(db):
+    r = matching.amplify_blend(db, "_citrus", max_hops=2)
+    assert r["style_id"] is None
+    assert r["style_restricted"] is False
+
+def test_amplify_blend_restricts_pool_to_style_hop_usage(db):
+    _insert_style_hop_usage(db, "TEST-T104-AMP", ["citra"])
+    r = matching.amplify_blend(db, "_citrus", max_hops=3, style_id="TEST-T104-AMP")
+    assert r["style_restricted"] is True
+    all_varieties = {h["variety"] for b in r["blends"] for h in b["hops"]}
+    assert all_varieties <= {"citra"}
+    db.execute("DELETE FROM style_hop_usage"); db.commit()
+
+def test_amplify_blend_without_descriptors_still_reports_style_fields(db):
+    # "_passion" (fixture) existe dans aroma_notes mais N'A AUCUNE ligne
+    # note_descriptors -- has_descriptors=False (repli honnête déjà
+    # existant), doit quand même porter les 2 nouvelles clés, jamais un
+    # KeyError côté appelant.
+    r = matching.amplify_blend(db, "_passion", style_id="ANY-STYLE")
+    assert r["has_descriptors"] is False
+    assert r["style_id"] == "ANY-STYLE"
+    assert r["style_restricted"] is False
+
+def test_style_restricted_pool_returns_none_for_none_style_id(db):
+    assert matching._style_restricted_pool(db, None) is None
+
+def test_style_restricted_pool_returns_none_for_unknown_style(db):
+    assert matching._style_restricted_pool(db, "TOTALLY-UNKNOWN") is None
+
+def test_style_restricted_pool_returns_real_varieties(db):
+    _insert_style_hop_usage(db, "TEST-POOL", ["citra", "simcoe"])
+    assert matching._style_restricted_pool(db, "TEST-POOL") == {"citra", "simcoe"}
+    db.execute("DELETE FROM style_hop_usage"); db.commit()
