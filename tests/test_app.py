@@ -144,9 +144,13 @@ def _build_toy_db(path):
     ])
     # T94 : combinaison jouet pour "2A" uniquement -- "10A" reste SANS
     # AUCUNE ligne (teste le message honnête "not enough recipes", pas un
-    # tableau vide silencieux, voir app._styles).
+    # tableau vide silencieux, voir app._styles). Support=10 (pas 22) --
+    # au-dessus du plancher par défaut du slider min_support (5), mais en
+    # dessous d'un réglage plus strict -- teste que remonter le slider le
+    # fait disparaître (retour utilisateur 2026-09-07 : "seems empty most
+    # of the time, wdf?").
     con.executemany("INSERT INTO hop_combinations VALUES (?,?,?,?,?,?,?,?,?)", [
-        ("hopa|hopb", 2, "2A", None, 22, 30, 3.1, "test", "2026"),
+        ("hopa|hopb", 2, "2A", None, 10, 30, 3.1, "test", "2026"),
     ])
     # T106 : métadonnées d'identité -- hopa porte tout (cultivar/breeder/
     # release_year/pedigree + is_experimental=1), hopb seulement is_organic=1,
@@ -1364,7 +1368,7 @@ def test_styles_search_switching_query_clears_stale_disambiguation_pick(toy_cwd)
     assert at.selectbox(key="styles_style").value == ("10A", "Test Wheat Style")
 
 def test_styles_shows_frequent_hop_combinations_with_display_names(toy_cwd):
-    # T94 : "2A" a une combinaison jouet (hopa+hopb, support 22, lift 3.1) --
+    # T94 : "2A" a une combinaison jouet (hopa+hopb, support 10, lift 3.1) --
     # doit s'afficher avec les NOMS AFFICHÉS ("Hopa"/"Hopb"), pas les
     # varietys brutes ("hopa"/"hopb").
     at = _app()
@@ -1375,8 +1379,25 @@ def test_styles_shows_frequent_hop_combinations_with_display_names(toy_cwd):
     assert not at.exception
     df = next(df.value for df in at.dataframe if "Hops" in df.value.columns)
     assert list(list(df["Hops"])[0]) == ["Hopa", "Hopb"]
-    assert list(df["Support (recipes)"])[0] == 22
+    assert list(df["Support (recipes)"])[0] == 10
     assert list(df["Lift"])[0] == pytest.approx(3.1)
+
+def test_styles_min_support_slider_hides_low_support_combination(toy_cwd):
+    # T94 (2026-09-07, retour utilisateur en direct : "seems empty most of
+    # the time, wdf?") : le slider min_support par défaut (5) montre la
+    # combinaison à support 10, mais remonter le slider au-dessus de 10
+    # doit la cacher -- pas un seuil unique deviné une fois pour toutes.
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("styles").run()
+    at.selectbox(key="styles_category").set_value(("2", "Test Lager")).run()
+    at.selectbox(key="styles_style").set_value(("2A", "Test Lager Style")).run()
+    assert any("Hops" in df.value.columns for df in at.dataframe)
+    at.slider(key="styles_combo_min_support").set_value(15).run()
+    assert not at.exception
+    assert not any("Hops" in df.value.columns for df in at.dataframe)
+    assert any("Not enough recipes in this style for 2-hop combinations" in c.value
+              for c in at.caption)
 
 def test_styles_shows_honest_message_when_no_combination_meets_threshold(toy_cwd):
     # T94 : "10A" n'a AUCUNE ligne hop_combinations dans la fixture --

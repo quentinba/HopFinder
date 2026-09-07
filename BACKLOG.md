@@ -1498,6 +1498,44 @@ Elles sont écrites pour qu'aucune décision implicite ne reste à deviner.
     style au seuil 20) -- poussée vers HopFinder-db + reboot Streamlit
     Cloud nécessaire après ce commit (même procédure que d'habitude).
 
+  **SUIVI (2026-09-07, même jour, retour utilisateur en direct après
+  déploiement) : « "Frequent hop combinations in this style" seems empty
+  most of the time, wdf? Should we have min_support at 5 or smthg? ».**
+  Confirmé -- `min_support=20` avait été pensé pour LE CORPUS beer-
+  analytics (bien plus gros), jamais re-dérivé pour un sous-ensemble PAR
+  STYLE forcément plus petit sur nos 1844 recettes MMuM ; 0/37 styles
+  franchissaient ce seuil, la section était vide partout.
+
+  - `ingest.compute_frequent_hop_combinations` : plancher d'écriture par
+    défaut abaissé **20 -> 5** (CLI `--min-support` idem) -- reste
+    délibérément au-dessus de 2 (le seuil que T93 qualifiait explicitement
+    d'illusion de signal). `matching.frequent_hop_combinations` garde SON
+    propre défaut à 20 (comportement inchangé pour tout appel qui ne
+    précise rien -- la tranche globale/par stade a 1844 recettes, largement
+    assez de marge à ce seuil).
+  - GUI (`app._styles`) : `st.slider` "Minimum matching recipes" (5-20,
+    défaut 5) à côté du `segmented_control` de taille -- plutôt qu'un
+    second chiffre deviné à la place de l'utilisateur, `support`/
+    `total_recipes` restent affichés par ligne pour que CHACUN juge la
+    solidité du signal. Vérifié en direct (Chrome, thème sombre) sur
+    21C - Hazy IPA (43 recettes résolues, le style le mieux couvert après
+    l'abaissement) : 7 combinaisons réelles au slider par défaut
+    (Amarillo+Centennial lift 2.56, Citra+Mosaic support 15...), remonter
+    le slider à 13 filtre en direct jusqu'à ne garder que Citra+Mosaic --
+    le mécanisme réagit correctement, pas seulement au rechargement de
+    page.
+  - Résultat réel après l'abaissement : **5/37 styles** ont au moins une
+    combinaison au seuil par défaut (contre 0/37 avant) -- toujours la
+    majorité des styles sans donnée à cette taille de corpus, message
+    honnête inchangé pour ceux-là ("Try lowering the minimum above" ajouté
+    au texte).
+  - 2 tests mis à jour/ajoutés (support jouet 22->10 pour tester le
+    slider, `test_styles_min_support_slider_hides_low_support_combination`
+    nouveau), suite verte (536 tests). `hop_combinations` recalculée
+    (262 lignes, 12 lignes par style sur 5 styles réels) -- repoussée vers
+    HopFinder-db (`aromahops.db` ET `recipes.db`, ce dernier déjà versionné
+    dans ce dépôt) + reboot Streamlit Cloud nécessaire.
+
 - [ ] **T118 — Import Brewfather (recettes personnelles)**
 
   **API** : `https://api.brewfather.app/v2/recipes` (documentation :

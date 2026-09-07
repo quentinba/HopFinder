@@ -2579,7 +2579,7 @@ _RECIPE_STAGES = ("first_wort", "boil", "whirlpool", "dry_hop")
 
 def compute_frequent_hop_combinations(recipes_db: str = "recipes.db", out_db: str = "aromahops.db",
                                       sizes: tuple[int, ...] = (2, 3, 4),
-                                      min_support: int = 20) -> None:
+                                      min_support: int = 5) -> None:
     """T93 : combinaisons de houblons RÉELLEMENT co-observées dans une même
     recette -- lit `recipe_hops` (déjà réconciliée, T92 ; `variety IS NULL`
     exclues) dans `recipes_db`, écrit `hop_combinations` dans `out_db`
@@ -2623,7 +2623,27 @@ def compute_frequent_hop_combinations(recipes_db: str = "recipes.db", out_db: st
     que la tranche "toutes étapes confondues"), et réciproquement les
     tranches par stade restent `style_id IS NULL`. Une recette sans
     `style_id` résolu ne contribue à AUCUNE tranche par style (ni
-    numérateur ni dénominateur) -- jamais un style fabriqué par défaut."""
+    numérateur ni dénominateur) -- jamais un style fabriqué par défaut.
+
+    `min_support` par défaut abaissé de **20 à 5** (2026-09-07, retour
+    utilisateur en direct après T94 : à 20 -- aligné sur `HOP_MIN_RECIPES`
+    de beer-analytics, mais ce seuil a été pensé pour LEUR corpus, bien
+    plus gros -- 0/37 styles franchissaient le seuil pour la moindre paire
+    qui leur soit propre, la section était vide partout). C'est un plancher
+    d'ÉCRITURE, pas le seuil affiché par défaut : `matching.frequent_hop_
+    combinations` garde son propre défaut à 20 pour tout appel qui ne
+    précise rien (comportement historique inchangé pour la tranche globale/
+    par stade -- 1844 recettes, largement assez de marge) ; seule la carte
+    GUI par style (`app._styles`) interroge explicitement en dessous, via
+    un `st.slider` -- l'utilisateur voit `support`/`total_recipes` à côté
+    de chaque ligne et juge lui-même la solidité du signal, plutôt qu'un
+    seuil unique deviné pour toutes les tailles de style. 5 reste
+    délibérément AU-DESSUS de 2 (le seuil que le ticket T93 qualifiait
+    explicitement d'illusion de signal) -- vérifié en direct que même à ce
+    plancher, les lifts proches de 1 (donc peu informatifs) restent
+    distinguables des vrais pics (ex. Herkules+Perle lift 6.2 vs Citra+
+    Saphir lift 0.78, tous deux support 3 sur le style Munich Helles/IPA
+    -- le lift, pas le seuil brut, reste ce qui sépare signal et bruit)."""
     import itertools
     from collections import Counter
     from datetime import datetime, timezone
