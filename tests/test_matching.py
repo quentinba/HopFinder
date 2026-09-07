@@ -1906,3 +1906,99 @@ def test_style_restricted_pool_returns_real_varieties(db):
     _insert_style_hop_usage(db, "TEST-POOL", ["citra", "simcoe"])
     assert matching._style_restricted_pool(db, "TEST-POOL") == {"citra", "simcoe"}
     db.execute("DELETE FROM style_hop_usage"); db.commit()
+
+
+# --------------------------------------------------------------------------- #
+# T130 -- recherche de style BJCP par alias (matching.resolve_style_search)
+# --------------------------------------------------------------------------- #
+def _insert_fixture_style(con, style_id, category_id, category, name):
+    con.execute(
+        "INSERT INTO beer_styles (style_id, guideline_year, category_id, category, name) "
+        "VALUES (?,?,?,?,?)", (style_id, 2021, category_id, category, name))
+    con.commit()
+
+def test_resolve_style_search_matches_real_bjcp_name_case_insensitive(db):
+    _insert_fixture_style(db, "_T130-A", "_T130", "Fixture Category", "Fixture American IPA")
+    assert matching.resolve_style_search(db, "fixture american ipa") == {
+        "style_id": "_T130-A", "category_id": "_T130", "category": "Fixture Category",
+        "name": "Fixture American IPA", "known": True}
+    db.execute("DELETE FROM beer_styles WHERE style_id='_T130-A'"); db.commit()
+
+def test_resolve_style_search_matches_alias_to_real_bjcp_entry(db):
+    # "Black IPA" (beer-analytics granularité fine) -> 21B "Specialty IPA"
+    # (BJCP réel) -- jamais une fiche "Black IPA" fabriquée.
+    _insert_fixture_style(db, "_T130-B", "_T130", "Fixture Category", "Fixture Specialty IPA")
+    db.execute("INSERT INTO beer_style_aliases VALUES (?,?,?,?)",
+              ("Fixture Black IPA", "_T130-B", "test", "2026-09-07"))
+    db.commit()
+    result = matching.resolve_style_search(db, "fixture black ipa")
+    assert result["style_id"] == "_T130-B"
+    assert result["name"] == "Fixture Specialty IPA"
+    db.execute("DELETE FROM beer_styles WHERE style_id='_T130-B'")
+    db.execute("DELETE FROM beer_style_aliases WHERE alias_label='Fixture Black IPA'")
+    db.commit()
+
+def test_resolve_style_search_known_alias_without_bjcp_equivalent(db):
+    # "Kellerbier" -- style beer-analytics RECONNU mais explicitement sans
+    # équivalent BJCP (style_id=NULL dans le fichier) -- distinct de "aucune
+    # correspondance trouvée" : known=True, style_id=None.
+    db.execute("INSERT INTO beer_style_aliases VALUES (?,?,?,?)",
+              ("Fixture Kellerbier", None, "test", "2026-09-07"))
+    db.commit()
+    assert matching.resolve_style_search(db, "fixture kellerbier") == {
+        "style_id": None, "known": True}
+    db.execute("DELETE FROM beer_style_aliases WHERE alias_label='Fixture Kellerbier'")
+    db.commit()
+
+def test_resolve_style_search_returns_none_for_totally_unknown_query(db):
+    assert matching.resolve_style_search(db, "not-a-real-style-at-all-xyz") is None
+    assert matching.resolve_style_search(db, "") is None
+    assert matching.resolve_style_search(db, "   ") is None
+
+def test_resolve_style_search_strips_whitespace(db):
+    _insert_fixture_style(db, "_T130-C", "_T130", "Fixture Category", "Fixture Trimmed Style")
+    assert matching.resolve_style_search(db, "  Fixture Trimmed Style  ") is not None
+    db.execute("DELETE FROM beer_styles WHERE style_id='_T130-C'"); db.commit()
+
+def test_ingest_beer_style_aliases_writes_null_and_resolved_rows(tmp_path, monkeypatch):
+    aroma_path = str(tmp_path / "aromahops.db")
+    con = connect(aroma_path); init_db(con); con.close()
+    monkeypatch.setattr(ingest, "_load_yaml_mapping",
+                        lambda filename: {"Resolved Style": "21A", "Unresolved Style": None})
+    ingest.ingest_beer_style_aliases(aroma_path)
+
+    con = connect(aroma_path)
+    rows = {r["alias_label"]: r["style_id"] for r in
+           con.execute("SELECT alias_label, style_id FROM beer_style_aliases")}
+    con.close()
+    assert rows == {"Resolved Style": "21A", "Unresolved Style": None}
+
+def test_ingest_beer_style_aliases_is_a_full_recompute(tmp_path, monkeypatch):
+    aroma_path = str(tmp_path / "aromahops.db")
+    con = connect(aroma_path); init_db(con); con.close()
+    monkeypatch.setattr(ingest, "_load_yaml_mapping", lambda filename: {"Style A": "21A"})
+    ingest.ingest_beer_style_aliases(aroma_path)
+    monkeypatch.setattr(ingest, "_load_yaml_mapping", lambda filename: {"Style B": "21B"})
+    ingest.ingest_beer_style_aliases(aroma_path)
+
+    con = connect(aroma_path)
+    labels = {r[0] for r in con.execute("SELECT alias_label FROM beer_style_aliases")}
+    con.close()
+    assert labels == {"Style B"}  # "Style A" disparu -- recalcul complet, pas cumulatif
+
+def test_ingest_beer_style_aliases_creates_table_without_wiping_existing_data(tmp_path, monkeypatch):
+    aroma_path = str(tmp_path / "aromahops.db")
+    con = connect(aroma_path); init_db(con)
+    con.execute("INSERT INTO hops (variety, name, region, sources, purpose) "
+               "VALUES ('citra', 'Citra', 'United States', 'yakima', NULL)")
+    con.execute("DROP TABLE beer_style_aliases")
+    con.commit(); con.close()
+    monkeypatch.setattr(ingest, "_load_yaml_mapping", lambda filename: {"Style A": "21A"})
+    ingest.ingest_beer_style_aliases(aroma_path)
+
+    con = connect(aroma_path)
+    hops = [r[0] for r in con.execute("SELECT variety FROM hops")]
+    n = con.execute("SELECT COUNT(*) FROM beer_style_aliases").fetchone()[0]
+    con.close()
+    assert hops == ["citra"]
+    assert n == 1

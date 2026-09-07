@@ -318,6 +318,35 @@ CREATE TABLE hop_addition_timing (
 """
 SCHEMA += HOP_ADDITION_TIMING_SCHEMA
 
+# T130 (2026-09-07) : recherche de style par alias dans la GUI (`browse`,
+# mode "Beer styles") -- table DÉRIVÉE de `data/mappings/beer_style_
+# aliases.yaml` (T84/T85/T92, même fichier), écrite par `ingest.ingest_
+# beer_style_aliases`, PAS lue en direct par app.py au runtime. Raison
+# structurelle, pas de style : `_load_yaml_mapping` importe `yaml` (extra
+# `crawl` du `pyproject.toml`), qui n'est PAS installé sur le conteneur
+# Streamlit Cloud déployé (`requirements.txt` : `-e .[ui]` seulement,
+# vérifié explicitement le 2026-09-07 avant d'écrire ce ticket) -- lire le
+# fichier YAML depuis `app.py` aurait crashé en production avec
+# `ModuleNotFoundError`. Même discipline déjà en place pour TOUS les autres
+# fichiers `data/mappings/*.yaml` du projet (aucun n'est jamais lu par
+# app.py/matching.py, seulement par ingest.py à l'ingestion -- vérifié en
+# grep sur tout le code avant d'écrire cette table).
+#
+# `alias_label` = clé EXACTE du fichier YAML (casse d'origine, ex.
+# "Black IPA") -- PRIMARY KEY, une ligne par clé, y compris les clés à
+# `style_id=NULL` (styles beer-analytics reconnus mais sans équivalent
+# BJCP, ex. "Kellerbier") : conservées pour que la GUI distingue « connu
+# mais sans équivalent BJCP » (réponse honnête et informative) de
+# « recherche totalement inconnue » (aucune ligne), jamais la même réponse
+# vague pour les deux cas.
+BEER_STYLE_ALIASES_SCHEMA = """
+CREATE TABLE beer_style_aliases (
+    alias_label TEXT PRIMARY KEY, style_id TEXT,
+    source TEXT, computed_at TEXT
+);
+"""
+SCHEMA += BEER_STYLE_ALIASES_SCHEMA
+
 # T91 (2026-08-30, D4 tranchée) : corpus BRUT de recettes (MMuM, puis
 # Brewfather/DIY Dog) -- fichier `recipes.db` SÉPARÉ d'`aromahops.db`,
 # jamais référencé par `app._fetch_remote_db`, jamais dans `SCHEMA`/
@@ -410,7 +439,8 @@ def init_db(con: sqlite3.Connection) -> None:
         "DROP TABLE IF EXISTS style_hop_pairings;"
         "DROP TABLE IF EXISTS hop_usage_stats;"
         "DROP TABLE IF EXISTS hop_combinations;"
-        "DROP TABLE IF EXISTS hop_addition_timing;")
+        "DROP TABLE IF EXISTS hop_addition_timing;"
+        "DROP TABLE IF EXISTS beer_style_aliases;")
     con.executescript(SCHEMA)
 
 

@@ -3167,7 +3167,7 @@ Mais la transparence doit être RÉELLE, pas un simple adverbe :
   confirmé (liste restreinte à berry/black currant/blackberry/blueberry/
   cranberry/gooseberry...).
 
-- [ ] **T130 — Recherche de style BJCP par alias (Beer styles)**
+- [x] **T130 — Recherche de style BJCP par alias (Beer styles)**
 
   **Origine** : discussion T85 (2026-08-27). beer-analytics.com a des noms
   de style plus granulaires que BJCP 2021 sur certaines familles (ex. 7
@@ -3207,6 +3207,57 @@ Mais la transparence doit être RÉELLE, pas un simple adverbe :
   **Statut** : opportuniste, ne bloque rien et n'est bloqué par rien
   -- à faire quand une session GUI légère est utile entre deux tickets plus
   lourds.
+
+  **FAIT (2026-09-07).** `schema.BEER_STYLE_ALIASES_SCHEMA` (nouvelle
+  table `beer_style_aliases` dans `aromahops.db`) + `ingest.ingest_beer_
+  style_aliases` (écrit le fichier d'alias TEL QUEL en base, y compris les
+  clés `null` -- "sans équivalent BJCP", conservées pour une réponse
+  honnête distincte d'une recherche totalement inconnue) + `matching.
+  resolve_style_search(con, query)` (correspondance exacte insensible à la
+  casse contre `beer_styles.name` D'ABORD, puis contre `beer_style_
+  aliases` -- jamais un fuzzy-match qui devinerait).
+
+  ⚠ **Contrainte structurelle découverte avant d'écrire le premier ligne
+  de GUI** : lire le fichier YAML directement depuis `app.py` aurait
+  crashé en production -- `_load_yaml_mapping` importe `yaml` (extra
+  `crawl` du `pyproject.toml`), qui n'est PAS installé sur le conteneur
+  Streamlit Cloud déployé (`requirements.txt` : `-e .[ui]` seulement,
+  vérifié explicitement). Confirmé par ailleurs qu'AUCUN fichier `data/
+  mappings/*.yaml` n'est jamais lu par `app.py`/`matching.py` dans tout le
+  projet (grep sur tout le code) -- même discipline déjà en place partout
+  ailleurs, pas une exception pour ce ticket. D'où la table `beer_style_
+  aliases` comme seul pont : ingestion locale pure (aucun réseau), lecture
+  GUI en SQL classique.
+
+  **GUI (`app._styles`)** : `st.text_input` "Search by name" ajouté dans sa
+  propre carte, juste avant les `st.selectbox` Category/Style en cascade
+  (T82). Résolution exécutée AVANT la création de ces deux widgets (même
+  contrainte que le relais `_next_mode` de `main()` -- Streamlit interdit
+  de modifier `st.session_state[key]` une fois le widget de cette clé déjà
+  instancié dans le run courant), pour pouvoir les pré-sélectionner sur
+  une résolution réussie. Garde-fou `_styles_search_applied` : n'applique
+  qu'UNE FOIS par texte de recherche distinct, pour que l'utilisateur
+  puisse ensuite resélectionner manuellement sans qu'un rerun sans rapport
+  (ex. toggle EBC/SRM) ne le ramène de force vers le résultat de
+  recherche -- testé explicitement.
+
+  **3 messages distincts, jamais la même réponse vague** : résolu (nom de
+  la fiche BJCP réelle ouverte) ; connu mais sans équivalent BJCP (ex.
+  "Kellerbier" -- la sélection reste inchangée, aucune resélection
+  forcée) ; recherche totalement inconnue (faute de frappe ou style
+  jamais vu par beer-analytics).
+
+  Vérifié en direct (Chrome, 2 thèmes) : "Black IPA" résout bien vers
+  "21B - Specialty IPA" avec les deux selectbox mis à jour ; "Kellerbier"
+  affiche le message honnête sans toucher à la sélection en cours.
+
+  13 nouveaux tests (5 `matching.resolve_style_search`, 3 `ingest.ingest_
+  beer_style_aliases`, 5 AppTest -- résolution nom réel/alias, message
+  honnête sur alias sans équivalent, message honnête sur recherche
+  inconnue, non-écrasement d'une resélection manuelle ultérieure), suite
+  verte (516 tests, 1 flaky AppTest déjà connu du projet re-testé seul et
+  confirmé sans rapport avec ce ticket). `_RECENT_UPDATES` mis à jour dans
+  le même commit.
 
 - [ ] **T131 — `hop_typical_styles` : dans quels styles un houblon est-il utilisé**
 

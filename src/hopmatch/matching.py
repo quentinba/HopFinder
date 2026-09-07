@@ -396,6 +396,57 @@ def style_observed_distribution(con, style_id: str) -> dict[str, list[dict]]:
 # JOIN explicite plutôt qu'un filtre applicatif, jamais une variété
 # fabriquée pour combler le reste (T103, croisement avec `by_descriptor`
 # qui n'opère que sur `hops`).
+def resolve_style_search(con, query: str) -> dict | None:
+    """T130 : résout un nom de style TAPÉ LIBREMENT (`query`, insensible à
+    la casse/aux espaces en trop) vers une entrée BJCP 2021 réelle --
+    "Black IPA" doit ouvrir la fiche "Specialty IPA (21B)", jamais fabriquer
+    une entrée "Black IPA" qui n'existe pas dans `beer_styles`.
+
+    Deux sources de vérité, dans cet ordre :
+    1. `beer_styles.name` -- correspondance EXACTE (insensible à la casse)
+       contre le nom BJCP réel lui-même (ex. taper "American IPA" trouve
+       directement 21A, sans même passer par le fichier d'alias).
+    2. `beer_style_aliases` (T130, `data/mappings/beer_style_aliases.yaml`
+       écrite par `ingest.ingest_beer_style_aliases`) -- vocabulaire
+       beer-analytics.com, near-littéral BJCP mais avec des variantes plus
+       fines (ex. les 7 sous-variantes "Specialty IPA", toutes -> 21B).
+
+    Retourne `None` si `query` ne correspond à AUCUNE des deux sources --
+    recherche totalement inconnue, jamais une réponse fabriquée.
+
+    Retourne `{"style_id": None, "known": True}` si `query` correspond à
+    une clé du fichier d'alias dont la valeur est explicitement `NULL`
+    (style beer-analytics reconnu mais SANS équivalent BJCP 2021, ex.
+    "Kellerbier") -- distinct du cas `None` ci-dessus : ici la recherche
+    est CONNUE, elle documente honnêtement l'absence d'équivalent plutôt
+    que de laisser croire à une faute de frappe.
+
+    Retourne `{"style_id": "21B", "category_id": ..., "category": ...,
+    "name": ..., "known": True}` sur une résolution réussie (les 3 derniers
+    champs viennent de `beer_styles`, nécessaires pour pré-sélectionner les
+    deux `st.selectbox` en cascade de la GUI -- catégorie puis style)."""
+    q = query.strip().lower()
+    if not q:
+        return None
+    row = con.execute(
+        "SELECT style_id, category_id, category, name FROM beer_styles "
+        "WHERE lower(name)=?", (q,)).fetchone()
+    if row is None:
+        alias_row = con.execute(
+            "SELECT style_id FROM beer_style_aliases WHERE lower(alias_label)=?", (q,)).fetchone()
+        if alias_row is None:
+            return None
+        if alias_row["style_id"] is None:
+            return {"style_id": None, "known": True}
+        row = con.execute(
+            "SELECT style_id, category_id, category, name FROM beer_styles "
+            "WHERE style_id=?", (alias_row["style_id"],)).fetchone()
+        if row is None:
+            return None
+    return {"style_id": row["style_id"], "category_id": row["category_id"],
+           "category": row["category"], "name": row["name"], "known": True}
+
+
 def style_hop_frequency(con, style_id: str, usage_type: str = "any") -> dict[str, dict]:
     """{variety: {"hop_name", "share_latest", "share_avg24m"}} depuis
     `style_hop_usage` (T86, beer-analytics.com) pour un `style_id` BJCP et

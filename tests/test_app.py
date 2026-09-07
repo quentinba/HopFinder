@@ -1234,6 +1234,73 @@ def test_styles_mode_shows_dash_and_shared_caption_when_no_vital_stats(toy_cwd):
               for label in ("ABV", "IBU", "OG (°P)", "FG (°P)", "EBC"))
     assert any("inherits" in c.value.lower() for c in at.caption)
 
+# --------------------------------------------------------------------------- #
+# T130 -- recherche de style par nom/alias (mode "Beer styles")
+# --------------------------------------------------------------------------- #
+def test_styles_search_resolves_real_bjcp_name_case_insensitive(toy_cwd):
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("styles").run()
+    at.text_input(key="styles_search").set_value("test lager style").run()
+    assert not at.exception
+    assert at.selectbox(key="styles_category").value == ("2", "Test Lager")
+    assert at.selectbox(key="styles_style").value == ("2A", "Test Lager Style")
+    assert any("Resolved to 2A" in c.value for c in at.caption)
+
+def test_styles_search_resolves_alias_to_real_bjcp_entry(toy_cwd):
+    # "Toy Black IPA" (alias fictif, jamais un vrai style BJCP) -> doit
+    # résoudre vers "10A"/"Test Wheat Style", jamais fabriquer une fiche
+    # "Toy Black IPA".
+    con = connect(os.path.join(os.getcwd(), "aromahops.db"))
+    con.execute("INSERT INTO beer_style_aliases VALUES (?,?,?,?)",
+               ("Toy Black IPA", "10A", "test", "2026-09-07"))
+    con.commit(); con.close()
+
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("styles").run()
+    at.text_input(key="styles_search").set_value("Toy Black IPA").run()
+    assert not at.exception
+    assert at.selectbox(key="styles_style").value == ("10A", "Test Wheat Style")
+    assert any("Resolved to 10A" in c.value for c in at.caption)
+
+def test_styles_search_known_alias_without_bjcp_equivalent(toy_cwd):
+    con = connect(os.path.join(os.getcwd(), "aromahops.db"))
+    con.execute("INSERT INTO beer_style_aliases VALUES (?,?,?,?)",
+               ("Toy Kellerbier", None, "test", "2026-09-07"))
+    con.commit(); con.close()
+
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("styles").run()
+    at.text_input(key="styles_search").set_value("Toy Kellerbier").run()
+    assert not at.exception
+    assert any("no BJCP 2021 equivalent" in c.value for c in at.caption)
+    # jamais une resélection -- la catégorie garde sa valeur par défaut.
+    assert not any("Resolved to" in c.value for c in at.caption)
+
+def test_styles_search_shows_honest_message_for_unknown_query(toy_cwd):
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("styles").run()
+    at.text_input(key="styles_search").set_value("Not A Real Style At All Xyz").run()
+    assert not at.exception
+    assert any("No BJCP 2021 style found" in c.value for c in at.caption)
+
+def test_styles_search_does_not_override_subsequent_manual_selection(toy_cwd):
+    # Après une recherche résolue, l'utilisateur doit pouvoir choisir un
+    # AUTRE style manuellement sans que le prochain rerun (ex. toggle
+    # EBC/SRM) ne le ramène de force vers le résultat de recherche.
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("styles").run()
+    at.text_input(key="styles_search").set_value("test lager style").run()
+    assert at.selectbox(key="styles_style").value == ("2A", "Test Lager Style")
+    at.selectbox(key="styles_category").set_value(("10", "Test Wheat")).run()
+    at.selectbox(key="styles_style").set_value(("10A", "Test Wheat Style")).run()
+    at.segmented_control(key="styles_color_units").set_value("SRM").run()  # rerun sans rapport
+    assert at.selectbox(key="styles_style").value == ("10A", "Test Wheat Style")
+
 def test_style_hops_highlights_relevant_hop_absent_from_real_usage(toy_cwd):
     # T103 : "2A" -- descripteurs pré-remplis ("citrus"/"floral", trouvés
     # littéralement dans le texte "aroma" de la fixture) recoupent hopa

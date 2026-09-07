@@ -209,6 +209,11 @@ def main(argv=None):
     at.add_argument("--recipes-db", default="recipes.db")
     at.add_argument("--db", default=DEFAULT_DB)
 
+    isa = sub.add_parser("ingest-style-aliases",
+                         help="écrit data/mappings/beer_style_aliases.yaml dans "
+                              "aromahops.db, lecture locale pure -- T130")
+    isa.add_argument("--db", default=DEFAULT_DB)
+
     am = sub.add_parser("amplify", help="cas d'usage : amplify")
     am.add_argument("note")
     am.add_argument("--db", default=DEFAULT_DB)
@@ -302,6 +307,8 @@ def main(argv=None):
         return 0
     if a.cmd == "compute-addition-timing":
         ingest.compute_hop_addition_timing(a.recipes_db, a.db); return 0
+    if a.cmd == "ingest-style-aliases":
+        ingest.ingest_beer_style_aliases(a.db); return 0
 
     con = connect(a.db)
     try:

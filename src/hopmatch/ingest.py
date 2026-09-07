@@ -13,6 +13,9 @@ RÉEL (tourne ici) :
   - compute_hop_addition_timing : répartition réelle des additions d'un houblon sur les
                            11 classes chronologiques (lit recipes.db, écrit
                            hop_addition_timing dans aromahops.db -- pas de réseau)
+  - ingest_beer_style_aliases : écrit data/mappings/beer_style_aliases.yaml dans
+                           aromahops.db (lecture locale pure, pas de réseau) -- seul
+                           pont pour app.py, qui ne peut pas importer yaml au runtime
   - build_from_fixtures : reconstruit la base depuis data/fixtures/{barthhaas,yakima}
   - seed_reference       : charge molécules + amorce note→molécule/descripteur
   - crawl_barthhaas      : moissonne barthhaas.com (réseau ; requests+bs4)
@@ -2704,3 +2707,41 @@ def compute_hop_addition_timing(recipes_db: str = "recipes.db", out_db: str = "a
     con.commit(); con.close()
     print(f"T126 : {n_rows} lignes écrites pour {len(total_additions)} varietys "
          f"({sum(total_additions.values())} additions résolues au total)")
+
+
+# --------------------------------------------------------------------------- #
+# Recherche de style par alias (T130, GUI "Beer styles")
+# --------------------------------------------------------------------------- #
+def ingest_beer_style_aliases(out_db: str = "aromahops.db") -> None:
+    """T130 : écrit `data/mappings/beer_style_aliases.yaml` TEL QUEL dans la
+    table `beer_style_aliases` -- lecture pure d'un fichier LOCAL, aucun
+    appel réseau, aucun crawl. Existe UNIQUEMENT parce que `_load_yaml_
+    mapping` importe `yaml` (extra `crawl`, absent du conteneur Streamlit
+    Cloud déployé -- voir `schema.BEER_STYLE_ALIASES_SCHEMA` pour la
+    vérification complète) : `app.py` ne peut donc jamais lire ce fichier
+    directement au runtime, cette table est le seul pont.
+
+    Toute clé du fichier est écrite, y compris celles à valeur `null`
+    (styles beer-analytics reconnus mais sans équivalent BJCP) --
+    `style_id=NULL` dans la table, jamais omise : la GUI a besoin de
+    distinguer "connu, sans équivalent" de "recherche inconnue" (absence de
+    toute ligne)."""
+    from datetime import datetime, timezone
+    from .schema import connect, ensure_table, BEER_STYLE_ALIASES_SCHEMA
+
+    aliases = _load_yaml_mapping("beer_style_aliases.yaml")
+    con = connect(out_db)
+    if not con.execute("SELECT name FROM sqlite_master WHERE name='hops'").fetchone():
+        init_db(con); seed_reference(con); con.commit()
+    else:
+        ensure_table(con, "beer_style_aliases", BEER_STYLE_ALIASES_SCHEMA)
+    con.execute("DELETE FROM beer_style_aliases")
+    computed_at = datetime.now(timezone.utc).isoformat()
+    con.executemany(
+        "INSERT INTO beer_style_aliases VALUES (?,?,?,?)",
+        [(label, style_id, "beer_style_aliases.yaml", computed_at)
+         for label, style_id in aliases.items()])
+    con.commit(); con.close()
+    n_resolved = sum(1 for v in aliases.values() if v)
+    print(f"T130 : {len(aliases)} alias écrits ({n_resolved} résolus vers un style_id, "
+         f"{len(aliases) - n_resolved} sans équivalent BJCP connu)")
