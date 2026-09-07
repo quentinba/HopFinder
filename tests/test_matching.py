@@ -1919,10 +1919,37 @@ def _insert_fixture_style(con, style_id, category_id, category, name):
 
 def test_resolve_style_search_matches_real_bjcp_name_case_insensitive(db):
     _insert_fixture_style(db, "_T130-A", "_T130", "Fixture Category", "Fixture American IPA")
-    assert matching.resolve_style_search(db, "fixture american ipa") == {
-        "style_id": "_T130-A", "category_id": "_T130", "category": "Fixture Category",
-        "name": "Fixture American IPA", "known": True}
+    result = matching.resolve_style_search(db, "fixture american ipa")
+    assert result["matches"] == [
+        {"style_id": "_T130-A", "category_id": "_T130", "category": "Fixture Category",
+         "name": "Fixture American IPA"}]
+    assert result["known_no_bjcp"] == []
     db.execute("DELETE FROM beer_styles WHERE style_id='_T130-A'"); db.commit()
+
+def test_resolve_style_search_is_a_substring_match_not_exact(db):
+    # 2026-09-07, retour utilisateur direct après test réel : "je tape pale
+    # ale ca marche pas, ipa non plus... il faut taper EXACTEMENT le
+    # terme" -- une recherche partielle DOIT remonter les styles réels dont
+    # le nom la CONTIENT, pas seulement une égalité stricte.
+    _insert_fixture_style(db, "_T130-SUB1", "_T130", "Fixture Category", "Fixture American IPA")
+    _insert_fixture_style(db, "_T130-SUB2", "_T130", "Fixture Category", "Fixture English IPA")
+    result = matching.resolve_style_search(db, "ipa")
+    style_ids = {m["style_id"] for m in result["matches"]}
+    assert {"_T130-SUB1", "_T130-SUB2"} <= style_ids
+    db.execute("DELETE FROM beer_styles WHERE style_id IN ('_T130-SUB1', '_T130-SUB2')")
+    db.commit()
+
+def test_resolve_style_search_returns_all_ambiguous_matches_never_one_guessed(db):
+    # "IPA" doit remonter PLUSIEURS entrées réelles distinctes -- jamais un
+    # choix arbitraire parmi des candidats également légitimes, c'est à
+    # l'appelant (GUI) de les présenter toutes.
+    _insert_fixture_style(db, "_T130-AMB1", "_T130", "Fixture Category", "Fixture American IPA")
+    _insert_fixture_style(db, "_T130-AMB2", "_T130", "Fixture Category", "Fixture Hazy IPA")
+    result = matching.resolve_style_search(db, "ipa")
+    assert len([m for m in result["matches"] if m["style_id"] in
+               ("_T130-AMB1", "_T130-AMB2")]) == 2
+    db.execute("DELETE FROM beer_styles WHERE style_id IN ('_T130-AMB1', '_T130-AMB2')")
+    db.commit()
 
 def test_resolve_style_search_matches_alias_to_real_bjcp_entry(db):
     # "Black IPA" (beer-analytics granularité fine) -> 21B "Specialty IPA"
@@ -1932,33 +1959,61 @@ def test_resolve_style_search_matches_alias_to_real_bjcp_entry(db):
               ("Fixture Black IPA", "_T130-B", "test", "2026-09-07"))
     db.commit()
     result = matching.resolve_style_search(db, "fixture black ipa")
-    assert result["style_id"] == "_T130-B"
-    assert result["name"] == "Fixture Specialty IPA"
+    assert result["matches"] == [
+        {"style_id": "_T130-B", "category_id": "_T130", "category": "Fixture Category",
+         "name": "Fixture Specialty IPA"}]
     db.execute("DELETE FROM beer_styles WHERE style_id='_T130-B'")
     db.execute("DELETE FROM beer_style_aliases WHERE alias_label='Fixture Black IPA'")
+    db.commit()
+
+def test_resolve_style_search_deduplicates_style_matched_by_both_sources(db):
+    # "American IPA" matche À LA FOIS beer_styles.name directement ET un
+    # alias explicite -- une seule entrée dans matches, pas un doublon.
+    _insert_fixture_style(db, "_T130-DUP", "_T130", "Fixture Category", "Fixture American IPA")
+    db.execute("INSERT INTO beer_style_aliases VALUES (?,?,?,?)",
+              ("Fixture American IPA", "_T130-DUP", "test", "2026-09-07"))
+    db.commit()
+    result = matching.resolve_style_search(db, "fixture american ipa")
+    assert len(result["matches"]) == 1
+    db.execute("DELETE FROM beer_styles WHERE style_id='_T130-DUP'")
+    db.execute("DELETE FROM beer_style_aliases WHERE alias_label='Fixture American IPA'")
     db.commit()
 
 def test_resolve_style_search_known_alias_without_bjcp_equivalent(db):
     # "Kellerbier" -- style beer-analytics RECONNU mais explicitement sans
     # équivalent BJCP (style_id=NULL dans le fichier) -- distinct de "aucune
-    # correspondance trouvée" : known=True, style_id=None.
+    # correspondance trouvée".
     db.execute("INSERT INTO beer_style_aliases VALUES (?,?,?,?)",
               ("Fixture Kellerbier", None, "test", "2026-09-07"))
     db.commit()
-    assert matching.resolve_style_search(db, "fixture kellerbier") == {
-        "style_id": None, "known": True}
+    result = matching.resolve_style_search(db, "fixture kellerbier")
+    assert result["matches"] == []
+    assert result["known_no_bjcp"] == ["Fixture Kellerbier"]
     db.execute("DELETE FROM beer_style_aliases WHERE alias_label='Fixture Kellerbier'")
     db.commit()
 
-def test_resolve_style_search_returns_none_for_totally_unknown_query(db):
-    assert matching.resolve_style_search(db, "not-a-real-style-at-all-xyz") is None
-    assert matching.resolve_style_search(db, "") is None
-    assert matching.resolve_style_search(db, "   ") is None
+def test_resolve_style_search_returns_empty_for_totally_unknown_query(db):
+    assert matching.resolve_style_search(db, "not-a-real-style-at-all-xyz") == {
+        "matches": [], "known_no_bjcp": []}
+    assert matching.resolve_style_search(db, "") == {"matches": [], "known_no_bjcp": []}
+    assert matching.resolve_style_search(db, "   ") == {"matches": [], "known_no_bjcp": []}
 
 def test_resolve_style_search_strips_whitespace(db):
     _insert_fixture_style(db, "_T130-C", "_T130", "Fixture Category", "Fixture Trimmed Style")
-    assert matching.resolve_style_search(db, "  Fixture Trimmed Style  ") is not None
+    result = matching.resolve_style_search(db, "  Fixture Trimmed Style  ")
+    assert len(result["matches"]) == 1
     db.execute("DELETE FROM beer_styles WHERE style_id='_T130-C'"); db.commit()
+
+def test_resolve_style_search_sorts_matches_numerically_by_category(db):
+    # Tri numérique sur category_id ("2" avant "10", jamais l'inverse
+    # lexicographique) -- même règle que app._category_sort_key.
+    _insert_fixture_style(db, "_T130-N1", "10", "Fixture Ten", "Fixture Match Ten")
+    _insert_fixture_style(db, "_T130-N2", "2", "Fixture Two", "Fixture Match Two")
+    result = matching.resolve_style_search(db, "fixture match")
+    style_ids = [m["style_id"] for m in result["matches"]]
+    assert style_ids.index("_T130-N2") < style_ids.index("_T130-N1")
+    db.execute("DELETE FROM beer_styles WHERE style_id IN ('_T130-N1', '_T130-N2')")
+    db.commit()
 
 def test_ingest_beer_style_aliases_writes_null_and_resolved_rows(tmp_path, monkeypatch):
     aroma_path = str(tmp_path / "aromahops.db")

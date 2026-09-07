@@ -3259,6 +3259,45 @@ Mais la transparence doit être RÉELLE, pas un simple adverbe :
   confirmé sans rapport avec ce ticket). `_RECENT_UPDATES` mis à jour dans
   le même commit.
 
+  **REDESIGN (2026-09-07, même jour, retour utilisateur direct après test
+  réel) : "je tape pale ale ca marche pas, ipa non plus... il faut taper
+  EXACTEMENT le terme".** La 1ère version exigeait une correspondance
+  EXACTE contre `beer_styles.name`/`beer_style_aliases.alias_label` --
+  vérifié après coup que "IPA"/"Pale Ale" ne sont le nom BJCP LITTÉRAL
+  d'AUCUN style réel (seuls des noms complets comme "American IPA"
+  fonctionnaient), rendant la recherche inutilisable pour l'usage le plus
+  évident. `matching.resolve_style_search` réécrite en correspondance par
+  SOUS-CHAÎNE (`LIKE '%q%'`), fusionnant/dédupliquant les deux sources par
+  `style_id` -- retourne désormais `{"matches": [...], "known_no_bjcp":
+  [...]}` (liste, pas un seul dict) : **"IPA" retourne volontairement 6
+  styles réels** (English/American/Specialty/Hazy/Double IPA + le style
+  provisoire "IPA Argenta"), **jamais un choix arbitraire parmi des
+  candidats également légitimes**.
+
+  GUI (`app._styles`) étendue avec un `st.selectbox` de désambiguïsation
+  dédié (option `None` = "— choose one —" par défaut, jamais de
+  pré-sélection forcée) affiché uniquement quand `len(matches) > 1`,
+  1 seul candidat pré-sélectionne directement comme avant. Garde-fou
+  supplémentaire trouvé en écrivant ce correctif (pas en test, en
+  réflexion sur le cycle de vie du widget) : `styles_search_pick` porte
+  des tuples SPÉCIFIQUES à la recherche précédente -- laissé en
+  session_state après un changement de texte de recherche, le prochain
+  `st.selectbox` planterait (`StreamlitAPIException`, valeur persistée
+  absente des nouvelles `options`, même piège que `st.multiselect` déjà
+  documenté ailleurs dans ce fichier) -- `st.session_state.pop
+  ("styles_search_pick", None)` ajouté au même endroit que les deux autres
+  garde-fous de recherche.
+
+  9 tests `matching.resolve_style_search` remplacés/complétés (sous-chaîne,
+  déduplication cross-source, tri numérique par catégorie), 2 nouveaux
+  tests AppTest (désambiguïsation multi-résultats avec choix explicite,
+  changement de recherche qui ne plante jamais sur un pick devenu obsolète)
+  -- suite verte (522 tests). Vérifié en direct (Chrome, 2 thèmes) sur les
+  deux recherches EXACTEMENT signalées par l'utilisateur : "pale ale" (2
+  matches réels, 18B/24B) et "IPA" (6 matches réels). `_RECENT_UPDATES` mis
+  à jour en place (même entrée révisée, pas une 2e ligne pour la même
+  fonctionnalité corrigée le jour même).
+
 - [ ] **T131 — `hop_typical_styles` : dans quels styles un houblon est-il utilisé**
 
   **Origine** : découvert en implémentant T88 (2026-08-28/29). Chaque page

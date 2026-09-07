@@ -396,55 +396,73 @@ def style_observed_distribution(con, style_id: str) -> dict[str, list[dict]]:
 # JOIN explicite plutôt qu'un filtre applicatif, jamais une variété
 # fabriquée pour combler le reste (T103, croisement avec `by_descriptor`
 # qui n'opère que sur `hops`).
-def resolve_style_search(con, query: str) -> dict | None:
-    """T130 : résout un nom de style TAPÉ LIBREMENT (`query`, insensible à
-    la casse/aux espaces en trop) vers une entrée BJCP 2021 réelle --
-    "Black IPA" doit ouvrir la fiche "Specialty IPA (21B)", jamais fabriquer
-    une entrée "Black IPA" qui n'existe pas dans `beer_styles`.
+def _style_category_sort_key(row: dict) -> tuple:
+    """Même logique que `app._category_sort_key` (tri NUMÉRIQUE sur
+    `category_id`, "2" avant "10"), réimplémentée ICI plutôt qu'importée :
+    `matching.py` ne dépend jamais de `app.py` (sens de dépendance
+    unidirectionnel du projet, GUI -> matching, jamais l'inverse)."""
+    try:
+        return (0, int(row["category_id"]), row["style_id"])
+    except (TypeError, ValueError):
+        return (1, 0, row["style_id"])
 
-    Deux sources de vérité, dans cet ordre :
-    1. `beer_styles.name` -- correspondance EXACTE (insensible à la casse)
-       contre le nom BJCP réel lui-même (ex. taper "American IPA" trouve
-       directement 21A, sans même passer par le fichier d'alias).
-    2. `beer_style_aliases` (T130, `data/mappings/beer_style_aliases.yaml`
-       écrite par `ingest.ingest_beer_style_aliases`) -- vocabulaire
-       beer-analytics.com, near-littéral BJCP mais avec des variantes plus
-       fines (ex. les 7 sous-variantes "Specialty IPA", toutes -> 21B).
 
-    Retourne `None` si `query` ne correspond à AUCUNE des deux sources --
-    recherche totalement inconnue, jamais une réponse fabriquée.
+def resolve_style_search(con, query: str) -> dict:
+    """T130 (2026-09-07, redesign sur retour utilisateur direct après test
+    réel : "je tape pale ale ca marche pas, ipa non plus... il faut taper
+    EXACTEMENT le terme") : résout un nom de style TAPÉ LIBREMENT vers une
+    ou plusieurs entrées BJCP 2021 réelles -- SOUS-CHAÎNE, insensible à la
+    casse (PAS une correspondance exacte, version originale de ce ticket
+    testée en direct et jugée inutilisable : "IPA" ou "Pale Ale" ne sont
+    des noms BJCP LITTÉRAUX d'AUCUN style réel, seuls des noms complets
+    comme "American IPA" l'étaient).
 
-    Retourne `{"style_id": None, "known": True}` si `query` correspond à
-    une clé du fichier d'alias dont la valeur est explicitement `NULL`
-    (style beer-analytics reconnu mais SANS équivalent BJCP 2021, ex.
-    "Kellerbier") -- distinct du cas `None` ci-dessus : ici la recherche
-    est CONNUE, elle documente honnêtement l'absence d'équivalent plutôt
-    que de laisser croire à une faute de frappe.
+    Deux sources, toutes deux en `LIKE '%q%'`, résultats FUSIONNÉS et
+    DÉDUPLIQUÉS par `style_id` :
+    1. `beer_styles.name` -- nom BJCP réel.
+    2. `beer_style_aliases` (`data/mappings/beer_style_aliases.yaml`, écrite
+       par `ingest.ingest_beer_style_aliases`) -- vocabulaire beer-
+       analytics.com, near-littéral BJCP mais avec des variantes plus
+       fines (ex. les 7 sous-variantes "Specialty IPA" -> 21B).
 
-    Retourne `{"style_id": "21B", "category_id": ..., "category": ...,
-    "name": ..., "known": True}` sur une résolution réussie (les 3 derniers
-    champs viennent de `beer_styles`, nécessaires pour pré-sélectionner les
-    deux `st.selectbox` en cascade de la GUI -- catégorie puis style)."""
+    Retourne `{"matches": [...], "known_no_bjcp": [...]}` :
+    - `matches` : liste DÉDUPLIQUÉE de `{style_id, category_id, category,
+      name}`, triée numériquement par catégorie puis style_id
+      (`_style_category_sort_key`) -- **"IPA" retourne volontairement
+      PLUSIEURS entrées réelles** (American/English/Hazy/Specialty/Double
+      IPA...) : jamais un choix arbitraire parmi des candidats également
+      légitimes, c'est à l'appelant (GUI) de les présenter TOUS et de
+      laisser l'utilisateur trancher, jamais de deviner à sa place.
+    - `known_no_bjcp` : labels d'alias qui matchent la sous-chaîne mais
+      dont le `style_id` est explicitement `NULL` (styles beer-analytics
+      reconnus, ex. "Kellerbier", mais SANS équivalent BJCP 2021) --
+      distinct d'une recherche totalement inconnue (liste vide des deux
+      côtés) : ici la recherche est CONNUE, elle documente honnêtement
+      l'absence d'équivalent plutôt que de laisser croire à une faute de
+      frappe."""
     q = query.strip().lower()
     if not q:
-        return None
-    row = con.execute(
-        "SELECT style_id, category_id, category, name FROM beer_styles "
-        "WHERE lower(name)=?", (q,)).fetchone()
-    if row is None:
-        alias_row = con.execute(
-            "SELECT style_id FROM beer_style_aliases WHERE lower(alias_label)=?", (q,)).fetchone()
-        if alias_row is None:
-            return None
-        if alias_row["style_id"] is None:
-            return {"style_id": None, "known": True}
-        row = con.execute(
-            "SELECT style_id, category_id, category, name FROM beer_styles "
-            "WHERE style_id=?", (alias_row["style_id"],)).fetchone()
-        if row is None:
-            return None
-    return {"style_id": row["style_id"], "category_id": row["category_id"],
-           "category": row["category"], "name": row["name"], "known": True}
+        return {"matches": [], "known_no_bjcp": []}
+    like = f"%{q}%"
+    matches: dict[str, dict] = {}
+    for r in con.execute(
+        "SELECT style_id, category_id, category, name FROM beer_styles WHERE lower(name) LIKE ?",
+        (like,)):
+        matches.setdefault(r["style_id"], dict(r))
+    known_no_bjcp: list[str] = []
+    for r in con.execute(
+        "SELECT alias_label, style_id FROM beer_style_aliases WHERE lower(alias_label) LIKE ?",
+        (like,)):
+        if r["style_id"] is None:
+            known_no_bjcp.append(r["alias_label"])
+        elif r["style_id"] not in matches:
+            row = con.execute(
+                "SELECT style_id, category_id, category, name FROM beer_styles "
+                "WHERE style_id=?", (r["style_id"],)).fetchone()
+            if row is not None:
+                matches[row["style_id"]] = dict(row)
+    return {"matches": sorted(matches.values(), key=_style_category_sort_key),
+           "known_no_bjcp": sorted(known_no_bjcp)}
 
 
 def style_hop_frequency(con, style_id: str, usage_type: str = "any") -> dict[str, dict]:

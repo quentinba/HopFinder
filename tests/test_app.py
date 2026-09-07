@@ -1301,6 +1301,62 @@ def test_styles_search_does_not_override_subsequent_manual_selection(toy_cwd):
     at.segmented_control(key="styles_color_units").set_value("SRM").run()  # rerun sans rapport
     assert at.selectbox(key="styles_style").value == ("10A", "Test Wheat Style")
 
+def test_styles_search_shows_disambiguation_selectbox_for_multiple_matches(toy_cwd):
+    # 2026-09-07, retour utilisateur direct après test réel : "je tape ipa
+    # ca marche pas" -- "IPA" matche PLUSIEURS styles réels (dans cette
+    # fixture, 2 styles jouets ajoutés pour reproduire le cas), jamais un
+    # choix arbitraire : un sélecteur de désambiguïsation dédié doit
+    # apparaître, aucune resélection automatique de styles_category/
+    # styles_style tant que l'utilisateur n'a pas choisi.
+    con = connect(os.path.join(os.getcwd(), "aromahops.db"))
+    con.execute(
+        "INSERT INTO beer_styles (style_id, guideline_year, category_id, category, name) "
+        "VALUES ('_IPA1', 2021, '21', 'Test IPA Category', 'Test American IPA')")
+    con.execute(
+        "INSERT INTO beer_styles (style_id, guideline_year, category_id, category, name) "
+        "VALUES ('_IPA2', 2021, '21', 'Test IPA Category', 'Test Hazy IPA')")
+    con.commit(); con.close()
+
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("styles").run()
+    at.text_input(key="styles_search").set_value("IPA").run()
+    assert not at.exception
+    assert any("2 matches for" in s.label for s in at.selectbox
+              if s.key == "styles_search_pick")
+    # Toujours sur le style par défaut (premier de la liste triée) -- pas
+    # de resélection forcée avant un choix explicite dans le disambiguateur.
+    assert at.selectbox(key="styles_style").value != ("_IPA1", "Test American IPA")
+    assert at.selectbox(key="styles_style").value != ("_IPA2", "Test Hazy IPA")
+
+    at.selectbox(key="styles_search_pick").set_value(("_IPA2", "21", "Test IPA Category",
+                                                       "Test Hazy IPA")).run()
+    assert not at.exception
+    assert at.selectbox(key="styles_style").value == ("_IPA2", "Test Hazy IPA")
+
+def test_styles_search_switching_query_clears_stale_disambiguation_pick(toy_cwd):
+    # Une 2e recherche différente doit repartir de zéro -- pas de crash sur
+    # une valeur `styles_search_pick` de l'ancienne recherche absente des
+    # nouvelles options (même piège que st.multiselect déjà documenté).
+    con = connect(os.path.join(os.getcwd(), "aromahops.db"))
+    con.execute(
+        "INSERT INTO beer_styles (style_id, guideline_year, category_id, category, name) "
+        "VALUES ('_IPA1', 2021, '21', 'Test IPA Category', 'Test American IPA')")
+    con.execute(
+        "INSERT INTO beer_styles (style_id, guideline_year, category_id, category, name) "
+        "VALUES ('_IPA2', 2021, '21', 'Test IPA Category', 'Test Hazy IPA')")
+    con.commit(); con.close()
+
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("styles").run()
+    at.text_input(key="styles_search").set_value("IPA").run()
+    at.selectbox(key="styles_search_pick").set_value(("_IPA1", "21", "Test IPA Category",
+                                                       "Test American IPA")).run()
+    at.text_input(key="styles_search").set_value("Test Wheat Style").run()
+    assert not at.exception
+    assert at.selectbox(key="styles_style").value == ("10A", "Test Wheat Style")
+
 def test_style_hops_highlights_relevant_hop_absent_from_real_usage(toy_cwd):
     # T103 : "2A" -- descripteurs pré-remplis ("citrus"/"floral", trouvés
     # littéralement dans le texte "aroma" de la fixture) recoupent hopa

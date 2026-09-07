@@ -239,12 +239,15 @@ _TOOL_SUMMARY_BY_MODE = {t["mode"]: t for t in _TOOL_SUMMARIES}
 # un `git log` en direct exigerait aussi que `.git` soit présent dans le
 # conteneur déployé, ce qui n'est pas garanti.
 _RECENT_UPDATES = [
-    ("2026-09-07", "Beer styles gained a \"Search by name\" box: type a real "
-                   "BJCP 2021 name (\"American IPA\") or a finer beer-"
-                   "analytics.com name (\"Black IPA\") and it resolves to "
-                   "the real BJCP entry (\"21B - Specialty IPA\"), never a "
-                   "fabricated style. Names with no BJCP equivalent get an "
-                   "honest note instead of a silent failure."),
+    ("2026-09-07", "Beer styles gained a \"Search by name\" box: type any "
+                   "part of a real BJCP 2021 name (\"IPA\", \"Pale Ale\") "
+                   "or a finer beer-analytics.com name (\"Black IPA\") and "
+                   "it resolves to the matching real BJCP entry/entries -- "
+                   "never a fabricated style. A search like \"IPA\" that "
+                   "matches several real styles shows all of them so you "
+                   "pick the right one, rather than guessing. Names with "
+                   "no BJCP equivalent get an honest note instead of a "
+                   "silent failure."),
     ("2026-09-03", "Compare Hops gained the same \"Hop addition timing\" "
                    "breakdown as Browse, grouped by hop: bars side by side "
                    "for up to 3 hops, small multiples (one mini-chart per "
@@ -5699,46 +5702,86 @@ def _styles(con) -> None:
         st.write("No style in the database yet — run `hopmatch ingest-styles` first.")
         return
 
-    # T130 (2026-09-07) : recherche par nom, résolue via `matching.resolve_
-    # style_search` -- un nom BJCP réel (ex. "American IPA") OU un nom plus
-    # fin de beer-analytics.com sans équivalent BJCP propre (ex. "Black
-    # IPA" -> 21B "Specialty IPA", `data/mappings/beer_style_aliases.yaml`,
-    # T84/T85). DOIT s'exécuter avant la création des `st.selectbox`
-    # `styles_category`/`styles_style` ci-dessous (même contrainte que le
-    # relais `_next_mode` de `main()` -- Streamlit interdit de modifier
-    # `st.session_state[key]` une fois le widget de cette clé déjà
-    # instancié dans CE run) pour pouvoir les pré-sélectionner.
+    # T130 (2026-09-07, REDESIGN sur retour utilisateur direct après test
+    # réel : "je tape pale ale ca marche pas, ipa non plus... il faut taper
+    # EXACTEMENT le terme") : recherche par SOUS-CHAÎNE (`matching.resolve_
+    # style_search`), pas une égalité exacte -- la 1ère version de ce
+    # ticket exigeait un nom BJCP littéral complet ("American IPA"), ce
+    # qu'aucun utilisateur ne devine spontanément ("IPA" seul, "Pale Ale"
+    # seul ne sont le nom BJCP LITTÉRAL d'aucun style réel). DOIT s'exécuter
+    # avant la création des `st.selectbox` `styles_category`/`styles_style`
+    # ci-dessous (même contrainte que le relais `_next_mode` de `main()` --
+    # Streamlit interdit de modifier `st.session_state[key]` une fois le
+    # widget de cette clé déjà instancié dans CE run) pour pouvoir les
+    # pré-sélectionner.
     #
-    # `_styles_search_applied` évite de ré-appliquer la MÊME recherche à
-    # chaque rerun causé par un widget sans rapport (ex. le toggle EBC/SRM
-    # ci-dessus) -- sans ce garde-fou, un choix manuel de l'utilisateur dans
-    # les selectbox juste après une recherche serait écrasé au rerun
-    # suivant. Un nouveau texte (différent du dernier appliqué) redéclenche
-    # la résolution normalement.
+    # **"IPA" retourne volontairement PLUSIEURS styles réels** (American/
+    # English/Hazy/Specialty/Double IPA...) -- jamais un choix arbitraire
+    # parmi des candidats également légitimes : un `st.selectbox` de
+    # désambiguïsation dédié s'affiche quand `len(matches) > 1`, l'exact
+    # inverse de deviner. Un seul candidat -> pré-sélection directe des deux
+    # `st.selectbox` Category/Style (pas de clic supplémentaire nécessaire).
+    #
+    # Garde-fous anti-écrasement : `_styles_search_query_seen` ne relance
+    # `resolve_style_search` que sur un texte VRAIMENT nouveau (jamais à
+    # chaque rerun causé par un widget sans rapport, ex. le toggle EBC/SRM
+    # ci-dessus) ; `_styles_search_applied`/`_styles_search_pick_applied`
+    # n'appliquent chaque résolution/choix de désambiguïsation qu'UNE FOIS,
+    # pour qu'une resélection manuelle ultérieure de l'utilisateur dans les
+    # selectbox Category/Style ne soit jamais reécrasée au rerun suivant.
     with _panel():
         search_query = st.text_input(
             "Search by name", key="styles_search",
-            placeholder="e.g. Hazy IPA, American IPA, Black IPA…",
-            help="Matches a real BJCP 2021 style name directly, or a finer-grained "
-                 "name beer-analytics.com uses (e.g. \"Black IPA\") -- resolved to "
-                 "its real BJCP entry, never a fabricated one.")
-        if search_query and search_query != st.session_state.get("_styles_search_applied"):
-            st.session_state["_styles_search_applied"] = search_query
-            result = matching.resolve_style_search(con, search_query)
-            if result is None:
-                st.session_state["_styles_search_message"] = (
-                    f"No BJCP 2021 style found for “{search_query}”.")
-            elif result["style_id"] is None:
-                st.session_state["_styles_search_message"] = (
-                    f"“{search_query}” is a real style tracked by "
-                    "beer-analytics.com, but it has no BJCP 2021 equivalent.")
+            placeholder="e.g. IPA, Pale Ale, Black IPA…",
+            help="Substring match, case-insensitive, against real BJCP 2021 names "
+                 "and beer-analytics.com's finer-grained names (e.g. \"Black IPA\" "
+                 "resolves to its real BJCP entry, \"21B - Specialty IPA\") -- "
+                 "never a fabricated style.")
+        if search_query != st.session_state.get("_styles_search_query_seen"):
+            st.session_state["_styles_search_query_seen"] = search_query
+            st.session_state["_styles_search_result"] = (
+                matching.resolve_style_search(con, search_query) if search_query else None)
+            st.session_state.pop("_styles_search_applied", None)
+            st.session_state.pop("_styles_search_pick_applied", None)
+            # `styles_search_pick` porte des tuples SPÉCIFIQUES à l'ancienne
+            # recherche (`pick_options` change de contenu à chaque nouvelle
+            # requête) -- le laisser en session_state ferait planter le
+            # `st.selectbox` suivant (`StreamlitAPIException`, valeur
+            # persistée absente des nouvelles `options`, même piège que
+            # `st.multiselect` déjà documenté ailleurs dans ce fichier).
+            st.session_state.pop("styles_search_pick", None)
+
+        result = st.session_state.get("_styles_search_result")
+        if result is not None:
+            matches = result["matches"]
+            if not matches:
+                if result["known_no_bjcp"]:
+                    st.caption(
+                        "Matches known style(s) with no BJCP 2021 equivalent: "
+                        + ", ".join(f"“{label}”" for label in result["known_no_bjcp"]) + ".")
+                else:
+                    st.caption(f"No BJCP 2021 style found for “{search_query}”.")
+            elif len(matches) == 1:
+                m = matches[0]
+                if st.session_state.get("_styles_search_applied") != search_query:
+                    st.session_state["styles_category"] = (m["category_id"], m["category"])
+                    st.session_state["styles_style"] = (m["style_id"], m["name"])
+                    st.session_state["_styles_search_applied"] = search_query
+                st.caption(f"Resolved to {m['style_id']} – {m['name']}.")
             else:
-                st.session_state["styles_category"] = (result["category_id"], result["category"])
-                st.session_state["styles_style"] = (result["style_id"], result["name"])
-                st.session_state["_styles_search_message"] = (
-                    f"Resolved to {result['style_id']} – {result['name']}.")
-        if search_query:
-            st.caption(st.session_state.get("_styles_search_message", ""))
+                pick_options = [None] + [
+                    (m["style_id"], m["category_id"], m["category"], m["name"]) for m in matches]
+                picked = st.selectbox(
+                    f"{len(matches)} matches for “{search_query}” — choose one",
+                    pick_options,
+                    format_func=lambda p: "— choose one —" if p is None else f"{p[0]} - {p[3]}",
+                    key="styles_search_pick")
+                if picked is not None:
+                    guard = (search_query, picked[0])
+                    if st.session_state.get("_styles_search_pick_applied") != guard:
+                        st.session_state["styles_category"] = (picked[1], picked[2])
+                        st.session_state["styles_style"] = (picked[0], picked[3])
+                        st.session_state["_styles_search_pick_applied"] = guard
 
     category_id, category = st.selectbox(
         "Category", categories, format_func=lambda c: f"{c[0]} - {c[1]}", key="styles_category")
