@@ -2062,10 +2062,15 @@ def test_ingest_hopsteiner_thiols_impact_broadcasts_to_sister_varieties_same_reg
     assert nz["category"] == "high" and mac["category"] == "high"
 
 
-def test_ingest_hopsteiner_thiols_impact_skips_ambiguous_single_generic_row(tmp_path, monkeypatch):
+def test_ingest_hopsteiner_thiols_impact_resolves_single_generic_row_by_region(tmp_path, monkeypatch):
     # Cascade : catégorie divergente selon le pays testé (Allemagne="medium"
-    # vs USA="high") et une SEULE ligne générique en catalogue -- jamais un
-    # choix arbitraire entre les deux.
+    # vs USA="high") mais une SEULE ligne générique en catalogue dont la
+    # `region` (United States, sourcée BarthHaas/Yakima, pas une supposition)
+    # correspond explicitement au pays "USA" portant "high" -- résout sans
+    # ambiguïté, contrairement à un choix arbitraire entre les catégories
+    # (bug réel corrigé 2026-09-08 : une première version ne faisait CETTE
+    # correspondance par région que si le cultivar avait plusieurs lignes
+    # catalogue, laissant Cascade non classée malgré sa région déjà connue).
     monkeypatch.setattr(ingest, "_load_yaml_mapping", lambda filename: _hopsteiner_yaml_fixture())
     db_path = _hopsteiner_test_db(tmp_path)
     ingest.ingest_hopsteiner_thiols(db_path)
@@ -2073,7 +2078,7 @@ def test_ingest_hopsteiner_thiols_impact_skips_ambiguous_single_generic_row(tmp_
     con = connect(db_path)
     row = con.execute("SELECT category FROM hop_thiol_impact WHERE variety='cascade'").fetchone()
     con.close()
-    assert row is None
+    assert row["category"] == "high"
 
 
 def test_ingest_hopsteiner_thiols_is_idempotent(tmp_path, monkeypatch):
@@ -2087,8 +2092,9 @@ def test_ingest_hopsteiner_thiols_is_idempotent(tmp_path, monkeypatch):
     n_comp = con.execute(
         "SELECT COUNT(*) FROM hop_composition WHERE source='hopsteiner-thiol-2024'").fetchone()[0]
     con.close()
-    # amarillo (high) + fuggles (low) + nelson-sauvin nz-hops/machops (high, x2) = 4
-    assert n_impact == 4
+    # amarillo (high) + fuggles (low) + nelson-sauvin nz-hops/machops (high, x2)
+    # + cascade (high, région "United States" matche "USA") = 5
+    assert n_impact == 5
     assert n_comp == 3  # mosaic + 2 lignes Nelson Sauvin (Eureka! sautée)
 
 

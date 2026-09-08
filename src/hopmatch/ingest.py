@@ -2817,30 +2817,35 @@ def ingest_hopsteiner_thiols(out_db: str) -> None:
        sautée, comptée dans le compte-rendu.
 
     2. `impact_classification` -> `hop_thiol_impact` (category=low/medium/
-       high). PAS une écriture par nom seul : le papier montre qu'une même
-       variété testée dans plusieurs pays peut recevoir des catégories
-       DIFFÉRENTES (ex. Cascade USA="high" vs Allemagne/Argentine=
-       "medium") -- une variété dont TOUTES les entrées YAML partagent la
-       même catégorie est écrite sans réserve de région ; une variété aux
-       catégories DIVERGENTES n'est écrite QUE sur les lignes `hops` dont
-       `region` correspond explicitement à l'un des pays testés portant
-       CETTE catégorie (résolution par `_cultivar_base_name`, même
-       mécanisme que `_write_hop_identity`/T106 -- une variété-sœur de même
-       cultivar, ex. Nelson Sauvin NZ Hops/MacHops, reçoit la même
-       classification si son `region` correspond) ; si notre catalogue n'a
-       qu'UNE SEULE ligne pour ce cultivar de base mais que le papier ne
-       l'a testée QUE dans un pays qui NE correspond PAS à notre `region`
-       (jamais rencontré dans les 62 variétés résolues au moment de ce
-       ticket, mais vérifié explicitement) elle est sautée plutôt que
-       supposée -- jamais une catégorie appliquée à un crop non testé.
-       Ex. réel : Amarillo (USA="high" seul testé) s'applique à notre ligne
-       `amarillo` (United States) mais PAS à `amarillo-brand-ama04`
-       (Germany, jamais testée par le papier) ; Cascade est un cas encore
-       plus strict -- notre catalogue n'a qu'UNE ligne générique "cascade"
-       sans région distincte USA/Allemagne/Argentine, donc AUCUNE des
-       catégories divergentes ne peut lui être attribuée sans deviner quel
-       crop elle représente -- sautée entièrement, jamais une classification
-       choisie au hasard entre "medium" et "high"."""
+       high). Correspondance par RÉGION, TOUJOURS, sur CHAQUE ligne `hops`
+       du cultivar de base (`_cultivar_base_name`, même mécanisme que
+       `_write_hop_identity`/T106) : une ligne n'hérite d'une catégorie que
+       si son `region` correspond explicitement à un pays RÉELLEMENT testé
+       par le papier pour ce nom -- que le cultivar ait UNE ligne catalogue
+       (Cascade -- `region`="United States", sourcé BarthHaas/Yakima, pas
+       une supposition -- résout sans ambiguïté vers "high", le pays
+       réellement testé pour cette catégorie parmi USA="high"/Allemagne=
+       "medium"/Argentine="medium") ou plusieurs (Amarillo -- USA="high"
+       seul testé -- s'applique à `amarillo` (United States) mais PAS à
+       `amarillo-brand-ama04`, Germany, jamais testée par le papier).
+       Nelson Sauvin/Motueka (NZ Hops/MacHops, même généalogie, même
+       `region`="New Zealand" pour les deux lignes) reçoivent donc
+       naturellement la même classification, sans branche spéciale.
+       ⚠ **BUG CORRIGÉ (2026-09-08, retour utilisateur explicite sur
+       Cascade)** : une PREMIÈRE version de cette fonction ne faisait la
+       correspondance par région QUE si le cultivar avait PLUSIEURS lignes
+       catalogue, et DIFFUSAIT la catégorie sans vérification dès qu'un
+       cultivar n'avait qu'UNE ligne (Cascade) OU qu'un seul pays était
+       testé (Amarillo) -- ce dernier cas aurait silencieusement donné
+       "high" à `amarillo-brand-ama04` (Allemagne, jamais testée) en plus
+       de `amarillo` (USA, réellement testée), et laissait Cascade non
+       classée alors que sa propre `region` résolvait déjà l'ambiguïté sans
+       supposition. La correspondance par région s'applique désormais
+       INCONDITIONNELLEMENT, sur chaque ligne, sans branche de diffusion
+       raccourcie. Une ligne dont la région ne correspond à AUCUN pays
+       testé est sautée et NOMMÉE dans le compte-rendu (jamais un simple
+       compteur silencieux, jamais un choix arbitraire entre catégories
+       testées)."""
     from .schema import connect, ensure_table, HOP_THIOL_IMPACT_SCHEMA
     from collections import defaultdict
     from datetime import datetime, timezone
@@ -2881,52 +2886,54 @@ def ingest_hopsteiner_thiols(out_db: str) -> None:
     for entry in data["impact_classification"]:
         by_variety_name[entry["variety"]].add((entry["country"], entry["category"]))
 
-    n_impact_written = n_impact_ambiguous = n_impact_no_region_match = 0
+    n_impact_written = n_impact_no_region_match = 0
+    no_region_match_names: list[str] = []
     con.execute("DELETE FROM hop_thiol_impact WHERE source='hopsteiner-thiol-2024'")
     for paper_name, country_category_pairs in by_variety_name.items():
-        categories = {cat for _, cat in country_category_pairs}
         candidate_rows = by_base_name.get(paper_name, [])
         if not candidate_rows:
             continue
-        if len(candidate_rows) > 1:
-            # Plusieurs lignes régionales pour ce cultivar de base (ex.
-            # Amarillo US/Allemagne, Fuggle Grande-Bretagne/France) --
-            # n'écrit QUE sur celles dont `region` correspond explicitement
-            # à un pays RÉELLEMENT TESTÉ par le papier pour ce nom, que les
-            # catégories testées soient identiques entre elles (Nelson
-            # Sauvin/Motueka, toutes deux Nouvelle-Zélande) ou divergentes
-            # (Cascade) -- une ligne dont la région n'a JAMAIS été testée
-            # par le papier n'hérite jamais d'une catégorie, même quand
-            # toutes les régions testées s'accordent entre elles.
-            for variety, region in candidate_rows:
-                match = next((cat for country, cat in country_category_pairs
-                             if _THIOL_PAPER_COUNTRY_TO_REGION.get(country, country) == region), None)
-                if match is None:
-                    n_impact_no_region_match += 1
-                    continue
-                con.execute("INSERT OR REPLACE INTO hop_thiol_impact VALUES (?,?,?,?)",
-                           (variety, match, "hopsteiner-thiol-2024", fetched_at))
-                n_impact_written += 1
-        elif len(categories) == 1:
-            variety, _region = candidate_rows[0]
+        # Correspondance par RÉGION, TOUJOURS, sur CHAQUE ligne catalogue du
+        # cultivar de base, qu'il y en ait une (Cascade) ou plusieurs
+        # (Amarillo US/Allemagne) et que le papier ait testé un seul pays ou
+        # plusieurs -- jamais de "diffusion" inconditionnelle même quand une
+        # seule catégorie est testée : une PREMIÈRE VERSION de cette
+        # fonction diffusait la catégorie testée à TOUTES les lignes du
+        # cultivar dès qu'un seul pays était testé, ce qui aurait donné
+        # "high" (USA) à `amarillo-brand-ama04` (Allemagne, jamais testée
+        # par le papier) simplement parce qu'Amarillo n'a qu'UNE entrée
+        # YAML -- bug réel trouvé en re-testant ce ticket (retour
+        # utilisateur explicite sur Cascade). La correspondance par région
+        # gère aussi bien Cascade (UNE ligne catalogue, `region`="United
+        # States" sourcé BarthHaas/Yakima -- pas une supposition -- résout
+        # sans ambiguïté vers "high", le pays réellement testé pour cette
+        # catégorie) que Nelson Sauvin/Motueka (DEUX lignes catalogue, même
+        # `region`="New Zealand" toutes les deux, même généalogie -- les
+        # deux reçoivent la même classification, cohérent avec
+        # `_write_hop_identity`/T106) : aucune branche spéciale n'est plus
+        # nécessaire. Une ligne dont la région ne correspond à AUCUN pays
+        # testé par le papier est sautée et NOMMÉE dans le compte-rendu
+        # (jamais un simple compteur silencieux, jamais un choix arbitraire
+        # entre catégories testées).
+        for variety, region in candidate_rows:
+            match = next((cat for country, cat in country_category_pairs
+                         if _THIOL_PAPER_COUNTRY_TO_REGION.get(country, country) == region), None)
+            if match is None:
+                n_impact_no_region_match += 1
+                no_region_match_names.append(f"{paper_name} ({region})")
+                continue
             con.execute("INSERT OR REPLACE INTO hop_thiol_impact VALUES (?,?,?,?)",
-                       (variety, next(iter(categories)), "hopsteiner-thiol-2024", fetched_at))
+                       (variety, match, "hopsteiner-thiol-2024", fetched_at))
             n_impact_written += 1
-        else:
-            # Une seule ligne catalogue (générique, sans région distincte)
-            # mais le papier donne des catégories DIVERGENTES selon la
-            # région testée (ex. Cascade USA="high" vs Allemagne/
-            # Argentine="medium") -- aucun moyen de savoir quel crop notre
-            # ligne générique représente, sautée plutôt qu'un choix au
-            # hasard entre les catégories.
-            n_impact_ambiguous += 1
     con.commit(); con.close()
     print(f"hopsteiner-thiol-2024 : {n_values_written} valeurs ponctuelles écrites "
          f"({n_values_skipped} variétés du papier absentes du catalogue), "
          f"{n_impact_written} classifications thiol impact écrites "
-         f"({n_impact_ambiguous} variétés à catégorie divergente sans ligne région "
-         f"distincte -- sautées, {n_impact_no_region_match} lignes région sans pays "
-         f"testé correspondant -- sautées)")
+         f"({n_impact_no_region_match} lignes sautées -- région catalogue ne "
+         f"correspondant à AUCUN pays testé par le papier pour cette variété)")
+    if no_region_match_names:
+        print("  variétés/régions sautées (catégorie divergente selon le pays, "
+             f"région catalogue jamais testée) : {', '.join(sorted(no_region_match_names))}")
 
 
 def reconcile_mmum_hop_varieties(recipes_db: str = "recipes.db", aroma_db: str = "aromahops.db",
