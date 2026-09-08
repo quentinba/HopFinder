@@ -840,3 +840,13 @@ def test_parse_beer_analytics_hops_csv_empty_alt_names_give_empty_list():
 def test_parse_beer_analytics_hops_csv_row_count():
     rows = parsers.parse_beer_analytics_hops_csv(_BA_HOPS_CSV_SAMPLE)
     assert len(rows) == 3
+
+def test_parse_beer_analytics_hops_csv_extracts_substitutes():
+    rows = parsers.parse_beer_analytics_hops_csv(_BA_HOPS_CSV_SAMPLE)
+    citra = next(r for r in rows if r["name"] == "Citra")
+    assert citra["substitutes"] == ["Cascade", "Centennial"]
+
+def test_parse_beer_analytics_hops_csv_empty_substitutes_give_empty_list():
+    rows = parsers.parse_beer_analytics_hops_csv(_BA_HOPS_CSV_SAMPLE)
+    solero = next(r for r in rows if r["name"] == "Solero")
+    assert solero["substitutes"] == []

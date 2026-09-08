@@ -702,6 +702,34 @@ def test_browse_mode_shows_hop_composition_and_descriptors(toy_cwd):
     assert any("citrus" in m.value and "woody" in m.value for m in at.markdown)
     assert len(at.dataframe) >= 1
 
+def test_browse_substitutions_grouped_by_source_with_convergence_bonus(toy_cwd):
+    # T109 : deux sources éditoriales dans hop_substitutions (BeerMaverick +
+    # beer-analytics) + hop_similar (Yakima) -- hopb suggéré par les TROIS
+    # (convergence), hopc seulement par BeerMaverick (pas de convergence).
+    con = connect(os.path.join(os.getcwd(), "aromahops.db"))
+    con.execute("INSERT INTO hop_similar VALUES (?,?,?)", ("hopa", "hopb", "yakima"))
+    con.execute("INSERT INTO hop_substitutions VALUES (?,?,?,?)",
+               ("hopa", "Hopb", "hopb", "beermaverick"))
+    con.execute("INSERT INTO hop_substitutions VALUES (?,?,?,?)",
+               ("hopa", "Hopb", "hopb", "beer-analytics"))
+    con.execute("INSERT INTO hop_substitutions VALUES (?,?,?,?)",
+               ("hopa", "Hopc", "hopc", "beermaverick"))
+    con.commit(); con.close()
+
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("browse").run()
+    at.selectbox[0].set_value("hopa").run()
+    assert not at.exception
+    markdown_blob = " ".join(m.value for m in at.markdown)
+    assert "BeerMaverick" in markdown_blob and "beer-analytics.com" in markdown_blob
+    assert any("All three editorial sources agree" in c.value and "Hopb" in c.value
+              for c in at.caption)
+    # hopc n'apparaît QUE chez BeerMaverick -- ne doit pas être cité dans la
+    # phrase de convergence (qui exige les 3 sources).
+    assert not any("All three editorial sources agree" in c.value and "Hopc" in c.value
+                  for c in at.caption)
+
 def test_browse_recommended_usage_shows_both_layers_when_available(toy_cwd):
     # T99 : hopa a à la fois une donnée empirique (hop_usage_stats, "Boil"
     # 10000 recettes, voir _build_toy_db/T108) ET une donnée chimique

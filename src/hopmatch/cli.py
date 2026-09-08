@@ -203,6 +203,11 @@ def main(argv=None):
     mr.add_argument("--recipes-db", default="recipes.db")
     mr.add_argument("--db", default=DEFAULT_DB, help="aromahops.db, lue seule, jamais modifiée")
 
+    bas = sub.add_parser("ingest-beer-analytics-substitutes",
+                         help="3e source de substitutions éditoriales (beer-analytics "
+                              "hops.csv, colonne substitutes) dans hop_substitutions -- T109")
+    bas.add_argument("--db", default=DEFAULT_DB)
+
     msr = sub.add_parser("reconcile-mmum-styles",
                          help="résout recipes.style_raw -> style_id BJCP dans recipes.db "
                               "(data/mappings/beer_style_aliases.yaml) -- T94")
@@ -316,6 +321,8 @@ def main(argv=None):
         ingest.ingest_mmum(a.db, start=a.start, end=a.end, sleep=a.sleep, limit=a.limit); return 0
     if a.cmd == "reconcile-mmum":
         ingest.reconcile_mmum_hop_varieties(a.recipes_db, aroma_db=a.db); return 0
+    if a.cmd == "ingest-beer-analytics-substitutes":
+        ingest.ingest_beer_analytics_substitutes(a.db); return 0
     if a.cmd == "reconcile-mmum-styles":
         ingest.reconcile_mmum_style_ids(a.recipes_db); return 0
     if a.cmd == "compute-hop-combinations":

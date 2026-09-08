@@ -844,7 +844,22 @@ def test_hop_substitutions_reads_inserted_rows(db):
     db.execute("INSERT INTO hop_substitutions VALUES (?,?,?,?)",
               ("citra", "Mosaic", "mosaic", "beermaverick"))
     db.commit()
-    assert matching.hop_substitutions(db, "citra") == [{"name": "Mosaic", "variety": "mosaic"}]
+    assert matching.hop_substitutions(db, "citra") == [
+        {"name": "Mosaic", "variety": "mosaic", "source": "beermaverick"}]
+    db.execute("DELETE FROM hop_substitutions WHERE variety='citra'")
+    db.commit()
+
+def test_hop_substitutions_keeps_multiple_sources_separate(db):
+    # T109 : BeerMaverick ET beer-analytics peuvent chacun suggérer Cascade
+    # pour Citra -- deux lignes distinctes, jamais fusionnées en une.
+    db.execute("INSERT INTO hop_substitutions VALUES (?,?,?,?)",
+              ("citra", "Cascade", "cascade", "beermaverick"))
+    db.execute("INSERT INTO hop_substitutions VALUES (?,?,?,?)",
+              ("citra", "Cascade", "cascade", "beer-analytics"))
+    db.commit()
+    result = matching.hop_substitutions(db, "citra")
+    assert len(result) == 2
+    assert {r["source"] for r in result} == {"beermaverick", "beer-analytics"}
     db.execute("DELETE FROM hop_substitutions WHERE variety='citra'")
     db.commit()
 

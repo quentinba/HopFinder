@@ -239,6 +239,13 @@ _TOOL_SUMMARY_BY_MODE = {t["mode"]: t for t in _TOOL_SUMMARIES}
 # un `git log` en direct exigerait aussi que `.git` soit présent dans le
 # conteneur déployé, ce qui n'est pas garanti.
 _RECENT_UPDATES = [
+    ("2026-09-08", "Browse a hop's \"Suggested substitutions\" card now has "
+                   "a second editorial source (beer-analytics.com), shown "
+                   "separately from BeerMaverick -- never merged, since two "
+                   "editors can genuinely disagree. When all three editorial "
+                   "sources (Yakima, BeerMaverick, beer-analytics.com) "
+                   "independently suggest the same hop, that's called out "
+                   "as a stronger signal."),
     ("2026-09-08", "Hopping plan gained a 5th addition stage: \"Late boil\" "
                    "(~5 minutes before the end of the boil) -- kept separate "
                    "from \"Whirlpool\" on purpose, they're chemically "
@@ -2791,12 +2798,14 @@ def _hop_associations(con, hops: dict, selected: str) -> None:
     """Associations houblon<->houblon (T25 backlog, +1 avec T83) : QUATRE
     relations différentes, chacune affichée avec sa propre source — ne
     jamais les présenter comme interchangeables (similarité YCH != co-usage
-    recette BeerMaverick != choix éditorial BeerMaverick substitutions !=
-    suggestion de style éditoriale Yakima/BeerMaverick). Toutes les listes
-    (hors le tableau "Frequent recipe pairings", qui porte une fréquence
-    numérique) en chips `_descriptor_chips` (2026-08-27, retour utilisateur
-    en direct : cohérence visuelle avec le bloc Descriptors juste au-dessus,
-    jamais de texte brut à côté de pilules colorées sur la même carte)."""
+    recette BeerMaverick != choix éditorial substitutions (BeerMaverick +
+    beer-analytics depuis T109, deux sources DANS cette même relation,
+    groupées séparément) != suggestion de style éditoriale Yakima/
+    BeerMaverick). Toutes les listes (hors le tableau "Frequent recipe
+    pairings", qui porte une fréquence numérique) en chips
+    `_descriptor_chips` (2026-08-27, retour utilisateur en direct :
+    cohérence visuelle avec le bloc Descriptors juste au-dessus, jamais de
+    texte brut à côté de pilules colorées sur la même carte)."""
     similar = matching.hop_similar_varieties(con, selected)
     st.write("**Similar varieties (Yakima)**")
     if similar:
@@ -2822,13 +2831,33 @@ def _hop_associations(con, hops: dict, selected: str) -> None:
                    "recipe volume on their end, or variety not covered).")
 
     subs = matching.hop_substitutions(con, selected)
-    st.write("**Suggested substitutions (BeerMaverick — editorial choice "
-             "of experienced brewers, not a measurement)**")
+    st.write("**Suggested substitutions (editorial choice — BeerMaverick "
+             "and/or beer-analytics.com, not a measurement)**")
+    # T109 (2026-09-08) : DEUX sources dans la même table depuis ce ticket
+    # (BeerMaverick + beer-analytics colonne `substitutes` du même hops.csv
+    # que T92) -- jamais fusionnées, même schéma "grouped by source" que
+    # les styles éditoriaux ci-dessous (`_SOURCE_LABELS`).
     if subs:
-        st.markdown(_descriptor_chips([
-            hops[s["variety"]]["name"] if s["variety"] in hops else s["name"] for s in subs]))
+        _SUB_SOURCE_LABELS = {"beermaverick": "BeerMaverick", "beer-analytics": "beer-analytics.com"}
+        subs_by_source: dict[str, list[str]] = {}
+        for s in subs:
+            label = hops[s["variety"]]["name"] if s["variety"] in hops else s["name"]
+            subs_by_source.setdefault(_SUB_SOURCE_LABELS.get(s["source"], s["source"]), []).append(label)
+        st.markdown("  \n".join(f"**{src}:** " + _descriptor_chips(labels)
+                                for src, labels in subs_by_source.items()))
+        # Bonus du ticket (T109) : convergence des TROIS sources éditoriales
+        # (Yakima `hop_similar` + BeerMaverick + beer-analytics, PAS notre
+        # calcul chimique `similar_hops` -- signal différent, jamais mélangé
+        # ici) -- un houblon suggéré indépendamment par les trois est un
+        # signal plus fort qu'une seule source prise isolément.
+        bm_varieties = {s["variety"] for s in subs if s["source"] == "beermaverick" and s["variety"]}
+        ba_varieties = {s["variety"] for s in subs if s["source"] == "beer-analytics" and s["variety"]}
+        convergent = set(similar) & bm_varieties & ba_varieties
+        if convergent:
+            st.caption(":material/priority_high: **All three editorial sources agree:** " +
+                      ", ".join(sorted(hops[v]["name"] for v in convergent if v in hops)))
     else:
-        st.caption("No BeerMaverick data for this variety.")
+        st.caption("No BeerMaverick or beer-analytics.com data for this variety.")
 
     # T83 (2026-08-27, priorité utilisateur explicite "super important") :
     # QUATRIÈME relation, grouped par source comme les descripteurs

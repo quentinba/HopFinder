@@ -1605,6 +1605,120 @@ def test_build_recipe_hop_index_excludes_ambiguous_duplicate_names(tmp_path):
     assert ingest._normalize_recipe_hop_name("Saaz") not in index
     assert index[ingest._normalize_recipe_hop_name("Citra")] == "citra"
 
+# --------------------------------------------------------------------------- #
+# T109 -- 3e source de substitutions éditoriales (beer-analytics hops.csv)
+# --------------------------------------------------------------------------- #
+_BA_SUBSTITUTES_CSV = (
+    "name;use;origin;substitutes;aromas;alt_names;alt_names_extra\n"
+    "Citra;dual-purpose;USA;Cascade, Unknown Hop XYZ;Citrus;;\n"
+    "Mosaic;dual-purpose;USA;;Fruity;;\n"
+    "Unresolved Source Hop;aroma;USA;Citra;Citrus;;\n"
+)
+
+def _write_ba_substitutes_csv(tmp_path):
+    path = tmp_path / "hops.csv"
+    path.write_text(_BA_SUBSTITUTES_CSV, encoding="utf-8")
+    return str(path)
+
+def test_ingest_beer_analytics_substitutes_writes_resolved_and_unresolved(tmp_path):
+    con = connect(str(tmp_path / "t.db")); init_db(con)
+    con.execute("INSERT INTO hops (variety, name, region, sources, purpose) "
+               "VALUES ('citra', 'Citra', 'United States', 'yakima', NULL)")
+    con.execute("INSERT INTO hops (variety, name, region, sources, purpose) "
+               "VALUES ('cascade', 'Cascade', 'United States', 'yakima', NULL)")
+    con.commit(); con.close()
+
+    csv_path = _write_ba_substitutes_csv(tmp_path)
+    ingest.ingest_beer_analytics_substitutes(str(tmp_path / "t.db"), hops_csv_path=csv_path)
+
+    con = connect(str(tmp_path / "t.db"))
+    rows = {r["substitute_name"]: dict(r) for r in con.execute(
+        "SELECT * FROM hop_substitutions WHERE variety='citra' AND source='beer-analytics'")}
+    con.close()
+    assert rows["Cascade"]["substitute_variety"] == "cascade"
+    # substitut réel mais absent de notre catalogue -- jamais deviné, mais
+    # le nom brut reste écrit (rien de perdu silencieusement).
+    assert rows["Unknown Hop XYZ"]["substitute_variety"] is None
+
+def test_ingest_beer_analytics_substitutes_skips_row_with_unresolved_source_hop(tmp_path):
+    # "Unresolved Source Hop" -> Citra : le houblon SOURCE n'est pas dans
+    # notre catalogue -- ligne sautée entièrement (pas de variety exploitable),
+    # même si son substitut listé (Citra) est, lui, résolu.
+    con = connect(str(tmp_path / "t.db")); init_db(con)
+    con.execute("INSERT INTO hops (variety, name, region, sources, purpose) "
+               "VALUES ('citra', 'Citra', 'United States', 'yakima', NULL)")
+    con.commit(); con.close()
+
+    csv_path = _write_ba_substitutes_csv(tmp_path)
+    ingest.ingest_beer_analytics_substitutes(str(tmp_path / "t.db"), hops_csv_path=csv_path)
+
+    con = connect(str(tmp_path / "t.db"))
+    n = con.execute(
+        "SELECT COUNT(*) FROM hop_substitutions WHERE substitute_name='Citra' "
+        "AND source='beer-analytics'").fetchone()[0]
+    con.close()
+    assert n == 0
+
+def test_ingest_beer_analytics_substitutes_row_with_no_substitutes_is_skipped(tmp_path):
+    # Mosaic (fixture) a un champ substitutes VIDE -- aucune ligne écrite
+    # pour lui, jamais une absence transformée en ligne fantôme.
+    con = connect(str(tmp_path / "t.db")); init_db(con)
+    con.execute("INSERT INTO hops (variety, name, region, sources, purpose) "
+               "VALUES ('mosaic', 'Mosaic', 'United States', 'yakima', NULL)")
+    con.commit(); con.close()
+
+    csv_path = _write_ba_substitutes_csv(tmp_path)
+    ingest.ingest_beer_analytics_substitutes(str(tmp_path / "t.db"), hops_csv_path=csv_path)
+
+    con = connect(str(tmp_path / "t.db"))
+    n = con.execute(
+        "SELECT COUNT(*) FROM hop_substitutions WHERE variety='mosaic' "
+        "AND source='beer-analytics'").fetchone()[0]
+    con.close()
+    assert n == 0
+
+def test_ingest_beer_analytics_substitutes_never_overwrites_beermaverick_rows(tmp_path):
+    # Même variety, même substitute_name, sources DIFFÉRENTES -- la clé
+    # composite (variety, substitute_name, source) garantit la coexistence,
+    # jamais un écrasement entre les deux sources éditoriales.
+    con = connect(str(tmp_path / "t.db")); init_db(con)
+    con.execute("INSERT INTO hops (variety, name, region, sources, purpose) "
+               "VALUES ('citra', 'Citra', 'United States', 'yakima', NULL)")
+    con.execute("INSERT INTO hops (variety, name, region, sources, purpose) "
+               "VALUES ('cascade', 'Cascade', 'United States', 'yakima', NULL)")
+    con.execute("INSERT INTO hop_substitutions VALUES (?,?,?,?)",
+               ("citra", "Cascade", "cascade", "beermaverick"))
+    con.commit(); con.close()
+
+    csv_path = _write_ba_substitutes_csv(tmp_path)
+    ingest.ingest_beer_analytics_substitutes(str(tmp_path / "t.db"), hops_csv_path=csv_path)
+
+    con = connect(str(tmp_path / "t.db"))
+    rows = [dict(r) for r in con.execute(
+        "SELECT * FROM hop_substitutions WHERE variety='citra' AND substitute_name='Cascade'")]
+    sources = {r["source"] for r in rows}
+    con.close()
+    assert sources == {"beermaverick", "beer-analytics"}
+
+def test_ingest_beer_analytics_substitutes_is_idempotent(tmp_path):
+    con = connect(str(tmp_path / "t.db")); init_db(con)
+    con.execute("INSERT INTO hops (variety, name, region, sources, purpose) "
+               "VALUES ('citra', 'Citra', 'United States', 'yakima', NULL)")
+    con.execute("INSERT INTO hops (variety, name, region, sources, purpose) "
+               "VALUES ('cascade', 'Cascade', 'United States', 'yakima', NULL)")
+    con.commit(); con.close()
+
+    csv_path = _write_ba_substitutes_csv(tmp_path)
+    ingest.ingest_beer_analytics_substitutes(str(tmp_path / "t.db"), hops_csv_path=csv_path)
+    ingest.ingest_beer_analytics_substitutes(str(tmp_path / "t.db"), hops_csv_path=csv_path)
+
+    con = connect(str(tmp_path / "t.db"))
+    n = con.execute(
+        "SELECT COUNT(*) FROM hop_substitutions WHERE source='beer-analytics'").fetchone()[0]
+    con.close()
+    assert n == 2  # Cascade + Unknown Hop XYZ, pas de doublon
+
+
 def test_reconcile_mmum_hop_varieties_writes_variety_and_product_form(tmp_path, monkeypatch):
     aroma_path = str(tmp_path / "aromahops.db")
     con = connect(aroma_path)

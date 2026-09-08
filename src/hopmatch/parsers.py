@@ -1071,17 +1071,23 @@ def parse_beer_analytics_hops_csv(text: str) -> list[dict]:
     beer-analytics`, colonnes `name;use;origin;substitutes;aromas;
     alt_names;alt_names_extra`, séparateur `;`) -> une entrée par houblon
     beer-analytics : `{"name": "Citra", "alt_names": ["HBC 394", "Citr",
-    "Ciara"]}` -- `alt_names`/`alt_names_extra` FUSIONNÉES en une seule
-    liste (T92 ne distingue pas les deux, toutes deux servent le même
-    usage : élargir le nom brut d'une recette vers le `name` canonique
-    beer-analytics, qui est ensuite résolu contre NOTRE PROPRE catalogue
-    par l'appelant -- ce parseur ne connaît rien à `hops.variety`).
+    "Ciara"], "substitutes": ["Cascade", "Centennial"]}` -- `alt_names`/
+    `alt_names_extra` FUSIONNÉES en une seule liste (T92 ne distingue pas
+    les deux, toutes deux servent le même usage : élargir le nom brut d'une
+    recette vers le `name` canonique beer-analytics, qui est ensuite résolu
+    contre NOTRE PROPRE catalogue par l'appelant -- ce parseur ne connaît
+    rien à `hops.variety`).
 
     Séparateur d'alias `, ` (vérifié en direct sur le fichier réel,
     206/435 lignes ont au moins un alias) -- un champ vide donne une liste
     vide, jamais un alias fabriqué. `name` lui-même n'est PAS ajouté à sa
     propre liste d'alias (redondant : l'appelant tente déjà `name` en
-    premier via son propre index)."""
+    premier via son propre index).
+
+    `substitutes` (T109) : MÊME séparateur `, `, MÊME repli liste vide sur
+    champ absent -- noms bruts éditoriaux beer-analytics, résolus contre
+    notre catalogue par l'appelant (même schéma que `alt_names`), jamais
+    par ce parseur."""
     import csv
     import io
 
@@ -1095,5 +1101,8 @@ def parse_beer_analytics_hops_csv(text: str) -> list[dict]:
             raw = (row.get(col) or "").strip()
             if raw:
                 alt_names.extend(a.strip() for a in raw.split(",") if a.strip())
-        out.append({"name": name, "alt_names": alt_names})
+        substitutes_raw = (row.get("substitutes") or "").strip()
+        substitutes = [s.strip() for s in substitutes_raw.split(",") if s.strip()] \
+            if substitutes_raw else []
+        out.append({"name": name, "alt_names": alt_names, "substitutes": substitutes})
     return out

@@ -857,13 +857,19 @@ def hop_pairings(con, variety: str) -> list[dict]:
 
 
 def hop_substitutions(con, variety: str) -> list[dict]:
-    """Substitutions suggérées (T25 backlog, `hop_substitutions`, BeerMaverick
-    — choix éditorial de brasseurs expérimentés, pas une mesure). Même
-    contrat que `hop_pairings` pour `variety`/`name`."""
+    """Substitutions suggérées -- DEUX sources éditoriales dans la même table
+    (T25, BeerMaverick "Hop Substitutions" ; T109, beer-analytics colonne
+    `substitutes` du même `hops.csv` que T92), jamais fusionnées : `source`
+    renvoyé par ligne, à l'appelant de les regrouper/afficher séparément
+    (même règle que `hop_beer_styles` ci-dessus -- deux éditeurs peuvent
+    légitimement diverger, un désaccord est une information, pas un
+    conflit à résoudre). Même contrat que `hop_pairings` pour `variety`/
+    `name`, `source` en plus."""
     rows = con.execute(
-        "SELECT substitute_name, substitute_variety FROM hop_substitutions WHERE variety=?",
-        (variety,))
-    return [{"name": r["substitute_name"], "variety": r["substitute_variety"]} for r in rows]
+        "SELECT substitute_name, substitute_variety, source FROM hop_substitutions "
+        "WHERE variety=? ORDER BY source, substitute_name", (variety,))
+    return [{"name": r["substitute_name"], "variety": r["substitute_variety"],
+             "source": r["source"]} for r in rows]
 
 
 def hop_beer_styles(con, variety: str) -> list[dict]:

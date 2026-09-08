@@ -2519,6 +2519,73 @@ def download_beer_analytics_hops_csv(dest_path: str = BEER_ANALYTICS_HOPS_CSV_CA
     return dest_path
 
 
+def ingest_beer_analytics_substitutes(out_db: str, hops_csv_path: str | None = None) -> None:
+    """T109 : TROISIÈME source de substitutions éditoriales, à côté de
+    `hop_similar` (Yakima, `imported_fields.similar_varieties`) et `hop_
+    substitutions` (BeerMaverick, "Hop Substitutions") -- `recipe_db/data/
+    hops.csv` (beer-analytics, déjà téléchargé pour T92) porte une colonne
+    `substitutes` jamais exploitée jusqu'ici.
+
+    ⚠ **Écrit dans la table `hop_substitutions` EXISTANTE** (schéma déjà
+    `PRIMARY KEY (variety, substitute_name, source)` -- `source` fait DÉJÀ
+    partie de la clé, aucune migration nécessaire), avec `source='beer-
+    analytics'` -- PAS une nouvelle table. Les trois sources éditoriales
+    (Yakima/BeerMaverick/beer-analytics) restent **JAMAIS fusionnées** : la
+    clé composite garantit qu'une ligne BeerMaverick et une ligne beer-
+    analytics pour le même `(variety, substitute_name)` coexistent sans
+    s'écraser -- `matching.hop_substitutions` (mis à jour par ce même
+    ticket) renvoie `source` par ligne, jamais un flux mélangé sans
+    provenance.
+
+    Réconciliation par nom normalisé (`_build_hop_name_index`/`_resolve_
+    hop_variety`, même index que T92/T25) DEUX FOIS par ligne : le houblon
+    lui-même (`row["name"]`) ET chaque substitut listé -- `variety`/
+    `substitute_variety` restent `NULL` si non reconnus, mais `substitute_
+    name` (texte brut) est TOUJOURS renseigné, rien n'est perdu
+    silencieusement (même contrat que `hop_pairings`/`hop_substitutions`
+    BeerMaverick). Une ligne dont le houblon LUI-MÊME n'est pas résolu est
+    SAUTÉE (pas de clé `variety` primaire exploitable), mais chaque
+    substitut individuel reste résolu indépendamment -- un houblon connu
+    peut avoir un substitut inconnu, et réciproquement."""
+    from .schema import connect
+
+    con = connect(out_db)
+    if not con.execute("SELECT name FROM sqlite_master WHERE name='hops'").fetchone():
+        init_db(con); seed_reference(con); con.commit()
+    index = _build_hop_name_index(con)
+
+    if hops_csv_path is None:
+        hops_csv_path = download_beer_analytics_hops_csv()
+    with open(hops_csv_path, encoding="utf-8") as f:
+        ba_rows = parsers.parse_beer_analytics_hops_csv(f.read())
+
+    n_hop_resolved = n_hop_total = 0
+    n_sub_resolved = n_sub_total = 0
+    n_rows = 0
+    con.execute("DELETE FROM hop_substitutions WHERE source='beer-analytics'")
+    for row in ba_rows:
+        if not row["substitutes"]:
+            continue
+        n_hop_total += 1
+        variety = _resolve_hop_variety(index, row["name"])
+        if not variety:
+            continue
+        n_hop_resolved += 1
+        for sub_name in row["substitutes"]:
+            n_sub_total += 1
+            sub_variety = _resolve_hop_variety(index, sub_name)
+            if sub_variety:
+                n_sub_resolved += 1
+            con.execute(
+                "INSERT OR REPLACE INTO hop_substitutions VALUES (?,?,?,?)",
+                (variety, sub_name, sub_variety, "beer-analytics"))
+            n_rows += 1
+    con.commit(); con.close()
+    print(f"beer-analytics (T109, substitutions) : {n_hop_resolved}/{n_hop_total} houblons "
+         f"source résolus, {n_sub_resolved}/{n_sub_total} substituts résolus, "
+         f"{n_rows} lignes écrites")
+
+
 def reconcile_mmum_hop_varieties(recipes_db: str = "recipes.db", aroma_db: str = "aromahops.db",
                                  hops_csv_path: str | None = None) -> None:
     """T92 : résout `recipe_hops.hop_name` (brut, MMuM) -> `variety` (notre
