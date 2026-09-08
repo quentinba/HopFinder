@@ -3579,6 +3579,87 @@ Mais la transparence doit être RÉELLE, pas un simple adverbe :
   doit pas être oublié avant tout élargissement de la diffusion (dépôt
   rendu public, usage commercial, etc.).
 
+- [ ] **T134 — `hops-comptoir.com` (Comptoir Agricole) comme nouvelle source de composition**
+
+  **Origine** : utilisateur signale l'absence du houblon "Elixir" en base
+  (2026-09-08). Investigué en direct : ni BarthHaas (page "Hop Varieties"
+  fetchée en direct, 95 variétés, aucun "Elixir") ni Yakima Chief (requête
+  Algolia live, même endpoint que `ingest.crawl_yakima`, 153 hits, aucun
+  match) ne le portent -- comportement ACTUEL correct, pas un bug
+  (`ingest_beermaverick`/beer-analytics ne créent jamais un houblon,
+  seulement réconciliés contre l'existant, voir leur docstring). Elixir
+  EST sur BeerMaverick et beer-analytics (cache local confirmé), mais sans
+  composition mesurable exploitable par notre pipeline.
+
+  **Ce qu'est le site** : boutique officielle de Comptoir Agricole
+  (Hop France), le VRAI producteur/obtenteur alsacien -- pas un revendeur
+  tiers, catégorie de source équivalente à BarthHaas (producteur/trader
+  primaire), pas à BeerMaverick (agrégateur secondaire).
+
+  **Données réelles vérifiées en direct** (`curl`, 2 pages -- Elixir,
+  Mistral) : chaque page CATÉGORIE de variété (pas les pages produit/SKU)
+  porte un vrai `<table>` HTML propre (`<td class="name">Alpha acid</td>
+  <td>5-7 %AA</td>`...) : alpha acid, cohumulone, beta acids, colupulone,
+  total oil (ml/100g), **et un vrai détail de composés d'huile** --
+  myrcène, humulène, caryophyllène (Mistral seulement), monoterpène/
+  sesquiterpène, linalol, farnésène, géraniol, en % ou mg/100g. Table
+  MOINS riche sur Elixir que sur Mistral (pas d'humulène/caryophyllène
+  listés pour Elixir) -- densité de mesure variable par variété, à traiter
+  comme BarthHaas/Yakima (jamais de valeur comblée artificiellement pour
+  une variété qui n'a pas telle mesure). Bloc descripteurs séparé, groupé
+  par catégorie (Spiced/Citrus Fruit/Floral/Woody, mots réels type
+  "cognac"/"lovage"/"kumquat") -- utilisable pour `hop_descriptors`.
+
+  **Scope réel du crawl** : sitemap (`https://www.hops-comptoir.com/
+  2_en_0_sitemap.xml`) contient beaucoup de pages produit/SKU (pellets/
+  cônes/conditionnements, 1kg/4kg/5kg, bio ou non -- HORS scope, aucune
+  donnée de composition dessus), mais SEULEMENT **~15 pages catégorie**
+  portent le tableau "Technical features" (une par variété, ex.
+  `/61-elixir`, `/30-hop-mistral-alsace`, `/96-p15-6`, `/97-teorem`) --
+  crawl court, pas un chantier de plusieurs centaines de pages.
+
+  **Recoupement avec notre catalogue actuel** (vérifié en direct sur les
+  15 noms de la nav "Our Hops") :
+  - **5 houblons RÉELLEMENT absents de notre base** :
+    **Barbe Rouge, Elixir, Mistral, P15-6, Teorem**.
+  - 10 déjà couverts par BarthHaas/Yakima (Aramis, Cascade, Columbus,
+    Fuggle, Nugget, Savinjski Golding, Strisselspalt, Brewers Gold,
+    Triskel, "Tradition") -- pour ceux-là, une 2e mesure à réconcilier à
+    la LECTURE (même principe EAV multi-sources que le reste du projet),
+    jamais à l'écriture.
+  - ⚠ **"Tradition" (Comptoir Agricole) pourrait NE PAS être la même
+    variété que "Hallertauer Tradition" (BarthHaas, déjà en base sous
+    `hallertau-tradition`)** -- juste un rapprochement par nom lors de
+    cette investigation, PAS vérifié. À trancher explicitement avant
+    toute fusion/réconciliation (ne jamais fusionner par nom seul sans
+    vérifier la généalogie réelle, précédent déjà établi pour Amarillo
+    US/Allemagne).
+
+  **Accès** : `robots.txt` ouvert sur les pages catégorie/produit (bloque
+  uniquement panier/compte/recherche/PDF, motif PrestaShop standard).
+  Aucun rempart anti-bot rencontré (`curl` simple suffit, contrairement à
+  Yakima). Pas de licence de données publiée -- même statut que BarthHaas/
+  Yakima dans la section Licence de CLAUDE.md (attribution, lecture seule,
+  esprit non-commercial).
+
+  **Travail restant** (non commencé, ticket de découverte seulement) :
+  1. Nouveau `ingest.crawl_hops_comptoir` (ou nom similaire) : énumère les
+     ~15 pages catégorie depuis le sitemap (filtrer les pages produit/SKU
+     hors scope), parse le tableau "Technical features" + le bloc
+     descripteurs -- nouveau parseur `parsers.parse_hops_comptoir_*`
+     (aucun parseur existant ne correspond à cette structure de table).
+  2. Écrit dans `hop_composition` (nouveau `source='hops-comptoir'`) et
+     `hop_descriptors` -- jamais mélangé aux échelles BarthHaas/Yakima
+     sans vérifier que les méthodologies sont comparables (même garde-fou
+     que BarthHaas vs Yakima déjà en place).
+  3. Trancher la question "Tradition" AVANT toute écriture qui pourrait
+     fusionner silencieusement deux généalogies différentes.
+  4. `docs/DATA_SOURCES.md` + section Licence CLAUDE.md : nouvelle entrée.
+
+  **Statut** : opportuniste, comme T130/T131 -- ne bloque rien, découvert
+  en marge d'un signalement utilisateur (houblon manquant) plutôt que
+  planifié.
+
 ## 11. Ordre d'attaque recommandé
 
 Tous les tickets sont désormais au niveau **spec d'implémentation** : DDL,
@@ -3621,7 +3702,8 @@ bloquent rien : T96/T97 (espèces de thiols, méthyl géranate), T116/T128
 Survivables sur indice dérivé — faisable dès maintenant, ne dépend de rien),
 T118 (Brewfather), T100/T101 (régression, T101 conditionné par T100),
 T102 (Blend Explorer), T109/T110/T112 (vocabulaire), T113/T114 (docs),
-**T129** (familles d'arôme, GUI seule — faisable dès maintenant).
+**T129** (familles d'arôme, GUI seule — faisable dès maintenant), **T134**
+(hops-comptoir.com, 5 houblons français absents de la base, ~15 pages).
 
 ⚠ **T132** (revue de licence CC-BY-SA 4.0) n'est PAS opportuniste comme les
 tickets ci-dessus — explicitement **reporté à la toute fin du projet** sur
