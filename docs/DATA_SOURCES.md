@@ -339,7 +339,7 @@ même livre, utilisées pour deux besoins différents, **jamais confondues** :
 
 ## Statistiques de recettes (beer-analytics.com)
 
-**beer-analytics.com** ([redacted], GPLv3) — https://www.beer-analytics.com
+**beer-analytics.com** (mainteneur indépendant, GPLv3) — https://www.beer-analytics.com
 - **Ce que c'est** : agrégateur de recettes homebrew publiées (charts Plotly générés
   côté serveur depuis leur propre base de recettes importées). **PAS du BJCP**
   (`beer_styles`, styleguide officiel) et **PAS une mesure de labo** (`hop_composition`,
@@ -386,15 +386,94 @@ même livre, utilisées pour deux besoins différents, **jamais confondues** :
     des houblons, exclue). **401/435 (92%) pages houblon couvertes, 2837 lignes,
     143/435 houblons résolus vers une `variety`** (beaucoup de houblons rares/
     expérimentaux hors de notre catalogue à 203 variétés).
-- **Chart listé par le ticket mais non capturé** : `typical-styles-relative.json`
-  (styles typiques d'un houblon donné) n'a nulle part où aller dans le schéma T88 tel
-  qu'écrit (indexé par `use_type`, pas par style) — donnée réelle et vérifiée, voir
-  **T131** (nouveau ticket backlog) pour une table dédiée.
-- **Prise de contact** (T89, PAS encore envoyée au moment de la rédaction) : message
-  rédigé dans `docs/OUTREACH_beer-analytics.md` — prévient avant une lecture régulière
-  de leurs endpoints et demande un agrégat de co-occurrence n-aire (triplets/
-  quadruplets, cf. épique C/D3). Action **utilisateur**, jamais envoyée par l'assistant
-  (message à un tiers réel, hors du périmètre d'une action autonome).
+- `hop_typical_styles` (T131, 2026-09-08) : relation INVERSE de `style_hop_usage`
+  ci-dessus (« pour CE houblon, dans quels styles est-il populaire », pas
+  l'inverse) — chart `typical-styles-relative.json`, listé par T88 mais qui n'avait
+  nulle part où aller dans son schéma (indexé par `use_type`, pas par style) ;
+  résolu par une table dédiée plutôt que forcé dans `hop_usage_stats`. Réutilise le
+  crawl T88 déjà en cache (aucune nouvelle page HTML fetchée, seul le chart est
+  neuf). **435/435 pages houblon, 5478 lignes, 143/435 houblons résolus vers une
+  `variety` (même taux que `hop_usage_stats`), 3842/5478 (70,2 %) `style_id`
+  résolus** vers BJCP (`data/mappings/beer_style_aliases.yaml`) — le reste garde son
+  libellé brut beer-analytics sans équivalent BJCP curé, jamais omis.
+- **Prise de contact (T89, envoyée et RÉPONDUE 2026-08-29)** : message initial dans
+  `docs/OUTREACH_beer-analytics.md`. Le mainteneur a répondu aux
+  trois questions posées : (1) crawl des endpoints charts **explicitement
+  autorisé**, cadence hebdomadaire/mensuelle largement suffisante (le site ne
+  change qu'une fois par jour, quelques centaines de nouvelles recettes) — le
+  rythme quasi continu de T85-T88 était bien plus fréquent que nécessaire ; (2)
+  **licence CC-BY-SA 4.0 sur tout le contenu, y compris les données d'endpoint**
+  (fait nouveau, non documenté avant cette réponse — clause ShareAlike réelle,
+  contrairement aux autres sources de ce document ; résolution de son implication
+  sur `aromahops.db`/`HopFinder-db` **explicitement reportée à la fin du projet**,
+  voir BACKLOG.md T132) ; (3) export de co-occurrence n-aire (triplets/
+  quadruplets) **décliné pour l'instant** (calcul déjà lourd en pairwise sur son
+  serveur, pas testé au-delà) — confirme que le corpus MMuM ci-dessous reste le
+  seul chemin réel vers des combinaisons à 3-4 houblons.
+
+## Corpus de recettes réelles (MMuM)
+
+**maischemalzundmehr.de** (MMuM) — https://www.maischemalzundmehr.de (T91-T94,
+T126-T127, épique C)
+- **Ce que c'est** : base de recettes homebrew publiées par des particuliers,
+  en langue allemande — contrairement à `hop_usage_stats`/`style_hop_usage`
+  (beer-analytics, agrégats déjà calculés), MMuM est le corpus **BRUT** :
+  une ligne par recette, une ligne par addition de houblon avec son stade et
+  son horodatage — seule source du projet qui permette de calculer des
+  combinaisons houblon×houblon réellement co-observées (T93/T94) ou une
+  répartition réelle du moment d'ajout (T126/T127). PAS une mesure de labo, PAS
+  du BJCP — une distribution empirique de ce que des brasseurs amateurs publient,
+  potentiellement biaisée vers la scène germanophone (D3, biais de corpus assumé
+  et documenté, jamais corrigé silencieusement).
+- Accès : export JSON public non authentifié, un fichier par recette
+  (`export_json.php?id=<N>`), aucune pagination/API de recherche — seul un
+  balayage séquentiel d'ids permet l'énumération. Pas de `robots.txt` publié
+  (site sans restriction technique de crawl), **pas de licence de données
+  publiée trouvée** (site personnel/hobbyiste, mention légale "Impressum"
+  standard allemande mais aucune mention de licence de contenu) — même statut
+  que BarthHaas/Yakima/BeerMaverick dans ce document (attribution, lecture
+  seule, esprit non commercial). Un id sans recette répond **HTTP 200** avec un
+  court message HTML ("le trou"), jamais un 404 — la détection se fait par
+  échec de désérialisation JSON, pas par code de statut. Crawl respectueux : 1
+  requête/s, cache disque `data/cache/mmum/` (jamais réinterrogé si déjà
+  présent), User-Agent identifiable.
+- **Isolation D4** : stocké dans un fichier **séparé** `recipes.db` (jamais
+  dans `aromahops.db`), jamais référencé par `app._fetch_remote_db` (l'app
+  déployée ne le télécharge/lit jamais) — seules les tables DÉRIVÉES
+  (`hop_combinations`, `hop_addition_timing`) traversent vers `aromahops.db`,
+  calculées par `ingest.compute_frequent_hop_combinations`/`compute_hop_
+  addition_timing` qui lisent `recipes.db` et écrivent dans `aromahops.db`,
+  jamais l'inverse.
+- **Couverture réelle mesurée** (crawl complet, ids 1-2400, 2026-09-02) :
+  **1844 recettes ingérées** (556 ids = trous), **6395 additions de houblon**
+  (3,5/recette). Répartition des 4 stades bruts observés : boil 3925, first_wort
+  942 (14,7 % — le "Vorderwuerze" allemand, absent des autres sources), dry_hop
+  789, whirlpool 739. Réconciliation nom→`variety` (T92) : **5935/6395 (92,8 %)**
+  résolues, 19 produits Cryo (jamais fusionnés à la variété de base), 441 non
+  résolues (pour l'essentiel des variétés réelles absentes de notre catalogue
+  BarthHaas/Yakima — Lemondrop, Solero, Strata, Jester, Fantasia, Apollo, Belma
+  — ou du texte libre non-houblon). Réconciliation style libre allemand→BJCP
+  (T94, `data/mappings/beer_style_aliases.yaml`, section dédiée MMuM) :
+  **1184/1844 (64,2 %)** — le reste reste `NULL`, soit un libellé BJCP-ambigu
+  connu (ex. "Pale Ale" bare avant sa résolution ciblée, "Stout", "Lager" —
+  span plusieurs styles BJCP défendables, jamais deviné), soit un style
+  historique/régional allemand sans équivalent BJCP 2021 dans notre jeu de 110
+  styles (Kellerbier, Roggenbier, Sahti...).
+- **Ce que cette source ne dit PAS** : pas de mesure de composition chimique
+  (aucun lien avec `hop_composition` — un houblon cité dans une recette MMuM
+  n'a de mesure que si BarthHaas/Yakima le mesurent séparément) ; pas de
+  quantité fiable à l'échelle d'une recette entière au-delà de `Menge`
+  (grammes) déclarée par l'auteur, jamais vérifiée/étalonnée ; corpus figé au
+  jour du crawl (2026-09-02), jamais re-synchronisé automatiquement ; 35,8 %
+  des recettes sans `style_id` résolu restent purement hors du calcul des
+  combinaisons PAR STYLE (T94) tout en participant normalement aux tranches
+  globales/par stade (T93).
+- Statut : `ingest.ingest_mmum` (crawl brut), `ingest.reconcile_mmum_hop_
+  varieties` (T92), `ingest.reconcile_mmum_style_ids` (T94), `ingest.compute_
+  frequent_hop_combinations` (T93/T94, `hop_combinations`), `ingest.compute_
+  hop_addition_timing` (T126/T127, `hop_addition_timing`, 11 classes
+  chronologiques `reference.ADDITION_TIMING_BINS`, seuil d'affichage 20
+  additions minimum côté GUI) — tous IMPLÉMENTÉS.
 
 ## Liant
 
@@ -413,4 +492,4 @@ même livre, utilisées pour deux besoins différents, **jamais confondues** :
   et `ingest_flavordb2` (accès direct à la fiche par CID, sans recherche par nom).
 
 ## Rappel licences
-Le **code** est MIT. **FooDB et FlavorDB2 sont non commerciales.** Un usage commercial de hopmatch imposerait de retirer/renégocier ces sources.
+Le **code** est MIT. **FooDB et FlavorDB2 sont non commerciales.** Un usage commercial de hopmatch imposerait de retirer/renégocier ces sources. **beer-analytics.com est en CC-BY-SA 4.0** (confirmé par le mainteneur, T89, 2026-08-29) — clause ShareAlike réelle, potentiellement plus stricte que MIT pour la portion de `aromahops.db` qui en dérive (`style_recipe_stats`, `style_hop_usage`, `style_hop_pairings`, `hop_usage_stats`, `hop_typical_styles`) ; résolution de son implication explicitement **reportée à la fin du projet** sur décision utilisateur (BACKLOG.md T132), pas encore tranchée. BarthHaas/Yakima/BeerMaverick/MMuM : aucune licence de données publiée trouvée, traitées par attribution + lecture seule + esprit non commercial.

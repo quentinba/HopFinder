@@ -870,6 +870,24 @@ générales, à traiter comme un prior, pas une mesure :
   figure « Chemical compositions of the essential oils of hops » — voir `docs/DATA_SOURCES.md`)
   et ne relève pas de ce prior : seule l'annotation de survie au procédé et son niveau de
   confiance sont à traiter comme une synthèse qualitative, pas une mesure.
+- **`app._chemical_earliness_index_all`/l'onglet Survivables (T99 couche (b), T117)** : indice
+  dérivé — MOYENNE (T99) ou SOMME (T117, barres empilées) des rangs quantile de 4 composés
+  mesurés (linalol, géraniol, isobutyrate, thiols) — d'après les règles 1/2/4 du handbook YCH
+  2022 (voir CLAUDE.md, « Règles procédé & survivables »), appliquées à **nos propres mesures**,
+  **PAS** une mesure directe de survivabilité par variété. L'API de lot YCH, seule source qui
+  publie de vraies valeurs de survivables par variété, a été explicitement écartée comme socle
+  systématique (numéros de lot non énumérables, mesures PAR LOT et non par variété — voir
+  CLAUDE.md pour le détail complet de cette décision). Rang quantile relatif à la base actuelle
+  (`_survivable_compound_positions_all`), jamais un pourcentage de transfert réel.
+- **`reference.PROCESS_STAGE_SURVIVAL`** (T119, matrice de rétention par stade — 11 composés ×
+  5 stades depuis T133 : boil, late boil, whirlpool, AFDH, PFDH) : `state` in {kept, partial,
+  lost, precursor} est un **ordinal qualitatif**, jamais un facteur de survie chiffré — même
+  refus que `PROCESS_SURVIVAL` ci-dessus, aucune source ne donne de pourcentage réel par
+  houblon/composé/stade. Chaque entrée cite sa source (Janish, JAFC/ASBC, CLAUDE.md/handbook
+  YCH 2022, notes de séminaire BarthHaas) mais certaines (T133, stade « late boil ») sont des
+  **interpolations explicitement validées par l'utilisateur** faute de mesure directe à 5
+  minutes — jamais une valeur devinée en silence, voir le commentaire en tête de la table dans
+  `reference.py` pour le détail de chaque groupe de justification.
 
 À l'inverse, tout ce qui vient d'un **parseur avec source tracée** (composition houblon) est de
 la donnée. Règle du projet : ne jamais figer en dur des valeurs de composition — passer par un
