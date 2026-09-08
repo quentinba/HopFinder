@@ -753,7 +753,7 @@ n'apparaît pas).
 descripteur compare visuellement leurs profils complets — pas seulement les descripteurs
 recherchés —, scindée en deux grilles (descripteurs de la roue quantitative, shadés par
 intensité mesurée ; autres descripteurs, catégoriques uniquement, jamais de nuance possible).
-Radar écarté volontairement pour CE cas précis (voir `docs/BACKLOG.md#T4`) : les descripteurs
+Radar écarté volontairement pour CE cas précis : les descripteurs
 d'un houblon forment ici un ensemble binaire, pas une quantité — un radar déformerait par
 l'aire sans gain de lisibilité (à distinguer du radar utilisé pour la roue d'arôme
 *quantitative*, où l'aire a un sens — voir plus bas).
@@ -914,7 +914,7 @@ src/hopmatch/
 data/fixtures/   pages réelles (démo) : barthhaas/{citra,mosaic,saazer}, yakima/{citra,mosaic,simcoe}
 tools/           audit_foodb.py, foodb_impact_check.py
 tests/           parsers, ingest, validation, réconciliation, modes
-docs/            ARCHITECTURE.md, DATA_SOURCES.md, FEATURE_NOTES.md, BACKLOG.md
+docs/            ARCHITECTURE.md, DATA_SOURCES.md, FEATURE_NOTES.md
 CLAUDE.md        contexte projet pour Claude Code
 ```
 
@@ -940,7 +940,8 @@ termes via les tags BeerMaverick, `contrast_blend` refondu + `amplify_blend` ajo
 tailles de blend 1-5, priorité à la fréquence réelle de pairing BeerMaverick, houblon de base
 choisi par l'utilisateur), outil **Compare Hops** (comparaison directe de 2 à 5 houblons),
 nettoyage des noms de houblon (®/™/©, suffixe "Brand", désambiguïsation régionale des vrais
-doublons de crop). Détail complet de chaque étape dans `docs/BACKLOG.md`/`CLAUDE.md`.
+doublons de crop). Détail complet de chaque étape dans `CLAUDE.md` (le journal de tickets
+détaillé est tenu en local, non versionné).
 
 **Résidu PubChem accepté, pas une piste ouverte.** 6/734 CAS restent sans CID (0,8%) après CAS
 + repli par nom : recherché aussi par CAS comme identifiant d'enregistrement PubChem (endpoint
@@ -953,8 +954,8 @@ Coder un CID à la main pour ces cas ne serait pas une donnée vérifiée comme 
 manuelles du projet (`reference.ALIASES`) : ce serait une supposition sans confirmation
 possible. Laissé non résolu.
 
-**`combine()` (mode `combine`, NNLS) implémenté puis retiré.** Livré, testé, amélioré
-(`docs/BACKLOG.md#T10`), puis retiré le 2026-08-12 après mesure sur les 506 notes réelles :
+**`combine()` (mode `combine`, NNLS) implémenté puis retiré.** Livré, testé, amélioré,
+puis retiré le 2026-08-12 après mesure sur les 506 notes réelles :
 0 % ne dépassaient 20 % de couverture, et sur les notes à un seul composé « producible »
 (la majorité) le calcul dégénérait en un résidu artificiel de 0 — confiance affichée sans
 rapport avec la couverture réelle. Décision utilisateur, pas un bug de méthode : la chimie de

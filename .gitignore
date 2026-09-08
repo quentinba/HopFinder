@@ -19,3 +19,8 @@ data/cache/
 # (vérifié : foodb_2020_4_7_csv.tar.gz en contient, cf. ingest._extract_foodb_tarball)
 data/._*
 ._*
+# journal de tickets détaillé (2026-09-08, décision utilisateur) : contient
+# des citations directes de retours utilisateur, retiré du dépôt public --
+# reste en local, continue d'être utilisé/mis à jour comme dossier de suivi
+BACKLOG.md
+docs/BACKLOG.md

@@ -97,8 +97,8 @@
   documentés publiquement, peuvent changer si YCH modifie son frontend).
 
 **BeerMaverick** — https://beermaverick.com/hop/{slug}/ (T25 backlog)
-- **Réexaminé et RETENU (2026-08, décision utilisateur)**, après avoir d'abord été écarté
-  (voir `docs/BACKLOG.md` pour l'historique de cette réserve initiale). La réserve portait sur
+- **Réexaminé et RETENU (2026-08, décision utilisateur)**, après avoir d'abord été écarté.
+  La réserve portait sur
   leur endpoint interne `/api/js/?hop=<id>`, explicitement documenté par eux comme "internal
   use" (pas d'accès public officiel). Revérifié en direct : LA MÊME donnée (pairings ET
   substitutions) est en fait déjà présente dans le HTML statique servi normalement par chaque
@@ -405,8 +405,8 @@ même livre, utilisées pour deux besoins différents, **jamais confondues** :
   **licence CC-BY-SA 4.0 sur tout le contenu, y compris les données d'endpoint**
   (fait nouveau, non documenté avant cette réponse — clause ShareAlike réelle,
   contrairement aux autres sources de ce document ; résolution de son implication
-  sur `aromahops.db`/`HopFinder-db` **explicitement reportée à la fin du projet**,
-  voir BACKLOG.md T132) ; (3) export de co-occurrence n-aire (triplets/
+  sur `aromahops.db`/`HopFinder-db` **explicitement reportée à la fin du projet**)
+  ; (3) export de co-occurrence n-aire (triplets/
   quadruplets) **décliné pour l'instant** (calcul déjà lourd en pairwise sur son
   serveur, pas testé au-delà) — confirme que le corpus MMuM ci-dessous reste le
   seul chemin réel vers des combinaisons à 3-4 houblons.
@@ -492,4 +492,4 @@ T126-T127, épique C)
   et `ingest_flavordb2` (accès direct à la fiche par CID, sans recherche par nom).
 
 ## Rappel licences
-Le **code** est MIT. **FooDB et FlavorDB2 sont non commerciales.** Un usage commercial de hopmatch imposerait de retirer/renégocier ces sources. **beer-analytics.com est en CC-BY-SA 4.0** (confirmé par le mainteneur, T89, 2026-08-29) — clause ShareAlike réelle, potentiellement plus stricte que MIT pour la portion de `aromahops.db` qui en dérive (`style_recipe_stats`, `style_hop_usage`, `style_hop_pairings`, `hop_usage_stats`, `hop_typical_styles`) ; résolution de son implication explicitement **reportée à la fin du projet** sur décision utilisateur (BACKLOG.md T132), pas encore tranchée. BarthHaas/Yakima/BeerMaverick/MMuM : aucune licence de données publiée trouvée, traitées par attribution + lecture seule + esprit non commercial.
+Le **code** est MIT. **FooDB et FlavorDB2 sont non commerciales.** Un usage commercial de hopmatch imposerait de retirer/renégocier ces sources. **beer-analytics.com est en CC-BY-SA 4.0** (confirmé par le mainteneur, T89, 2026-08-29) — clause ShareAlike réelle, potentiellement plus stricte que MIT pour la portion de `aromahops.db` qui en dérive (`style_recipe_stats`, `style_hop_usage`, `style_hop_pairings`, `hop_usage_stats`, `hop_typical_styles`) ; résolution de son implication explicitement **reportée à la fin du projet** sur décision utilisateur, pas encore tranchée. BarthHaas/Yakima/BeerMaverick/MMuM : aucune licence de données publiée trouvée, traitées par attribution + lecture seule + esprit non commercial.
