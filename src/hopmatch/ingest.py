@@ -2785,6 +2785,150 @@ def ingest_hops_comptoir(out_db: str, sleep: float = 1.0, timeout: float = 30.0,
          f"{n_compound_rows} lignes de composition, {n_descriptor_rows} descripteurs écrits")
 
 
+# T96 (2026-09-08) : pays du papier (imprimés tels quels dans le texte) qui
+# ne correspondent PAS littéralement à `hops.region` -- tous les autres
+# (Germany/France/Poland/Czech Republic/Slovenia/Australia/New Zealand/
+# South Africa/Argentina/Spain) sont déjà la même chaîne des deux côtés.
+_THIOL_PAPER_COUNTRY_TO_REGION = {"USA": "United States", "England": "Great Britain"}
+
+
+def ingest_hopsteiner_thiols(out_db: str) -> None:
+    """T96 : espèces individuelles de thiols (4MMP/3MH/3M4MP) -- SEULE
+    source par variété trouvée (voir data/mappings/hopsteiner_thiol_
+    species_2024.yaml pour la référence complète, ses réserves, et la
+    transcription intégrale des tableaux). Curation manuelle depuis un PDF
+    scanné/mis en page (pas un parseur -- même précédent que hop_breeder_
+    pedigree.yaml), donc lit directement le YAML plutôt qu'un fetch réseau.
+
+    Deux écritures INDÉPENDANTES, jamais mélangées :
+
+    1. `exact_point_values` -> `hop_composition` (compound="4mmp"/"3mh"/
+       "3m4mp", unit="ug_kg", même convention que l'agrégat "thiols"
+       existant -- voir schema.py). INSERT DIRECT, hors `_ingest_variety`/
+       `validate_and_repair` (ses règles de somme des 5 terpènes supposent
+       un houblon en `pct_oil`, sans rapport avec ces composés en µg/kg,
+       même raisonnement que le bypass mg_100g de `ingest_hops_comptoir`).
+       `notes` rappelle explicitement "maximum observed, not typical" --
+       ces valeurs sont les valeurs RECORD citées en toutes lettres par le
+       papier, jamais une moyenne. N'écrit QUE pour une `variety` déjà
+       présente dans `hops` (jamais de houblon créé depuis cette source,
+       hors périmètre de ce ticket) -- une variété du YAML absente du
+       catalogue (ex. Eureka!/Calypso, vérifié absents) est silencieusement
+       sautée, comptée dans le compte-rendu.
+
+    2. `impact_classification` -> `hop_thiol_impact` (category=low/medium/
+       high). PAS une écriture par nom seul : le papier montre qu'une même
+       variété testée dans plusieurs pays peut recevoir des catégories
+       DIFFÉRENTES (ex. Cascade USA="high" vs Allemagne/Argentine=
+       "medium") -- une variété dont TOUTES les entrées YAML partagent la
+       même catégorie est écrite sans réserve de région ; une variété aux
+       catégories DIVERGENTES n'est écrite QUE sur les lignes `hops` dont
+       `region` correspond explicitement à l'un des pays testés portant
+       CETTE catégorie (résolution par `_cultivar_base_name`, même
+       mécanisme que `_write_hop_identity`/T106 -- une variété-sœur de même
+       cultivar, ex. Nelson Sauvin NZ Hops/MacHops, reçoit la même
+       classification si son `region` correspond) ; si notre catalogue n'a
+       qu'UNE SEULE ligne pour ce cultivar de base mais que le papier ne
+       l'a testée QUE dans un pays qui NE correspond PAS à notre `region`
+       (jamais rencontré dans les 62 variétés résolues au moment de ce
+       ticket, mais vérifié explicitement) elle est sautée plutôt que
+       supposée -- jamais une catégorie appliquée à un crop non testé.
+       Ex. réel : Amarillo (USA="high" seul testé) s'applique à notre ligne
+       `amarillo` (United States) mais PAS à `amarillo-brand-ama04`
+       (Germany, jamais testée par le papier) ; Cascade est un cas encore
+       plus strict -- notre catalogue n'a qu'UNE ligne générique "cascade"
+       sans région distincte USA/Allemagne/Argentine, donc AUCUNE des
+       catégories divergentes ne peut lui être attribuée sans deviner quel
+       crop elle représente -- sautée entièrement, jamais une classification
+       choisie au hasard entre "medium" et "high"."""
+    from .schema import connect, ensure_table, HOP_THIOL_IMPACT_SCHEMA
+    from collections import defaultdict
+    from datetime import datetime, timezone
+
+    data = _load_yaml_mapping("hopsteiner_thiol_species_2024.yaml")
+    con = connect(out_db)
+    ensure_table(con, "hop_thiol_impact", HOP_THIOL_IMPACT_SCHEMA)
+    fetched_at = datetime.now(timezone.utc).isoformat()
+
+    hops_rows = con.execute("SELECT variety, name, region FROM hops").fetchall()
+    by_base_name: dict[str, list[tuple[str, str]]] = defaultdict(list)
+    for variety, name, region in hops_rows:
+        by_base_name[_cultivar_base_name(name)].append((variety, region))
+
+    # 1. Valeurs ponctuelles exactes -> hop_composition. Correspondance par
+    # CULTIVAR DE BASE (`_cultivar_base_name`, pas `name=` exact) -- une
+    # variété-sœur de même cultivar (ex. "Nelson Sauvin - NZ Hops"/"Nelson
+    # Sauvin - MacHops") reçoit la MÊME valeur record, jamais une seule des
+    # deux lignes au hasard (même principe de diffusion que la
+    # classification ci-dessous et que `_write_hop_identity`/T106).
+    n_values_written = n_values_skipped = 0
+    for entry in data["exact_point_values"]:
+        name, compound, value = entry["variety"], entry["compound"], entry["value_ug_kg"]
+        candidate_rows = by_base_name.get(name, [])
+        if not candidate_rows:
+            n_values_skipped += 1
+            continue
+        for variety, _region in candidate_rows:
+            con.execute(
+                "INSERT OR REPLACE INTO hop_composition VALUES (?,?,?,?,?,?,?,?)",
+                (variety, compound, value, value, "ug_kg", "hopsteiner-thiol-2024", "ok",
+                 "maximum observed value across analysed samples, not an average or "
+                 "typical value (Schmidt, Hoferer & Biendl, BrewingScience 77, 2024)"))
+            n_values_written += 1
+
+    # 2. Classification low/medium/high -> hop_thiol_impact
+    by_variety_name: dict[str, set[tuple[str, str]]] = defaultdict(set)
+    for entry in data["impact_classification"]:
+        by_variety_name[entry["variety"]].add((entry["country"], entry["category"]))
+
+    n_impact_written = n_impact_ambiguous = n_impact_no_region_match = 0
+    con.execute("DELETE FROM hop_thiol_impact WHERE source='hopsteiner-thiol-2024'")
+    for paper_name, country_category_pairs in by_variety_name.items():
+        categories = {cat for _, cat in country_category_pairs}
+        candidate_rows = by_base_name.get(paper_name, [])
+        if not candidate_rows:
+            continue
+        if len(candidate_rows) > 1:
+            # Plusieurs lignes régionales pour ce cultivar de base (ex.
+            # Amarillo US/Allemagne, Fuggle Grande-Bretagne/France) --
+            # n'écrit QUE sur celles dont `region` correspond explicitement
+            # à un pays RÉELLEMENT TESTÉ par le papier pour ce nom, que les
+            # catégories testées soient identiques entre elles (Nelson
+            # Sauvin/Motueka, toutes deux Nouvelle-Zélande) ou divergentes
+            # (Cascade) -- une ligne dont la région n'a JAMAIS été testée
+            # par le papier n'hérite jamais d'une catégorie, même quand
+            # toutes les régions testées s'accordent entre elles.
+            for variety, region in candidate_rows:
+                match = next((cat for country, cat in country_category_pairs
+                             if _THIOL_PAPER_COUNTRY_TO_REGION.get(country, country) == region), None)
+                if match is None:
+                    n_impact_no_region_match += 1
+                    continue
+                con.execute("INSERT OR REPLACE INTO hop_thiol_impact VALUES (?,?,?,?)",
+                           (variety, match, "hopsteiner-thiol-2024", fetched_at))
+                n_impact_written += 1
+        elif len(categories) == 1:
+            variety, _region = candidate_rows[0]
+            con.execute("INSERT OR REPLACE INTO hop_thiol_impact VALUES (?,?,?,?)",
+                       (variety, next(iter(categories)), "hopsteiner-thiol-2024", fetched_at))
+            n_impact_written += 1
+        else:
+            # Une seule ligne catalogue (générique, sans région distincte)
+            # mais le papier donne des catégories DIVERGENTES selon la
+            # région testée (ex. Cascade USA="high" vs Allemagne/
+            # Argentine="medium") -- aucun moyen de savoir quel crop notre
+            # ligne générique représente, sautée plutôt qu'un choix au
+            # hasard entre les catégories.
+            n_impact_ambiguous += 1
+    con.commit(); con.close()
+    print(f"hopsteiner-thiol-2024 : {n_values_written} valeurs ponctuelles écrites "
+         f"({n_values_skipped} variétés du papier absentes du catalogue), "
+         f"{n_impact_written} classifications thiol impact écrites "
+         f"({n_impact_ambiguous} variétés à catégorie divergente sans ligne région "
+         f"distincte -- sautées, {n_impact_no_region_match} lignes région sans pays "
+         f"testé correspondant -- sautées)")
+
+
 def reconcile_mmum_hop_varieties(recipes_db: str = "recipes.db", aroma_db: str = "aromahops.db",
                                  hops_csv_path: str | None = None) -> None:
     """T92 : résout `recipe_hops.hop_name` (brut, MMuM) -> `variety` (notre

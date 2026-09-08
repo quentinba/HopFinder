@@ -215,6 +215,12 @@ def main(argv=None):
     hc.add_argument("--sleep", type=float, default=1.0)
     hc.add_argument("--limit", type=int)
 
+    hts = sub.add_parser("ingest-hopsteiner-thiols",
+                         help="espèces individuelles de thiols (4MMP/3MH/3M4MP) -- Schmidt/"
+                              "Hoferer/Biendl, BrewingScience 77 (2024), curation manuelle "
+                              "depuis data/mappings/hopsteiner_thiol_species_2024.yaml -- T96")
+    hts.add_argument("--db", default=DEFAULT_DB)
+
     msr = sub.add_parser("reconcile-mmum-styles",
                          help="résout recipes.style_raw -> style_id BJCP dans recipes.db "
                               "(data/mappings/beer_style_aliases.yaml) -- T94")
@@ -332,6 +338,8 @@ def main(argv=None):
         ingest.ingest_beer_analytics_substitutes(a.db); return 0
     if a.cmd == "ingest-hops-comptoir":
         ingest.ingest_hops_comptoir(a.db, sleep=a.sleep, limit=a.limit); return 0
+    if a.cmd == "ingest-hopsteiner-thiols":
+        ingest.ingest_hopsteiner_thiols(a.db); return 0
     if a.cmd == "reconcile-mmum-styles":
         ingest.reconcile_mmum_style_ids(a.recipes_db); return 0
     if a.cmd == "compute-hop-combinations":

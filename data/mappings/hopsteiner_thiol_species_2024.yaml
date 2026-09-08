@@ -1,0 +1,165 @@
+# T96 (2026-09-08) : Schmidt, C.; Hoferer, L.; Biendl, M. "Determination of
+# Variety Dependent 'Thiol Impact' Based on LC-MS/MS Analysis of Different Hop
+# Samples Collected Worldwide." BrewingScience 77 (Nov/Dec 2024), pp. 135-141.
+# https://doi.org/10.23763/BrSc24-10schmidt -- CC-BY 4.0, open access. Auteurs
+# Hopsteiner (Hallertauer Hopfenveredelungsges.m.b.H.). LC-MS/MS sur 250
+# échantillons, 97 variétés, 12 pays, 5 millésimes (2019-2023) -- SEULE source
+# par variété trouvée pour 3MH/4MMP/3M4MP individuellement (notre `thiols`
+# BarthHaas reste un agrégat des trois, voir T95/CLAUDE.md).
+#
+# Curation manuelle depuis les tableaux du PDF (pas un parseur -- table
+# scannée/mise en page en 2 colonnes avec bandeau de marge répété, aucun
+# extracteur fiable ; même précédent que hop_breeder_pedigree.yaml, prose
+# BeerMaverick trop hétérogène pour un regex). Transcription vérifiée
+# visuellement page par page (rendu PDF->image), pas un OCR automatique.
+#
+# ⚠ CE QUE CES DONNÉES SONT / NE SONT PAS -- lire avant toute utilisation :
+# - `impact_classification` : la classification "low"/"medium"/"high" que le
+#   papier assigne lui-même par variété (tables 4-6), construite à partir du
+#   MAXIMUM observé sur tous les échantillons/millésimes/régions de cette
+#   variété -- PAS une concentration, PAS une valeur "typique". Le détail par
+#   composé sous-jacent au papier n'est publié QUE sous forme de seuils
+#   ("n.d." / "<10 µg/kg" / ">10 µg/kg", ">10" SANS PLAFOND PUBLIÉ pour la
+#   quasi-totalité des entrées) -- volontairement PAS repris ici, PAS écrit
+#   dans `hop_composition` (aucun vmax défendable pour un intervalle ouvert,
+#   voir CLAUDE.md règle n°1 -- jamais de valeur inventée). Seule la
+#   catégorie finale (résultat du raisonnement des auteurs, pas une mesure
+#   brute) est retenue.
+# - `exact_point_values` : les SEULES valeurs numériques ponctuelles que le
+#   papier donne en toutes lettres dans son texte (pas lues sur un graphique
+#   -- Fig. 2 du papier reste un graphique, jamais utilisée ici, cf. T98).
+#   Ce sont les valeurs RECORD ("by far the two highest concentrations...",
+#   "just three cultivars show more than...") -- le maximum observé pour
+#   cette variété sur CE composé, pas une valeur représentative/moyenne.
+#
+# `country` : pays de culture de l'échantillon testé (le papier montre que la
+# région influence fortement le résultat, ex. Cascade USA="high" mais Cascade
+# Allemagne/Argentine="medium" -- une variété dont le papier teste plusieurs
+# pays avec des catégories DIFFÉRENTES est exclue de l'application côté
+# ingestion plutôt que de deviner laquelle s'applique à notre entrée générique
+# ; voir ingest.ingest_hopsteiner_thiols). Codes tels qu'imprimés dans le
+# papier (ex. "USA", "England") -- la correspondance vers `hops.region` est
+# faite par l'ingestion, jamais ici.
+
+exact_point_values:
+  # variety (nom paper), compound (4mmp/3mh/3m4mp), value µg/kg -- valeur
+  # RECORD/maximum, jamais une moyenne. Citations exactes du texte (p.139) :
+  - {variety: Mosaic, compound: 3m4mp, value_ug_kg: 96}
+  - {variety: Nelson Sauvin, compound: 3m4mp, value_ug_kg: 83}
+  - {variety: Citra, compound: 4mmp, value_ug_kg: 38}
+  - {variety: Eureka!, compound: 4mmp, value_ug_kg: 26}
+  - {variety: Mosaic, compound: 4mmp, value_ug_kg: 23}
+  - {variety: Centennial, compound: 3mh, value_ug_kg: 16}
+  - {variety: Calypso, compound: 3mh, value_ug_kg: 13}
+  - {variety: Huell Melon, compound: 3mh, value_ug_kg: 12}
+  - {variety: Polaris, compound: 3mh, value_ug_kg: 11}
+
+impact_classification:
+  # Table 4A (low, détail chiffré par composé)
+  - {variety: East Kent Golding, country: England, category: low}
+  - {variety: Tettnanger, country: Germany, category: low}
+  - {variety: Akoya, country: Germany, category: low}
+  - {variety: Perle, country: Germany, category: low}
+  - {variety: Saazer, country: Czech Republic, category: low}
+  - {variety: Styrian Golding, country: Slovenia, category: low}
+  - {variety: Strisselspalt, country: France, category: low}
+  - {variety: Lubliner, country: Poland, category: low}
+  - {variety: Willamette, country: USA, category: low}
+  - {variety: African Queen, country: South Africa, category: low}
+  - {variety: Southern Star, country: South Africa, category: low}
+  - {variety: Mapuche, country: Argentina, category: low}
+  - {variety: Herkules, country: Germany, category: low}
+  # Table 4B (low, liste sans détail chiffré)
+  - {variety: Brewers Gold, country: Germany, category: low}
+  - {variety: Marynka, country: Poland, category: low}
+  - {variety: Diamant, country: Germany, category: low}
+  - {variety: Bramling Cross, country: England, category: low}
+  - {variety: Hallertau Mittelfrüh, country: Germany, category: low}
+  - {variety: Challenger, country: England, category: low}
+  - {variety: Hersbrucker, country: Germany, category: low}
+  - {variety: First Gold, country: England, category: low}
+  - {variety: Magnum, country: Germany, category: low}
+  - {variety: Fuggle, country: England, category: low}
+  - {variety: Merkur, country: Germany, category: low}
+  - {variety: Pilgrim, country: England, category: low}
+  - {variety: Northern Brewer, country: Germany, category: low}
+  - {variety: Progress, country: England, category: low}
+  - {variety: Opal, country: Germany, category: low}
+  - {variety: Target, country: England, category: low}
+  - {variety: Saphir, country: Germany, category: low}
+  - {variety: Bitter Gold, country: USA, category: low}
+  - {variety: Smaragd, country: Germany, category: low}
+  - {variety: Contessa, country: USA, category: low}
+  - {variety: Spalter, country: Germany, category: low}
+  - {variety: Delta, country: USA, category: low}
+  - {variety: Spalter Select, country: Germany, category: low}
+  - {variety: Galena, country: USA, category: low}
+  - {variety: Taurus, country: Germany, category: low}
+  - {variety: Lemondrop, country: USA, category: low}
+  - {variety: Titan, country: Germany, category: low}
+  - {variety: Mount Hood, country: USA, category: low}
+  - {variety: Tradition, country: Germany, category: low}
+  - {variety: Nugget, country: USA, category: low}
+  - {variety: Xantia, country: Germany, category: low}
+  - {variety: Nugget, country: Germany, category: low}
+  - {variety: Premiant, country: Czech Republic, category: low}
+  - {variety: Sorachi Ace, country: USA, category: low}
+  - {variety: Sladek, country: Czech Republic, category: low}
+  - {variety: Sultana, country: USA, category: low}
+  - {variety: Styrian Golding Bobek, country: Slovenia, category: low}
+  - {variety: Super Galena, country: USA, category: low}
+  - {variety: Styrian Golding Celeia, country: Slovenia, category: low}
+  - {variety: Tahoma, country: USA, category: low}
+  - {variety: Super Styrian Aurora, country: Slovenia, category: low}
+  - {variety: Vanguard, country: USA, category: low}
+  - {variety: Aramis, country: France, category: low}
+  - {variety: Southern Dawn, country: South Africa, category: low}
+  - {variety: Barbe Rouge, country: France, category: low}
+  - {variety: Southern Passion, country: South Africa, category: low}
+  - {variety: Triskel, country: France, category: low}
+  - {variety: Southern Promise, country: South Africa, category: low}
+  # Table 5A (medium, détail chiffré)
+  - {variety: Cascade, country: Germany, category: medium}
+  - {variety: Cascade, country: Argentina, category: medium}
+  - {variety: Gaucho, country: Argentina, category: medium}
+  - {variety: Huell Melon, country: Germany, category: medium}
+  - {variety: Centennial, country: USA, category: medium}
+  - {variety: Mistral, country: France, category: medium}
+  - {variety: Ella, country: Australia, category: medium}
+  - {variety: Azacca, country: USA, category: medium}
+  - {variety: Motueka, country: New Zealand, category: medium}
+  # Table 5B (medium, liste sans détail chiffré)
+  - {variety: Ariana, country: Germany, category: medium}
+  - {variety: Apollo, country: USA, category: medium}
+  - {variety: Apollo, country: Spain, category: medium}
+  - {variety: Bravo, country: USA, category: medium}
+  - {variety: Cluster, country: USA, category: medium}
+  - {variety: Chinook, country: USA, category: medium}
+  - {variety: Columbus, country: USA, category: medium}
+  - {variety: El Dorado, country: USA, category: medium}
+  - {variety: Helios, country: USA, category: medium}
+  - {variety: Lotus, country: USA, category: medium}
+  # Table 6 (high, détail chiffré)
+  - {variety: Callista, country: Germany, category: high}
+  - {variety: Hallertau Blanc, country: Germany, category: high}
+  - {variety: Mandarina Bavaria, country: Germany, category: high}
+  - {variety: Polaris, country: Germany, category: high}
+  - {variety: Solero, country: Germany, category: high}
+  - {variety: Tango, country: Germany, category: high}
+  - {variety: Alora, country: USA, category: high}
+  - {variety: Altus, country: USA, category: high}
+  - {variety: Amarillo, country: USA, category: high}
+  - {variety: Calypso, country: USA, category: high}
+  - {variety: Cascade, country: USA, category: high}
+  - {variety: Crystal, country: USA, category: high}
+  - {variety: Idaho7, country: USA, category: high}
+  - {variety: Summit, country: USA, category: high}
+  - {variety: Citra, country: USA, category: high}
+  - {variety: Eureka!, country: USA, category: high}
+  - {variety: Eureka!, country: Spain, category: high}
+  - {variety: Eureka!, country: Germany, category: high}
+  - {variety: Mosaic, country: USA, category: high}
+  - {variety: Simcoe, country: USA, category: high}
+  - {variety: Strata, country: USA, category: high}
+  - {variety: Galaxy, country: Australia, category: high}
+  - {variety: Nelson Sauvin, country: New Zealand, category: high}

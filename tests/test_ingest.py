@@ -1934,6 +1934,164 @@ def test_ingest_hops_comptoir_never_creates_a_resold_hops_of_the_world_variety(t
     assert cascade_usa is None  # "Hops of the world" -- jamais créée
 
 
+def _hopsteiner_yaml_fixture():
+    return {
+        "exact_point_values": [
+            {"variety": "Mosaic", "compound": "3m4mp", "value_ug_kg": 96},
+            {"variety": "Nelson Sauvin", "compound": "3m4mp", "value_ug_kg": 83},
+            {"variety": "Eureka!", "compound": "4mmp", "value_ug_kg": 26},
+        ],
+        "impact_classification": [
+            {"variety": "Amarillo", "country": "USA", "category": "high"},
+            {"variety": "Fuggle", "country": "England", "category": "low"},
+            {"variety": "Nelson Sauvin", "country": "New Zealand", "category": "high"},
+            {"variety": "Cascade", "country": "Germany", "category": "medium"},
+            {"variety": "Cascade", "country": "USA", "category": "high"},
+        ],
+    }
+
+
+def _hopsteiner_test_db(tmp_path):
+    db_path = str(tmp_path / "t.db")
+    con = connect(db_path); init_db(con)
+    rows = [
+        ("mosaic", "Mosaic", "United States"),
+        ("amarillo", "Amarillo", "United States"),
+        ("amarillo-brand-ama04", "Amarillo", "Germany"),
+        ("fuggles", "Fuggle", "Great Britain"),
+        ("fuggle", "Fuggle", "France"),
+        ("nelson-sauvin-brand-nz-hops", "Nelson Sauvin - NZ Hops", "New Zealand"),
+        ("nelson-sauvin-brand-machops", "Nelson Sauvin - MacHops", "New Zealand"),
+        ("cascade", "Cascade", "United States"),
+    ]
+    for variety, name, region in rows:
+        con.execute("INSERT INTO hops (variety, name, region, sources, purpose) "
+                   "VALUES (?,?,?,'barthhaas',NULL)", (variety, name, region))
+    con.commit(); con.close()
+    return db_path
+
+
+def test_ingest_hopsteiner_thiols_writes_exact_point_values(tmp_path, monkeypatch):
+    monkeypatch.setattr(ingest, "_load_yaml_mapping", lambda filename: _hopsteiner_yaml_fixture())
+    db_path = _hopsteiner_test_db(tmp_path)
+    ingest.ingest_hopsteiner_thiols(db_path)
+
+    con = connect(db_path)
+    row = con.execute(
+        "SELECT vmin, vmax, unit, source, confidence FROM hop_composition "
+        "WHERE variety='mosaic' AND compound='3m4mp'").fetchone()
+    con.close()
+    assert row["vmin"] == 96.0 and row["vmax"] == 96.0
+    assert row["unit"] == "ug_kg"
+    assert row["source"] == "hopsteiner-thiol-2024"
+    assert row["confidence"] == "ok"
+
+
+def test_ingest_hopsteiner_thiols_point_value_broadcast_to_sister_varieties(tmp_path, monkeypatch):
+    # Nelson Sauvin NZ Hops/MacHops -- même cultivar, même généalogie (T106) --
+    # la valeur record doit s'appliquer aux DEUX lignes, pas une seule au hasard.
+    monkeypatch.setattr(ingest, "_load_yaml_mapping", lambda filename: _hopsteiner_yaml_fixture())
+    db_path = _hopsteiner_test_db(tmp_path)
+    ingest.ingest_hopsteiner_thiols(db_path)
+
+    con = connect(db_path)
+    nz = con.execute("SELECT vmin FROM hop_composition WHERE "
+                     "variety='nelson-sauvin-brand-nz-hops' AND compound='3m4mp'").fetchone()
+    mac = con.execute("SELECT vmin FROM hop_composition WHERE "
+                      "variety='nelson-sauvin-brand-machops' AND compound='3m4mp'").fetchone()
+    con.close()
+    assert nz["vmin"] == 83.0 and mac["vmin"] == 83.0
+
+
+def test_ingest_hopsteiner_thiols_skips_variety_absent_from_catalog(tmp_path, monkeypatch):
+    monkeypatch.setattr(ingest, "_load_yaml_mapping", lambda filename: _hopsteiner_yaml_fixture())
+    db_path = _hopsteiner_test_db(tmp_path)
+    ingest.ingest_hopsteiner_thiols(db_path)
+
+    con = connect(db_path)
+    n = con.execute(
+        "SELECT COUNT(*) FROM hop_composition WHERE compound='4mmp'").fetchone()[0]
+    con.close()
+    assert n == 0  # Eureka! absente du catalogue de test -- jamais fabriquée
+
+
+def test_ingest_hopsteiner_thiols_impact_single_row_single_category(tmp_path, monkeypatch):
+    monkeypatch.setattr(ingest, "_load_yaml_mapping", lambda filename: _hopsteiner_yaml_fixture())
+    db_path = _hopsteiner_test_db(tmp_path)
+    ingest.ingest_hopsteiner_thiols(db_path)
+
+    con = connect(db_path)
+    row = con.execute(
+        "SELECT category FROM hop_thiol_impact WHERE variety='mosaic'").fetchone()
+    con.close()
+    assert row is None  # Mosaic n'a pas d'entrée impact_classification dans la fixture
+
+
+def test_ingest_hopsteiner_thiols_impact_region_aware_for_multi_row_cultivar(tmp_path, monkeypatch):
+    # Amarillo : le papier ne teste QUE les USA -- la ligne Allemagne
+    # (jamais testée) ne doit recevoir AUCUNE classification, même si
+    # c'est la seule autre ligne du même cultivar de base.
+    monkeypatch.setattr(ingest, "_load_yaml_mapping", lambda filename: _hopsteiner_yaml_fixture())
+    db_path = _hopsteiner_test_db(tmp_path)
+    ingest.ingest_hopsteiner_thiols(db_path)
+
+    con = connect(db_path)
+    us = con.execute("SELECT category FROM hop_thiol_impact WHERE variety='amarillo'").fetchone()
+    de = con.execute(
+        "SELECT category FROM hop_thiol_impact WHERE variety='amarillo-brand-ama04'").fetchone()
+    fr_fuggle = con.execute("SELECT category FROM hop_thiol_impact WHERE variety='fuggle'").fetchone()
+    gb_fuggle = con.execute("SELECT category FROM hop_thiol_impact WHERE variety='fuggles'").fetchone()
+    con.close()
+    assert us["category"] == "high"
+    assert de is None
+    assert fr_fuggle is None
+    assert gb_fuggle["category"] == "low"
+
+
+def test_ingest_hopsteiner_thiols_impact_broadcasts_to_sister_varieties_same_region(tmp_path, monkeypatch):
+    monkeypatch.setattr(ingest, "_load_yaml_mapping", lambda filename: _hopsteiner_yaml_fixture())
+    db_path = _hopsteiner_test_db(tmp_path)
+    ingest.ingest_hopsteiner_thiols(db_path)
+
+    con = connect(db_path)
+    nz = con.execute(
+        "SELECT category FROM hop_thiol_impact WHERE variety='nelson-sauvin-brand-nz-hops'").fetchone()
+    mac = con.execute(
+        "SELECT category FROM hop_thiol_impact WHERE variety='nelson-sauvin-brand-machops'").fetchone()
+    con.close()
+    assert nz["category"] == "high" and mac["category"] == "high"
+
+
+def test_ingest_hopsteiner_thiols_impact_skips_ambiguous_single_generic_row(tmp_path, monkeypatch):
+    # Cascade : catégorie divergente selon le pays testé (Allemagne="medium"
+    # vs USA="high") et une SEULE ligne générique en catalogue -- jamais un
+    # choix arbitraire entre les deux.
+    monkeypatch.setattr(ingest, "_load_yaml_mapping", lambda filename: _hopsteiner_yaml_fixture())
+    db_path = _hopsteiner_test_db(tmp_path)
+    ingest.ingest_hopsteiner_thiols(db_path)
+
+    con = connect(db_path)
+    row = con.execute("SELECT category FROM hop_thiol_impact WHERE variety='cascade'").fetchone()
+    con.close()
+    assert row is None
+
+
+def test_ingest_hopsteiner_thiols_is_idempotent(tmp_path, monkeypatch):
+    monkeypatch.setattr(ingest, "_load_yaml_mapping", lambda filename: _hopsteiner_yaml_fixture())
+    db_path = _hopsteiner_test_db(tmp_path)
+    ingest.ingest_hopsteiner_thiols(db_path)
+    ingest.ingest_hopsteiner_thiols(db_path)
+
+    con = connect(db_path)
+    n_impact = con.execute("SELECT COUNT(*) FROM hop_thiol_impact").fetchone()[0]
+    n_comp = con.execute(
+        "SELECT COUNT(*) FROM hop_composition WHERE source='hopsteiner-thiol-2024'").fetchone()[0]
+    con.close()
+    # amarillo (high) + fuggles (low) + nelson-sauvin nz-hops/machops (high, x2) = 4
+    assert n_impact == 4
+    assert n_comp == 3  # mosaic + 2 lignes Nelson Sauvin (Eureka! sautée)
+
+
 def test_reconcile_mmum_hop_varieties_writes_variety_and_product_form(tmp_path, monkeypatch):
     aroma_path = str(tmp_path / "aromahops.db")
     con = connect(aroma_path)

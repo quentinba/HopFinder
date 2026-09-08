@@ -856,6 +856,20 @@ def hop_pairings(con, variety: str) -> list[dict]:
              "frequency": r["frequency"]} for r in rows]
 
 
+def hop_thiol_impact(con, variety: str) -> dict | None:
+    """{"category": "low"/"medium"/"high", "source": ...} pour `variety`
+    (T96, hopsteiner-thiol-2024) ou `None` si non couverte. Classification
+    QUALITATIVE (pas une concentration -- le papier source publie ses
+    valeurs par variété en seuils "n.d."/"<10"/">10 µg/kg" sans plafond
+    défendable pour ">10", voir data/mappings/hopsteiner_thiol_species_
+    2024.yaml), jamais consultée par un chemin de scoring (`amplify`/
+    `contrast`/`molecular_scores`), purement informative -- même statut que
+    `hops.purpose` côté GUI."""
+    row = con.execute(
+        "SELECT category, source FROM hop_thiol_impact WHERE variety=?", (variety,)).fetchone()
+    return dict(row) if row else None
+
+
 def hop_substitutions(con, variety: str) -> list[dict]:
     """Substitutions suggérées -- DEUX sources éditoriales dans la même table
     (T25, BeerMaverick "Hop Substitutions" ; T109, beer-analytics colonne

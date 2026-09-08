@@ -239,6 +239,13 @@ _TOOL_SUMMARY_BY_MODE = {t["mode"]: t for t in _TOOL_SUMMARIES}
 # un `git log` en direct exigerait aussi que `.git` soit présent dans le
 # conteneur déployé, ce qui n'est pas garanti.
 _RECENT_UPDATES = [
+    ("2026-09-08", "Free thiol species (3MH, 4MMP, 3M4MP) added for a handful "
+                   "of hops, on top of our existing \"thiols\" aggregate -- "
+                   "sourced from a 2024 peer-reviewed paper (Hopsteiner, "
+                   "97 varieties tested), the only per-variety source found "
+                   "for these individually. A new \"Thiol impact\" badge "
+                   "(Low/Medium/High) also appears on Browse for ~60 hops -- "
+                   "informative only, never used in any score."),
     ("2026-09-08", "5 new hop varieties from hops-comptoir.com (Comptoir "
                    "Agricole): Elixir, Mistral, Barbe Rouge (self-grown in "
                    "Alsace, no other source covers them), plus Fuggle and "
@@ -1294,6 +1301,26 @@ def _purpose_badge(purpose: str | None, inferred: bool = False) -> None:
     st.badge(label, color=_PURPOSE_COLORS.get(purpose, "gray"), icon=_PURPOSE_ICONS.get(purpose))
 
 
+def _thiol_impact_badge(con, variety: str) -> None:
+    """T96 (2026-09-08) : classification qualitative low/medium/high du
+    potentiel thiol libre (Schmidt, Hoferer & Biendl, Hopsteiner,
+    BrewingScience 77, 2024 -- CC-BY 4.0), juste après le badge purpose
+    dans les 3 sites qui partagent l'ordre fixe T-D10. Couverture partielle
+    (une minorité des houblons) -- silencieuse quand absente, jamais un
+    badge "unknown" fabriqué (contrairement à purpose, toujours pertinent
+    et donc toujours affiché même en `None`)."""
+    info = matching.hop_thiol_impact(con, variety)
+    if info is None:
+        return
+    label = {"low": "Low", "medium": "Medium", "high": "High"}[info["category"]]
+    st.badge(
+        f"Thiol impact: {label}", color="gray",
+        help="Free thiol potential (3MH, 4MMP, 3M4MP) -- Schmidt, Hoferer & Biendl "
+             "(Hopsteiner), BrewingScience 77 (2024). Based on the maximum value "
+             "observed across sampled batches, not a typical/average measurement. "
+             "Informative only, never used in any score.")
+
+
 def _row_with_purpose(entry: dict, hops: dict, comp: dict) -> dict:
     """Résout le purpose EFFECTIF (réel BeerMaverick, ou inféré depuis
     l'acide alpha -- voir `matching.resolve_purpose`) pour une ligne de
@@ -1614,11 +1641,12 @@ def _hop_detail_expanders(con, hops: dict, comp: dict, hop_desc: dict, rows: lis
         v = row["variety"]
         with st.expander(f"{row['name']} — {row['caption']}"):
             # T-D10 (2026-08-23, spec Claude Design §7) : ordre FIXE -- "purpose
-            # chip -> key stats -> wheel block -> descriptors by source ->
-            # composition table -> sources" -- identique dans
-            # `_hop_detail_expanders`/`_browse`/`_by_descriptor`.
+            # chip -> thiol impact chip (T96) -> key stats -> wheel block ->
+            # descriptors by source -> composition table -> sources" --
+            # identique dans `_hop_detail_expanders`/`_browse`/`_by_descriptor`.
             purpose, inferred = matching.resolve_purpose(hops[v].get("purpose"), comp.get(v, {}))
             _purpose_badge(purpose, inferred)
+            _thiol_impact_badge(con, v)
             _render_key_stats(comp.get(v, {}))
             by_source = all_intensity.get(v, {})
             source = _aroma_wheel_toggle(matching.default_aroma_wheel_source(by_source),
@@ -2595,9 +2623,9 @@ def _browse(con):
     h = hops[selected]
     hcomp = comp.get(selected, {})
     # T-D04/T-D10 (2026-08-23, spec Claude Design) : ordre FIXE -- "purpose
-    # chip -> key stats -> wheel block -> descriptors by source ->
-    # composition table -> sources" -- identique dans
-    # `_browse`/`_hop_detail_expanders`/`_by_descriptor`. Une carte par étape
+    # chip -> thiol impact chip (T96) -> key stats -> wheel block ->
+    # descriptors by source -> composition table -> sources" -- identique
+    # dans `_browse`/`_hop_detail_expanders`/`_by_descriptor`. Une carte par étape
     # (T-D04, "one card per logical section") plutôt qu'une seule carte
     # fourre-tout comme avant T-D10.
     with _panel():
@@ -2606,6 +2634,7 @@ def _browse(con):
         # in the browser information as a main/top information").
         purpose, inferred = matching.resolve_purpose(h.get("purpose"), hcomp)
         _purpose_badge(purpose, inferred)
+        _thiol_impact_badge(con, selected)
         st.caption(f"Region: {h['region'] or 'unknown'}")
         # T106 : identité (cultivar/breeder/release_year/pedigree, badges
         # experimental/organic/blend) -- "juste sous le nom du houblon, avant
@@ -3179,11 +3208,12 @@ def _by_descriptor(con):
         hcomp = comp.get(h["variety"], {})
         with st.expander(f"{h['name']} — matches {', '.join(h['matched_descriptors'])}"):
             # T-D10 (2026-08-23, spec Claude Design §7) : ordre FIXE -- "purpose
-            # chip -> key stats -> wheel block -> descriptors by source ->
-            # composition table -> sources" -- identique dans
-            # `_browse`/`_hop_detail_expanders`/`_by_descriptor`.
+            # chip -> thiol impact chip (T96) -> key stats -> wheel block ->
+            # descriptors by source -> composition table -> sources" --
+            # identique dans `_browse`/`_hop_detail_expanders`/`_by_descriptor`.
             purpose, inferred = matching.resolve_purpose(h.get("purpose"), hcomp)
             _purpose_badge(purpose, inferred)
+            _thiol_impact_badge(con, h["variety"])
             _render_key_stats(hcomp)
             # Transparence sur le tri quantitatif (2026-08-19, "propose a 2
             # layer results ordering... inside this selection, propose a
@@ -3371,7 +3401,14 @@ _COMPARE_DETAIL_OIL_COMPOUNDS = ["myrcene", "humulene", "caryophyllene", "farnes
 # pour le barplot 1) : mélanger thiols (~0.06 µg/kg) avec myrcène (~40%
 # d'huile) sur le même axe écraserait sa barre. Même traitement à double
 # axe que le barplot 1, jamais fusionné sur le même axe que le reste.
+# 4mmp/3mh/3m4mp (T96, 2026-09-08) : les 3 espèces individuelles derrière
+# l'agrégat "thiols" (hopsteiner-thiol-2024, per-variety) -- même unité
+# µg/kg, donc même axe secondaire. Un houblon peut porter les DEUX (l'agrégat
+# BarthHaas ET une espèce individuelle Hopsteiner) -- affichées comme des
+# barres SÉPARÉES, jamais sommées/fusionnées (sources et méthodologies
+# distinctes, même principe que Yakima/BarthHaas jamais moyennés).
 _COMPARE_THIOLS_COMPOUND = "thiols"
+_COMPARE_THIOL_SPECIES_COMPOUNDS = [_COMPARE_THIOLS_COMPOUND, "4mmp", "3mh", "3m4mp"]
 
 
 def _compare_principal_values(hcomp: dict) -> dict[str, float | None]:
@@ -5248,11 +5285,12 @@ def _compare(con):
                 # houblon -- pas de conversion possible, jamais une barre
                 # fabriquée à partir d'une huile totale devinée.
                 missing_oil.append(name)
-        thiols_val = _compare_detail_value(hcomp, _COMPARE_THIOLS_COMPOUND, show_absolute)
-        if thiols_val is not None:
-            detail_rows.append({"Hop": name, "Field": _COMPARE_THIOLS_COMPOUND, "Value": thiols_val})
-    thiols_fields = [_COMPARE_THIOLS_COMPOUND] if any(
-        r["Field"] == _COMPARE_THIOLS_COMPOUND for r in detail_rows) else []
+        for tc in _COMPARE_THIOL_SPECIES_COMPOUNDS:
+            thiols_val = _compare_detail_value(hcomp, tc, show_absolute)
+            if thiols_val is not None:
+                detail_rows.append({"Hop": name, "Field": tc, "Value": thiols_val})
+    thiols_fields = [tc for tc in _COMPARE_THIOL_SPECIES_COMPOUNDS
+                     if any(r["Field"] == tc for r in detail_rows)]
     log_scale = normalization == "Log"
     x_domain = value_tooltip_title = raw_value_title = None
     if normalization in ("Min-max", "Quantile"):

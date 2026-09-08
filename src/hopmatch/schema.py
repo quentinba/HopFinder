@@ -377,6 +377,30 @@ CREATE TABLE beer_style_aliases (
 """
 SCHEMA += BEER_STYLE_ALIASES_SCHEMA
 
+# T96 (2026-09-08) : classification "thiol impact" (low/medium/high) par
+# variété, curée depuis Schmidt/Hoferer/Biendl (Hopsteiner), BrewingScience
+# 77 (2024), voir `data/mappings/hopsteiner_thiol_species_2024.yaml` pour la
+# source complète et ses réserves. Table SÉPARÉE de `hop_composition` --
+# PAS une mesure de concentration (la classification du papier vient de
+# seuils "n.d."/"<10"/">10 µg/kg" sans plafond publié, jamais convertible en
+# vmin/vmax défendables, voir CLAUDE.md règle n°1), une classification
+# QUALITATIVE distincte, au même titre que `hops.purpose`. `category` in
+# {'low','medium','high'}, jamais consultée par un chemin de scoring
+# (`matching`/`amplify`/`contrast`), purement informative -- voir
+# `ingest.ingest_hopsteiner_thiols` pour la logique de correspondance
+# variété/région (une variété testée par le papier dans plusieurs pays avec
+# des catégories DIFFÉRENTES, ex. Cascade USA="high" vs Allemagne/
+# Argentine="medium", n'est écrite QUE si notre catalogue porte des lignes
+# régionales distinctes correspondantes -- jamais devinée sur une entrée
+# générique unique).
+HOP_THIOL_IMPACT_SCHEMA = """
+CREATE TABLE hop_thiol_impact (
+    variety TEXT, category TEXT, source TEXT, fetched_at TEXT,
+    PRIMARY KEY (variety, source)
+);
+"""
+SCHEMA += HOP_THIOL_IMPACT_SCHEMA
+
 # T91 (2026-08-30, D4 tranchée) : corpus BRUT de recettes (MMuM, puis
 # Brewfather/DIY Dog) -- fichier `recipes.db` SÉPARÉ d'`aromahops.db`,
 # jamais référencé par `app._fetch_remote_db`, jamais dans `SCHEMA`/
@@ -470,7 +494,8 @@ def init_db(con: sqlite3.Connection) -> None:
         "DROP TABLE IF EXISTS hop_usage_stats;"
         "DROP TABLE IF EXISTS hop_combinations;"
         "DROP TABLE IF EXISTS hop_addition_timing;"
-        "DROP TABLE IF EXISTS beer_style_aliases;")
+        "DROP TABLE IF EXISTS beer_style_aliases;"
+        "DROP TABLE IF EXISTS hop_thiol_impact;")
     con.executescript(SCHEMA)
 
 

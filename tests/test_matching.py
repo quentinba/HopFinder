@@ -238,6 +238,20 @@ def test_compound_descriptors_thiols_resolves_only_via_janish(db):
     assert matching.compound_descriptors(db, ["thiols"]) == {
         "thiols": "berry & currant (Janish, The New IPA)"}
 
+def test_compound_descriptors_4mmp_resolves_same_janish_category_as_thiols(db):
+    # T96 : "4mmp" est la même molécule (4-mercapto-4-methylpentan-2-one)
+    # déjà citée par le livre pour "thiols" -- l'association s'applique
+    # aussi à sa propre clé maintenant qu'elle existe séparément.
+    assert matching.compound_descriptors(db, ["4mmp"]) == {
+        "4mmp": "berry & currant (Janish, The New IPA)"}
+
+def test_compound_descriptors_3mh_and_3m4mp_absent_no_janish_entry(db):
+    # T96 : le livre ne nomme QUE 4MMP individuellement dans ce tableau --
+    # 3mh/3m4mp n'ont ni CID (pas de résolution Flavornet possible, comme
+    # "thiols") ni entrée JANISH_COMPOUND_CATEGORIES (jamais une extension
+    # par supposition) -- absents, comme isobutyrate/ketones.
+    assert matching.compound_descriptors(db, ["3mh", "3m4mp"]) == {}
+
 def test_compound_descriptors_dedups_janish_category_already_covered(db):
     # T73 : si le descripteur Flavornet couvre DÉJÀ la catégorie du livre
     # (comparaison par racine de 4 lettres -- "herb"), la catégorie Janish
@@ -835,6 +849,18 @@ def test_hop_pairings_sorted_by_frequency_desc(db):
     assert r[0]["variety"] == "mosaic"
     assert r[2]["variety"] is None  # nom brut conservé même sans réconciliation
     db.execute("DELETE FROM hop_pairings WHERE variety='citra'")
+    db.commit()
+
+def test_hop_thiol_impact_none_without_data(db):
+    assert matching.hop_thiol_impact(db, "citra") is None
+
+def test_hop_thiol_impact_reads_inserted_row(db):
+    db.execute("INSERT INTO hop_thiol_impact VALUES (?,?,?,?)",
+              ("citra", "high", "hopsteiner-thiol-2024", "2026-09-08T00:00:00+00:00"))
+    db.commit()
+    assert matching.hop_thiol_impact(db, "citra") == {
+        "category": "high", "source": "hopsteiner-thiol-2024"}
+    db.execute("DELETE FROM hop_thiol_impact WHERE variety='citra'")
     db.commit()
 
 def test_hop_substitutions_empty_without_beermaverick_data(db):

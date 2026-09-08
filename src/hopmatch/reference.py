@@ -120,6 +120,14 @@ JANISH_COMPOUND_CATEGORIES: dict[str, list[str]] = {
     "farnesene": ["woody"],
     "caryophyllene": ["woody", "spicy"],
     "thiols": ["berry & currant"],
+    # T96 (2026-09-08) : "4mmp" est la même molécule (4-mercapto-4-
+    # methylpentan-2-one) déjà citée ci-dessus au sujet de "thiols" -- le
+    # livre la liste littéralement, l'association s'applique donc de plein
+    # droit à sa propre clé une fois qu'elle existe séparément dans
+    # `hop_composition` (T96). "3mh"/"3m4mp" PAS ajoutés : le livre ne les
+    # nomme pas individuellement dans ce tableau (seul 4MMP y est cité),
+    # jamais une extension par supposition.
+    "4mmp": ["berry & currant"],
 }
 
 # Option --biotransform (redirection géraniol->citronellol / linalol->
@@ -547,9 +555,11 @@ CONTRAST_AFFINITY: dict[str, list[str]] = {
 # hydrocarbures monoterpéniques) -- ne se lit plus comme un réarrangement
 # du même libellé.
 #
-# Cas particuliers, PAS des omissions -- les 11 composés RÉELLEMENT
+# Cas particuliers, PAS des omissions -- les 14 composés RÉELLEMENT
 # présents dans hop_composition sont TOUS mappés ci-dessous (vérifié,
-# aucun composé réel n'est laissé sans décision) :
+# aucun composé réel n'est laissé sans décision -- 11 + 4mmp/3mh/3m4mp,
+# T96, mêmes classe/annotation que l'agrégat "thiols" dont ils sont les
+# espèces individuelles) :
 #   - "isobutyrate"/"ketones" classées "esters"/"ketones" par NOMENCLATURE
 #     CHIMIQUE DIRECTE ("-ate" = ester, "ketones" = nom littéral de la
 #     sous-classe -- pas une supposition sur un nom approchant) MAIS avec
@@ -599,6 +609,17 @@ PROCESS_SURVIVAL: dict[str, dict[str, str]] = {
                       "subclass": "Other (ketones, esters, aldehydes, epoxides)",
                       "annotation": "intermediate transfer", "confidence": "low"},
     "thiols":        {"class": "Sulfur compounds", "subclass": "Thiols",
+                      "annotation": "extremely volatile — dry hop only", "confidence": "medium"},
+    # T96 (2026-09-08) : 4mmp/3mh/3m4mp sont les 3 ESPÈCES individuelles qui
+    # composent l'agrégat "thiols" ci-dessus (établi par T95) -- même classe
+    # chimique, même comportement procédé, donc même annotation/confidence
+    # reprise telle quelle (pas une nouvelle science, juste le même
+    # jugement appliqué au niveau composé plutôt qu'agrégat).
+    "4mmp":          {"class": "Sulfur compounds", "subclass": "Thiols",
+                      "annotation": "extremely volatile — dry hop only", "confidence": "medium"},
+    "3mh":           {"class": "Sulfur compounds", "subclass": "Thiols",
+                      "annotation": "extremely volatile — dry hop only", "confidence": "medium"},
+    "3m4mp":         {"class": "Sulfur compounds", "subclass": "Thiols",
                       "annotation": "extremely volatile — dry hop only", "confidence": "medium"},
 }
 
@@ -1075,6 +1096,73 @@ PROCESS_STAGE_SURVIVAL: dict[str, dict[str, dict[str, str]]] = {
         "afdh": {"state": "kept", "source": "CLAUDE.md — YCH handbook rule 1",
                  "note": "One of the 8 officially published YCH survivable compounds "
                          "(field `threeMercaptohexanol`)."},
+        "pfdh": {"state": "kept", "source": "CLAUDE.md — YCH handbook rule 1",
+                 "note": "Survives a cold, post-fermentation dry hop addition without "
+                         "reservation."},
+    },
+    # T96 (2026-09-08) : 4mmp/3mh/3m4mp sont les 3 espèces individuelles de
+    # l'agrégat "thiols" ci-dessus -- même classe chimique, même annotation
+    # sourcée YCH handbook, reprise à l'identique (pas une nouvelle science,
+    # juste le même jugement au niveau composé).
+    "4mmp": {
+        "boil": {"state": "partial", "source": "CLAUDE.md — YCH handbook (order-of-magnitude thresholds)",
+                 "note": "Present in vanishingly small quantities (µg/kg) and highly "
+                         "volatile -- boiling drives off most of it."},
+        "late_boil": {"state": "partial",
+                      "source": "Same as \"boil\" above -- no minute-specific figure exists, "
+                                "only the order-of-magnitude threshold comparison.",
+                      "note": "No basis to claim anything different from the full-boil "
+                              "annotation at 5 minutes specifically."},
+        "whirlpool": {"state": "kept",
+                      "source": "CLAUDE.md — YCH handbook (\"wort-soluble compounds pass to the fermenter\")",
+                      "note": "Same reasoning as 3MH -- a wort-soluble thiol survives "
+                              "into the fermenter from a whirlpool/knockout addition."},
+        "afdh": {"state": "kept", "source": "CLAUDE.md — YCH handbook rule 1",
+                 "note": "Not individually one of the 8 officially published YCH "
+                         "survivable fields (only 3MH is), but shares the same thiol "
+                         "volatility profile -- same practical recommendation."},
+        "pfdh": {"state": "kept", "source": "CLAUDE.md — YCH handbook rule 1",
+                 "note": "Survives a cold, post-fermentation dry hop addition without "
+                         "reservation."},
+    },
+    "3mh": {
+        "boil": {"state": "partial", "source": "CLAUDE.md — YCH handbook (order-of-magnitude thresholds)",
+                 "note": "Present in vanishingly small quantities (µg/kg) and highly "
+                         "volatile -- boiling drives off most of it."},
+        "late_boil": {"state": "partial",
+                      "source": "Same as \"boil\" above -- no minute-specific figure exists, "
+                                "only the order-of-magnitude threshold comparison.",
+                      "note": "No basis to claim anything different from the full-boil "
+                              "annotation at 5 minutes specifically."},
+        "whirlpool": {"state": "kept",
+                      "source": "CLAUDE.md — YCH handbook (\"wort-soluble compounds pass to the fermenter\")",
+                      "note": "3-mercaptohexanol (3MH) specifically is named as surviving "
+                              "into the fermenter from a whirlpool/knockout addition."},
+        "afdh": {"state": "kept", "source": "CLAUDE.md — YCH handbook rule 1",
+                 "note": "One of the 8 officially published YCH survivable compounds "
+                         "(field `threeMercaptohexanol`)."},
+        "pfdh": {"state": "kept", "source": "CLAUDE.md — YCH handbook rule 1",
+                 "note": "Survives a cold, post-fermentation dry hop addition without "
+                         "reservation."},
+    },
+    "3m4mp": {
+        "boil": {"state": "partial", "source": "CLAUDE.md — YCH handbook (order-of-magnitude thresholds)",
+                 "note": "Present in vanishingly small quantities (µg/kg) and highly "
+                         "volatile -- boiling drives off most of it."},
+        "late_boil": {"state": "partial",
+                      "source": "Same as \"boil\" above -- no minute-specific figure exists, "
+                                "only the order-of-magnitude threshold comparison.",
+                      "note": "No basis to claim anything different from the full-boil "
+                              "annotation at 5 minutes specifically."},
+        "whirlpool": {"state": "kept",
+                      "source": "CLAUDE.md — YCH handbook (\"wort-soluble compounds pass to the fermenter\")",
+                      "note": "Same reasoning as 3MH (a structural isomer, same molecular "
+                              "mass) -- a wort-soluble thiol survives into the fermenter "
+                              "from a whirlpool/knockout addition."},
+        "afdh": {"state": "kept", "source": "CLAUDE.md — YCH handbook rule 1",
+                 "note": "Not individually one of the 8 officially published YCH "
+                         "survivable fields, but shares the same thiol volatility "
+                         "profile as 3MH/4MMP -- same practical recommendation."},
         "pfdh": {"state": "kept", "source": "CLAUDE.md — YCH handbook rule 1",
                  "note": "Survives a cold, post-fermentation dry hop addition without "
                          "reservation."},

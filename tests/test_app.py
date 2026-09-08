@@ -792,6 +792,31 @@ def test_browse_shows_purpose_badge_as_top_info(toy_cwd):
     assert not at.exception
     assert any("-badge[" in m.value and "Aromatic" in m.value for m in at.markdown)
 
+def test_browse_shows_thiol_impact_badge_when_present(toy_cwd):
+    # T96 : badge optionnel, juste après le badge purpose -- présent
+    # seulement pour les houblons couverts par hopsteiner-thiol-2024.
+    con = connect(os.path.join(toy_cwd, "aromahops.db"))
+    con.execute("INSERT INTO hop_thiol_impact VALUES (?,?,?,?)",
+               ("hopa", "high", "hopsteiner-thiol-2024", "2026-09-08T00:00:00+00:00"))
+    con.commit(); con.close()
+
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("browse").run()
+    at.selectbox[0].set_value("hopa").run()
+    assert not at.exception
+    assert any("-badge[" in m.value and "Thiol impact: High" in m.value for m in at.markdown)
+
+def test_browse_omits_thiol_impact_badge_when_absent(toy_cwd):
+    # hopb : aucune ligne hop_thiol_impact -- silencieux, jamais un badge
+    # "unknown" fabriqué (contrairement au badge purpose).
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("browse").run()
+    at.selectbox[0].set_value("hopb").run()
+    assert not at.exception
+    assert not any("-badge[" in m.value and "Thiol impact" in m.value for m in at.markdown)
+
 def test_browse_shows_hop_identity_metadata_and_badges(toy_cwd):
     # T106 : cultivar/breeder/release_year/pedigree en ligne de texte,
     # badge "Experimental" (is_experimental=1, voir _build_toy_db).

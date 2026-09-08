@@ -191,6 +191,33 @@ même livre, utilisées pour deux besoins différents, **jamais confondues** :
     BarthHaas ne mesure que les thiols agrégés — l'étiquette reflète cette limite plutôt que de
     suggérer une homogénéité que la source dément.
 
+**Hopsteiner thiol species (2024)** — Schmidt, C.; Hoferer, L.; Biendl, M. « Determination of
+Variety Dependent "Thiol Impact" Based on LC-MS/MS Analysis of Different Hop Samples Collected
+Worldwide. » *BrewingScience* 77 (Nov/Dec 2024), pp. 135-141. https://doi.org/10.23763/BrSc24-10schmidt
+(T96 backlog, 2026-09-08)
+- Licence : **CC-BY 4.0**, accès libre.
+- Accès : PDF téléchargeable, pas d'API — curation manuelle des tableaux (comme
+  `data/mappings/hop_breeder_pedigree.yaml`), transcrite dans
+  `data/mappings/hopsteiner_thiol_species_2024.yaml`. LC-MS/MS sur 250 échantillons, 97
+  variétés, 12 pays, 5 millésimes (2019-2023).
+- **Seule source par variété trouvée** pour 3MH/4MMP/3M4MP individuellement — notre agrégat
+  `thiols` (BarthHaas) ne les distingue pas (T95).
+- **Deux écritures de nature différente, jamais confondues** :
+  - `hop_composition` (compound="4mmp"/"3mh"/"3m4mp", unit="ug_kg", 8 lignes réelles) : SEULEMENT
+    les valeurs record citées en toutes lettres dans le texte du papier (jamais une valeur lue
+    sur le graphique Fig. 2 du papier — voir CLAUDE.md T98). Le détail chiffré des tableaux 4-6
+    n'est PAS écrit ici : il est publié en seuils "n.d."/"<10"/">10 µg/kg" (">10" sans plafond
+    pour la quasi-totalité des entrées), aucun `vmax` défendable n'en découle.
+  - `hop_thiol_impact` (table dédiée, 63 lignes réelles) : la classification "low"/"medium"/
+    "high" propre du papier (résultat de leur raisonnement, pas une mesure brute), écrite avec
+    résolution par région quand notre catalogue porte plusieurs crops du même cultivar (ex.
+    Amarillo USA testé="high" appliqué uniquement à la ligne américaine, jamais à la ligne
+    allemande jamais testée par le papier) ; une variété testée avec des catégories divergentes
+    selon le pays ET dont notre catalogue n'a qu'une ligne générique (ex. Cascade) est sautée
+    plutôt qu'un choix arbitraire.
+- `ingest.ingest_hopsteiner_thiols` — voir sa docstring pour le détail complet de la logique de
+  correspondance variété/région.
+
 ## Côté note (ingrédient → molécules)
 
 **FooDB** — https://foodb.ca
