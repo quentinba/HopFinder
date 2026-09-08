@@ -1622,7 +1622,13 @@ def amplify_blend(con, note: str, w_mol: float = 0.5, w_desc: float = 0.5, use_o
 # à l'identique dans les deux modules (trouvé en revue de code, 2026-08-20),
 # à l'encontre du principe déjà suivi pour `CONTRAST_CORE_CATEGORIES`/
 # `AROMA_WHEEL_DEFINITIONS` : une seule définition ici, jamais recopiée.
-NON_AROMA_DISPLAY = {"total_oil", "alpha_acid", "beta_acid", "co_humulone"}
+# `colupulone` (T134, hops-comptoir) : même nature que `co_humulone` -- un
+# ratio de composition des acides bêta (`pct`), pas un composé d'arôme, donc
+# jamais de "Smells like"/"Process" fabriqué pour lui (aucune source ne les
+# documente) ; exclu de l'affichage générique au même titre que co_humulone,
+# sans promotion en `st.metric` dédié (pas de demande utilisateur en ce sens,
+# contrairement à co_humulone).
+NON_AROMA_DISPLAY = {"total_oil", "alpha_acid", "beta_acid", "co_humulone", "colupulone"}
 
 
 def by_descriptor(con, selected: list[str], wheel_descriptors: list[str] | None = None,

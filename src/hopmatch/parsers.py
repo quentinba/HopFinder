@@ -1106,3 +1106,168 @@ def parse_beer_analytics_hops_csv(text: str) -> list[dict]:
             if substitutes_raw else []
         out.append({"name": name, "alt_names": alt_names, "substitutes": substitutes})
     return out
+
+
+# --------------------------------------------------------------------------- #
+# hops-comptoir.com (Comptoir Agricole, Alsace) -- T134
+# --------------------------------------------------------------------------- #
+# label ("Technical features" table, colonne "name") -> (compound, unit).
+# Périmètre volontairement RESTREINT aux labels qui correspondent à un
+# composé unique et sans ambiguïté d'unité -- "Monoterpene"/"Sesquiterpene"
+# (agrégats de classe, pas un composé nommé) et "Humulene / Caryophyllene"
+# (un RATIO, pas une magnitude) sont délibérément ABSENTS de cette table :
+# ils n'ont simplement pas d'entrée ici, donc jamais rencontrés par
+# `parse_hops_comptoir_variety` -- pas une omission, un choix explicite
+# (aucune façon honnête de les faire tenir dans le schéma EAV vmin/vmax/unit
+# à un seul composé).
+#
+# ⚠ Unité RÉELLE différente de BarthHaas/Yakima pour linalool/farnésène/
+# géraniol : cette source les publie en **mg/100g de houblon** (masse
+# absolue), jamais en **% de l'huile totale** (`pct_oil`, convention
+# BarthHaas/Yakima pour ces mêmes composés) -- PAS interconvertible sans
+# supposer une densité d'huile (jamais fait, ce serait une inférence
+# silencieuse). D'où `unit="mg_100g"`, une valeur de `unit` NOUVELLE et
+# DISTINCTE de `pct_oil` -- `ingest.ingest_hops_comptoir` n'écrit ce
+# sous-groupe QUE pour des variétés sans aucune autre source de composition
+# (voir sa docstring : jamais mélangé par `matching.load` avec une mesure
+# BarthHaas/Yakima existante de la même variété/composé sous une autre
+# unité, ce qui produirait une moyenne dénuée de sens).
+#
+# "Coluplone" : coquille RÉELLE de la source (devrait être "Colupulone",
+# vérifiée identique sur Elixir ET Barbe Rouge -- pas une faute de frappe
+# isolée) -- notre clé interne reste orthographiée correctement.
+# Composé NOUVEAU pour ce projet (ni BarthHaas ni Yakima ne le publient).
+HOPS_COMPTOIR_LABELS = {
+    "Alpha acid": ("alpha_acid", "pct"),
+    "Beta acids": ("beta_acid", "pct"),
+    "Cohumulone": ("co_humulone", "pct"),
+    "Coluplone": ("colupulone", "pct"),
+    "Total Oil": ("total_oil", "ml_100g"),
+    "Myrcene": ("myrcene", "pct_oil"),
+    "Humulene": ("humulene", "pct_oil"),
+    "Linalool": ("linalool", "mg_100g"),
+    "Farnesene": ("farnesene", "mg_100g"),
+    "Geraniol": ("geraniol", "mg_100g"),
+}
+# unit -> catégorie d'unité BRUTE attendue dans le texte source (validation
+# croisée : si l'étiquette dit "pct_oil"/"pct" mais que le texte source ne
+# contient ni "%" ni "%AA", ou "mg_100g" sans "mg/100g", quelque chose a
+# changé côté source -- lever plutôt que d'écrire une valeur mal étiquetée).
+_HOPS_COMPTOIR_UNIT_CATEGORY = {"pct": "pct", "pct_oil": "pct", "ml_100g": "ml_100g",
+                                "mg_100g": "mg_100g"}
+
+
+def _parse_hops_comptoir_value(raw: str) -> tuple[float, float, str]:
+    """'5-7 %AA' -> (5.0, 7.0, 'pct') ; '6 mg/100g' -> (6.0, 6.0, 'mg_100g')
+    (valeur SEULE, pas de tiret -- vmin=vmax) ; '1.8-2.2 ml/100g' -> (1.8,
+    2.2, 'ml_100g').
+
+    Source HTML brute, PAS le texte "aplati label/valeur" de BarthHaas/
+    Yakima (`parse_range`) -- gabarit différent, coquilles réelles
+    observées EN DIRECT sur le site (espaces parasites à l'intérieur d'un
+    nombre : "42. 1-42.2 %", "10 - 15mg / 100g" -- vérifiées sur Elixir/
+    Barbe Rouge). Stratégie : détecter et retirer le SUFFIXE d'unité
+    D'ABORD (ancre fixe, jamais ambiguë), PUIS retirer tout espace du reste
+    (corrige "42. 1" -> "42.1" sans jamais toucher au SÉPARATEUR de plage,
+    qui reste le seul "-" restant), PUIS virgule décimale -> point.
+    Lève `ValueError` si le suffixe n'est pas reconnu ou si le reste ne
+    contient ni 1 ni 2 nombres -- jamais une valeur devinée."""
+    s = raw.strip()
+    unit_category = None
+    for pattern, category in (
+        (r"mg\s*/\s*100\s*g", "mg_100g"),
+        (r"ml\s*/\s*100\s*g", "ml_100g"),
+        (r"%\s*AA", "pct"),
+        (r"%", "pct"),
+    ):
+        if re.search(pattern, s, re.I):
+            unit_category = category
+            s = re.sub(pattern, "", s, flags=re.I)
+            break
+    if unit_category is None:
+        raise ValueError(f"hops-comptoir : unité non reconnue dans {raw!r}")
+    s = re.sub(r"\s+", "", s).replace(",", ".")
+    parts = [p for p in s.split("-") if p]
+    if len(parts) == 1:
+        v = float(parts[0])
+        return v, v, unit_category
+    if len(parts) == 2:
+        return float(parts[0]), float(parts[1]), unit_category
+    raise ValueError(f"hops-comptoir : plage numérique illisible dans {raw!r} (jetons {parts})")
+
+
+_HOPS_COMPTOIR_TABLE_HEADER_RE = re.compile(r'<div class="table-header">([^<]+)</div>')
+_HOPS_COMPTOIR_ROW_RE = re.compile(r'<td class="name">([^<]+)</td><td>([^<]+)</td>')
+_HOPS_COMPTOIR_CATEGORY_RE = re.compile(r'class="name"[^>]*>\s*([^<]+?)\s*</h3>')
+
+
+def parse_hops_comptoir_variety(html: str) -> dict | None:
+    """Page catégorie hops-comptoir.com (une par variété, ex. `/61-elixir`)
+    -> `{"name": "Elixir", "compounds": {"alpha_acid": (5.0, 7.0, "pct"),
+    ...}, "categories": ["Spiced", "Citrus Fruit", "Floral", "Woody"]}`.
+
+    Renvoie `None` si la page n'a AUCUNE section "Technical features" --
+    pas une erreur : vérifié en direct que P15-6/Teorem (2 des 5 variétés
+    françaises absentes de notre catalogue) n'ont tout simplement AUCUNE
+    donnée publiée sur ce site (page catégorie vide, listing produit
+    incohérent) -- l'appelant doit traiter ce cas comme « rien à ingérer
+    pour cette variété », jamais une composition fabriquée.
+
+    `compounds` : SEULEMENT les labels de `HOPS_COMPTOIR_LABELS` -- un
+    label absent de cette table (agrégat de classe, ratio, ou composé hors
+    périmètre) est silencieusement ignoré, jamais une entrée devinée.
+    `categories` : noms de catégorie BRUTS (ex. "Citrus Fruit") -- résolution
+    vers le vocabulaire réel `hop_descriptors` faite par l'appelant via
+    `data/mappings/hops_comptoir_categories.yaml`, jamais par ce parseur
+    (même séparation que partout ailleurs dans ce fichier)."""
+    m = _HOPS_COMPTOIR_TABLE_HEADER_RE.search(html)
+    if not m:
+        return None
+    name = m.group(1).strip()
+    compounds: dict[str, tuple] = {}
+    for label, raw_value in _HOPS_COMPTOIR_ROW_RE.findall(html):
+        label = label.strip()
+        if label not in HOPS_COMPTOIR_LABELS:
+            continue
+        compound, unit = HOPS_COMPTOIR_LABELS[label]
+        vmin, vmax, raw_category = _parse_hops_comptoir_value(raw_value)
+        expected = _HOPS_COMPTOIR_UNIT_CATEGORY[unit]
+        if raw_category != expected:
+            raise ValueError(
+                f"hops-comptoir {name!r}/{label!r} : attendu une unité {expected!r}, "
+                f"trouvé {raw_category!r} dans {raw_value!r}")
+        compounds[compound] = (vmin, vmax, unit)
+    categories = [c.strip() for c in _HOPS_COMPTOIR_CATEGORY_RE.findall(html)]
+    return {"name": name, "compounds": compounds, "categories": categories}
+
+
+_HOPS_COMPTOIR_OUR_HOPS_SECTION_RE = re.compile(r"Our Hops</a><ul>(.*?)</ul>", re.S)
+_HOPS_COMPTOIR_NAV_LINK_RE = re.compile(r'href="https://www\.hops-comptoir\.com/([^"]+)"')
+
+
+def parse_hops_comptoir_our_hops_paths(html: str) -> list[str]:
+    """Chemins d'URL (ex. "61-elixir") listés sous "Our Hops" dans la nav
+    latérale -- présente TELLE QUELLE sur CHAQUE page du site (vérifié en
+    direct sur plusieurs pages différentes), donc utilisable depuis
+    n'importe quelle page déjà fetchée, pas seulement l'index dédié.
+
+    **Pourquoi c'est nécessaire** : Comptoir Agricole cultive lui-même les
+    variétés "Our Hops" (15, Alsace) mais REVEND aussi des variétés
+    internationales sous "Hops of the world" (17, ex. "Cascade USA",
+    "Sabro USA") -- ces dernières sont déjà dans notre catalogue sous un
+    nom LÉGÈREMENT différent (notre "cascade" vs leur "Cascade USA") : une
+    résolution par nom seul les traiterait à tort comme des variétés
+    NOUVELLES (bug réel trouvé en direct lors du premier crawl complet,
+    2026-09-08 -- "Cascade USA"/"cascade-usa" créée comme houblon distinct
+    alors qu'il s'agit très probablement du même Cascade américain déjà en
+    base, juste revendu). `ingest.ingest_hops_comptoir` ne crée un houblon
+    NOUVEAU QUE pour un chemin présent dans cette liste -- jamais pour une
+    page "Hops of the world", même sans correspondance de clé.
+
+    Renvoie `[]` si la section est absente (page sans cette nav -- ne
+    devrait pas arriver sur ce site, mais jamais une liste fabriquée à sa
+    place)."""
+    m = _HOPS_COMPTOIR_OUR_HOPS_SECTION_RE.search(html)
+    if not m:
+        return []
+    return _HOPS_COMPTOIR_NAV_LINK_RE.findall(m.group(1))

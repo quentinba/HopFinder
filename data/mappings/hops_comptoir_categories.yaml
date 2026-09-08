@@ -1,0 +1,32 @@
+# Catégories d'arôme hops-comptoir.com -> vocabulaire réel `hop_descriptors`
+# (138 termes, même discipline que barthhaas_descriptor_aliases.yaml/
+# BeerMaverick T79 -- jamais un mot inventé, jamais un dérivé automatique).
+#
+# T134 (2026-09-08). Chaque page catégorie de variété liste 2-4 "familles
+# aromatiques" (ex. "Citrus Fruit", "Spiced") tirées d'un vocabulaire FIXE
+# de 8 catégories au total (vu sur le plan de site : Spiced, Citrus Fruit,
+# Green Herbaceous, Red Berries, Floral, Sweet Fruits, Woody, Caramel).
+# Chaque catégorie porte AUSSI une liste de mots courts ("Citrus Fruit" ->
+# "Kumquat, orange, lime, grapefruit") -- vérifié en direct que cette liste
+# est IDENTIQUE pour Elixir/Mistral/Barbe Rouge malgré des variétés très
+# différentes : c'est une LÉGENDE fixe de ce que la catégorie signifie sur
+# tout le site, PAS une observation spécifique à la variété. Utiliser ces
+# mots comme descripteurs par variété surstaterait notre précision réelle
+# (on sait seulement "cette variété est dans la famille Citrus Fruit", pas
+# "cette variété sent spécifiquement le kumquat ET l'orange ET la lime ET
+# le pamplemousse") -- seule l'étiquette de CATÉGORIE est mappée ici,
+# jamais les mots de la légende.
+#
+# Revu à la main contre les 3 variétés réellement couvertes par cette
+# source (Elixir, Mistral, Barbe Rouge) -- 7 des 8 catégories observées
+# ("Caramel" jamais vue sur ces 3 pages, mappée par avance pour rester
+# cohérente si une future variété française l'utilise, jamais vérifiée
+# empiriquement à ce jour).
+"Citrus Fruit": "citrus"
+"Floral": "floral"
+"Woody": "woody"
+"Spiced": "spicy"
+"Sweet Fruits": "fruity"
+"Green Herbaceous": "herbal"
+"Red Berries": "redberry"
+"Caramel": "caramel"

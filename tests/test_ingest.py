@@ -1719,6 +1719,221 @@ def test_ingest_beer_analytics_substitutes_is_idempotent(tmp_path):
     assert n == 2  # Cascade + Unknown Hop XYZ, pas de doublon
 
 
+# --------------------------------------------------------------------------- #
+# T134 -- hops-comptoir.com (Comptoir Agricole, Alsace)
+# --------------------------------------------------------------------------- #
+_HC_SITEMAP_FIXTURE = (
+    "<?xml version=\"1.0\"?><urlset><url><loc><![CDATA["
+    "https://www.hops-comptoir.com/61-elixir]]></loc></url>"
+    "<url><loc><![CDATA[https://www.hops-comptoir.com/6-hop-aramis-alsace]]></loc></url>"
+    "<url><loc><![CDATA[https://www.hops-comptoir.com/44-online-sales]]></loc></url>"
+    "</urlset>")
+
+# Nav "Our Hops" -- site-wide, présente sur CHAQUE page réelle (T134,
+# vérifié en direct) : Elixir et Aramis y figurent, "Cascade USA" (revendu,
+# "Hops of the world") en est délibérément absent.
+_HC_OUR_HOPS_NAV = (
+    '<a href="https://www.hops-comptoir.com/5-our-alsace-hops">Our Hops</a><ul>'
+    '<li> <a class="" href="https://www.hops-comptoir.com/6-hop-aramis-alsace">Aramis</a></li>'
+    '<li> <a class="" href="https://www.hops-comptoir.com/61-elixir">Elixir</a></li>'
+    '</ul>'
+    '<a href="https://www.hops-comptoir.com/51-hops-of-the-world">Hops of the world</a><ul>'
+    '<li> <a class="" href="https://www.hops-comptoir.com/60-cascade-usa">Cascade USA</a></li>'
+    '</ul>'
+)
+
+_HC_ELIXIR_PAGE = (
+    _HC_OUR_HOPS_NAV +
+    '<div class="table-header"> Elixir</div><table><tbody>'
+    '<tr><td class="name">Alpha acid</td><td>5-7 %AA</td></tr>'
+    '<tr><td class="name">Myrcene</td><td>70-75 %</td></tr>'
+    '<tr><td class="name">Linalool</td><td>6 mg/100g</td></tr>'
+    '</tbody></table>'
+    '<h3 class="name"> Citrus Fruit</h3><p class="features"> Kumquat, orange</p>'
+    '<h3 class="name"> Unmapped Category</h3><p class="features"> whatever</p>'
+)
+
+# Aramis EXISTE DÉJÀ dans notre catalogue (BarthHaas/Yakima) -- doit être
+# sauté pour la composition malgré une vraie table technique sur cette page
+# (garde-fou anti-mélange d'unité, coeur du ticket).
+_HC_ARAMIS_PAGE = (
+    _HC_OUR_HOPS_NAV +
+    '<div class="table-header"> Aramis</div><table><tbody>'
+    '<tr><td class="name">Alpha acid</td><td>7-9 %AA</td></tr>'
+    '</tbody></table>')
+
+# "Cascade USA" : REVENDU ("Hops of the world"), pas cultivé par Comptoir
+# Agricole -- une vraie table technique mais AUCUNE clé correspondante
+# exacte dans notre catalogue ("cascade" existe, "cascade-usa" non) --
+# doit être sauté pour la CRÉATION malgré ça (bug réel du 1er crawl complet).
+_HC_CASCADE_USA_PAGE = (
+    _HC_OUR_HOPS_NAV +
+    '<div class="table-header"> Cascade USA</div><table><tbody>'
+    '<tr><td class="name">Alpha acid</td><td>6.5-8.5 %</td></tr>'
+    '</tbody></table>')
+
+_HC_NO_TABLE_PAGE = "<div>No products in this category yet.</div>"
+
+_HC_FIXTURES = {
+    "/2_en_0_sitemap.xml": _HC_SITEMAP_FIXTURE,
+    "/61-elixir": _HC_ELIXIR_PAGE,
+    "/6-hop-aramis-alsace": _HC_ARAMIS_PAGE,
+    "/44-online-sales": _HC_NO_TABLE_PAGE,
+}
+
+def _mock_hops_comptoir_fetch(monkeypatch):
+    monkeypatch.setattr(ingest, "_hops_comptoir_fetch", lambda path, **kw: _HC_FIXTURES[path])
+
+def test_ingest_hops_comptoir_creates_new_variety_with_composition(tmp_path, monkeypatch):
+    _mock_hops_comptoir_fetch(monkeypatch)
+    db_path = str(tmp_path / "t.db")
+    ingest.ingest_hops_comptoir(db_path)
+
+    con = connect(db_path)
+    hop = con.execute("SELECT * FROM hops WHERE variety='elixir'").fetchone()
+    comp = {r["compound"]: dict(r) for r in con.execute(
+        "SELECT * FROM hop_composition WHERE variety='elixir'")}
+    con.close()
+    assert hop["name"] == "Elixir"
+    assert hop["region"] == "France"
+    assert hop["sources"] == "hops-comptoir"
+    assert comp["alpha_acid"]["unit"] == "pct"
+    assert comp["alpha_acid"]["vmin"] == 5.0 and comp["alpha_acid"]["vmax"] == 7.0
+    assert comp["myrcene"]["unit"] == "pct_oil"
+
+def test_ingest_hops_comptoir_writes_mg_100g_compounds_directly(tmp_path, monkeypatch):
+    # linalol : unité mg_100g DIFFÉRENTE de pct_oil -- toujours écrite, mais
+    # jamais passée par le contrôle de somme des 5 grands terpènes
+    # (validate_and_repair), qui suppose implicitement du pct_oil partout.
+    _mock_hops_comptoir_fetch(monkeypatch)
+    db_path = str(tmp_path / "t.db")
+    ingest.ingest_hops_comptoir(db_path)
+
+    con = connect(db_path)
+    linalool = con.execute(
+        "SELECT * FROM hop_composition WHERE variety='elixir' AND compound='linalool'").fetchone()
+    con.close()
+    assert linalool["unit"] == "mg_100g"
+    assert linalool["vmin"] == 6.0 and linalool["vmax"] == 6.0
+    assert linalool["confidence"] == "ok"
+
+def test_ingest_hops_comptoir_skips_composition_for_already_known_variety(tmp_path, monkeypatch):
+    # Coeur du garde-fou du ticket : Aramis existe déjà (BarthHaas/Yakima) --
+    # ne JAMAIS écrire de composition hops-comptoir par-dessus (unité
+    # mg_100g incompatible avec le pct_oil déjà en base pour ce composé).
+    _mock_hops_comptoir_fetch(monkeypatch)
+    db_path = str(tmp_path / "t.db")
+    con = connect(db_path); init_db(con)
+    con.execute("INSERT INTO hops (variety, name, region, sources, purpose) "
+               "VALUES ('aramis', 'Aramis', 'France', 'barthhaas', NULL)")
+    con.commit(); con.close()
+
+    ingest.ingest_hops_comptoir(db_path)
+
+    con = connect(db_path)
+    n = con.execute(
+        "SELECT COUNT(*) FROM hop_composition WHERE variety='aramis' "
+        "AND source='hops-comptoir'").fetchone()[0]
+    sources = con.execute("SELECT sources FROM hops WHERE variety='aramis'").fetchone()[0]
+    con.close()
+    assert n == 0
+    # `sources` de la ligne `hops` existante inchangée -- jamais "fusionnée"
+    # avec hops-comptoir pour une variété volontairement sautée.
+    assert sources == "barthhaas"
+
+def test_ingest_hops_comptoir_skips_page_without_technical_features(tmp_path, monkeypatch):
+    # P15-6/Teorem, vérifié en direct : page catégorie sans table technique
+    # -- jamais un houblon fabriqué à partir de rien. Sur une base VIDE,
+    # Elixir ET Aramis (aucun des deux "déjà connu" ici) sont tous deux
+    # créés -- seule la page "online-sales" (sans table) doit être sautée.
+    _mock_hops_comptoir_fetch(monkeypatch)
+    db_path = str(tmp_path / "t.db")
+    ingest.ingest_hops_comptoir(db_path)
+
+    con = connect(db_path)
+    n = con.execute("SELECT COUNT(*) FROM hops").fetchone()[0]
+    con.close()
+    assert n == 2  # Elixir + Aramis -- page online-sales sautée (pas de table)
+
+def test_ingest_hops_comptoir_resolves_descriptors_via_category_map(tmp_path, monkeypatch):
+    _mock_hops_comptoir_fetch(monkeypatch)
+    db_path = str(tmp_path / "t.db")
+    ingest.ingest_hops_comptoir(db_path)
+
+    con = connect(db_path)
+    descriptors = {r[0] for r in con.execute(
+        "SELECT descriptor FROM hop_descriptors WHERE variety='elixir'")}
+    con.close()
+    assert descriptors == {"citrus"}  # "Unmapped Category" n'a pas d'entrée -> jamais écrite
+
+def test_ingest_hops_comptoir_is_idempotent(tmp_path, monkeypatch):
+    _mock_hops_comptoir_fetch(monkeypatch)
+    db_path = str(tmp_path / "t.db")
+    ingest.ingest_hops_comptoir(db_path)
+    ingest.ingest_hops_comptoir(db_path)
+
+    con = connect(db_path)
+    n_hops = con.execute("SELECT COUNT(*) FROM hops WHERE variety='elixir'").fetchone()[0]
+    n_comp = con.execute(
+        "SELECT COUNT(*) FROM hop_composition WHERE variety='elixir'").fetchone()[0]
+    con.close()
+    assert n_hops == 1
+    assert n_comp == 3  # alpha_acid + myrcene + linalool, pas de doublon
+
+def test_ingest_hops_comptoir_one_malformed_page_never_aborts_the_crawl(tmp_path, monkeypatch):
+    # Ella, vérifié en direct (2026-09-08) : "Cohumulone" sans AUCUN suffixe
+    # d'unité ("36-45" au lieu de "36-45 %") -- une page en erreur de format
+    # ne doit jamais faire échouer les autres pages, comptée/journalisée
+    # plutôt que silencieuse.
+    fixtures = dict(_HC_FIXTURES)
+    fixtures["/2_en_0_sitemap.xml"] = (
+        "<?xml version=\"1.0\"?><urlset>"
+        "<url><loc><![CDATA[https://www.hops-comptoir.com/61-elixir]]></loc></url>"
+        "<url><loc><![CDATA[https://www.hops-comptoir.com/59-houblon-ella]]></loc></url>"
+        "</urlset>")
+    fixtures["/59-houblon-ella"] = (
+        '<div class="table-header"> Ella</div><table><tbody>'
+        '<tr><td class="name">Cohumulone</td><td>36-45</td></tr>'
+        '</tbody></table>')
+    monkeypatch.setattr(ingest, "_hops_comptoir_fetch", lambda path, **kw: fixtures[path])
+
+    db_path = str(tmp_path / "t.db")
+    ingest.ingest_hops_comptoir(db_path)
+
+    con = connect(db_path)
+    elixir = con.execute("SELECT 1 FROM hops WHERE variety='elixir'").fetchone()
+    ella = con.execute("SELECT 1 FROM hops WHERE variety='ella'").fetchone()
+    con.close()
+    assert elixir is not None  # traitée normalement malgré l'échec de la page suivante
+    assert ella is None  # jamais créée à partir d'une valeur illisible
+
+def test_ingest_hops_comptoir_never_creates_a_resold_hops_of_the_world_variety(tmp_path, monkeypatch):
+    # Coeur du garde-fou (bug réel trouvé au 1er crawl complet, 2026-09-08) :
+    # "Cascade USA" a une vraie table technique ET aucune clé correspondante
+    # exacte ("cascade" existe, "cascade-usa" non) -- sans la liste "Our
+    # Hops", elle aurait été (mal) créée comme houblon nouveau. "Hops of the
+    # world" = revendu, jamais cultivé par eux -- jamais de création, table
+    # technique ou pas.
+    fixtures = dict(_HC_FIXTURES)
+    fixtures["/2_en_0_sitemap.xml"] = (
+        "<?xml version=\"1.0\"?><urlset>"
+        "<url><loc><![CDATA[https://www.hops-comptoir.com/61-elixir]]></loc></url>"
+        "<url><loc><![CDATA[https://www.hops-comptoir.com/60-cascade-usa]]></loc></url>"
+        "</urlset>")
+    fixtures["/60-cascade-usa"] = _HC_CASCADE_USA_PAGE
+    monkeypatch.setattr(ingest, "_hops_comptoir_fetch", lambda path, **kw: fixtures[path])
+
+    db_path = str(tmp_path / "t.db")
+    ingest.ingest_hops_comptoir(db_path)
+
+    con = connect(db_path)
+    elixir = con.execute("SELECT 1 FROM hops WHERE variety='elixir'").fetchone()
+    cascade_usa = con.execute("SELECT 1 FROM hops WHERE variety='cascade-usa'").fetchone()
+    con.close()
+    assert elixir is not None  # "Our Hops" -- créée normalement
+    assert cascade_usa is None  # "Hops of the world" -- jamais créée
+
+
 def test_reconcile_mmum_hop_varieties_writes_variety_and_product_form(tmp_path, monkeypatch):
     aroma_path = str(tmp_path / "aromahops.db")
     con = connect(aroma_path)

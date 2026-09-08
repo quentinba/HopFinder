@@ -208,6 +208,13 @@ def main(argv=None):
                               "hops.csv, colonne substitutes) dans hop_substitutions -- T109")
     bas.add_argument("--db", default=DEFAULT_DB)
 
+    hc = sub.add_parser("ingest-hops-comptoir",
+                        help="hops-comptoir.com (Comptoir Agricole, Alsace) -- variétés "
+                             "françaises absentes du catalogue (Elixir, Mistral...) -- T134")
+    hc.add_argument("--db", default=DEFAULT_DB)
+    hc.add_argument("--sleep", type=float, default=1.0)
+    hc.add_argument("--limit", type=int)
+
     msr = sub.add_parser("reconcile-mmum-styles",
                          help="résout recipes.style_raw -> style_id BJCP dans recipes.db "
                               "(data/mappings/beer_style_aliases.yaml) -- T94")
@@ -323,6 +330,8 @@ def main(argv=None):
         ingest.reconcile_mmum_hop_varieties(a.recipes_db, aroma_db=a.db); return 0
     if a.cmd == "ingest-beer-analytics-substitutes":
         ingest.ingest_beer_analytics_substitutes(a.db); return 0
+    if a.cmd == "ingest-hops-comptoir":
+        ingest.ingest_hops_comptoir(a.db, sleep=a.sleep, limit=a.limit); return 0
     if a.cmd == "reconcile-mmum-styles":
         ingest.reconcile_mmum_style_ids(a.recipes_db); return 0
     if a.cmd == "compute-hop-combinations":

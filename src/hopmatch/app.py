@@ -239,6 +239,14 @@ _TOOL_SUMMARY_BY_MODE = {t["mode"]: t for t in _TOOL_SUMMARIES}
 # un `git log` en direct exigerait aussi que `.git` soit présent dans le
 # conteneur déployé, ce qui n'est pas garanti.
 _RECENT_UPDATES = [
+    ("2026-09-08", "5 new hop varieties from hops-comptoir.com (Comptoir "
+                   "Agricole): Elixir, Mistral, Barbe Rouge (self-grown in "
+                   "Alsace, no other source covers them), plus Fuggle and "
+                   "Tradition grown as distinct Alsace crops alongside the "
+                   "existing British/German entries of those names -- 192 "
+                   "hops total now. Resold varieties from the same site's "
+                   "\"Hops of the world\" section are never used to create a "
+                   "new hop, only to add data to an existing one."),
     ("2026-09-08", "Browse a hop's \"Suggested substitutions\" card now has "
                    "a second editorial source (beer-analytics.com), shown "
                    "separately from BeerMaverick -- never merged, since two "

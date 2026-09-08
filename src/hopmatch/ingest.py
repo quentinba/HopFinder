@@ -2586,6 +2586,205 @@ def ingest_beer_analytics_substitutes(out_db: str, hops_csv_path: str | None = N
          f"{n_rows} lignes écrites")
 
 
+# --------------------------------------------------------------------------- #
+# hops-comptoir.com (Comptoir Agricole, Alsace) -- T134
+# --------------------------------------------------------------------------- #
+HOPS_COMPTOIR_BASE = "https://www.hops-comptoir.com"
+HOPS_COMPTOIR_SITEMAP_PATH = "/2_en_0_sitemap.xml"
+HOPS_COMPTOIR_CACHE_DIR = "data/cache/hops_comptoir"
+# Page CATÉGORIE (une par variété OU par rubrique non-houblon -- promotions,
+# accessoires, épices... -- filtrées à la lecture par l'ABSENCE de tableau
+# "Technical features", jamais par le slug seul : le site n'a pas de
+# convention de nommage assez régulière pour les distinguer par motif).
+_HOPS_COMPTOIR_CATEGORY_URL_RE = re.compile(
+    r"https://www\.hops-comptoir\.com/(\d+-[a-z0-9-]+)(?=\]\]|<)")
+
+
+def _hops_comptoir_fetch(path: str, cache_dir: str = HOPS_COMPTOIR_CACHE_DIR,
+                         timeout: float = 30.0, sleep: float = 1.0) -> str:
+    """Même patron que `_beer_analytics_fetch` (cache disque, écriture
+    atomique, `User-Agent` identifiable) -- site nettement plus petit
+    (PrestaShop, ~46 pages catégorie au total), aucune fragilité réseau
+    rencontrée en investiguant ce ticket (`curl` simple suffit, pas de
+    rempart anti-bot)."""
+    import tempfile
+    import time
+
+    import requests
+
+    os.makedirs(cache_dir, exist_ok=True)
+    cache_path = os.path.join(cache_dir, re.sub(r"[^a-zA-Z0-9_-]", "_", path.strip("/")) + ".html")
+    if os.path.exists(cache_path):
+        with open(cache_path, encoding="utf-8") as f:
+            return f.read()
+    resp = requests.get(HOPS_COMPTOIR_BASE + path, timeout=timeout,
+                        headers={"User-Agent": "hopmatch/0.1 (research)"})
+    resp.raise_for_status()
+    text = resp.text
+    fd, tmp_path = tempfile.mkstemp(dir=cache_dir)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(tmp_path, cache_path)
+    except BaseException:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        raise
+    time.sleep(sleep)
+    return text
+
+
+def ingest_hops_comptoir(out_db: str, sleep: float = 1.0, timeout: float = 30.0,
+                         limit: int | None = None) -> None:
+    """T134 : hops-comptoir.com (Comptoir Agricole, le VRAI producteur
+    alsacien derrière plusieurs variétés françaises -- pas un revendeur,
+    source équivalente en nature à BarthHaas/Yakima) comme source de
+    composition -- découvert en creusant un signalement utilisateur en
+    direct ("Elixir absent de la base").
+
+    ⚠ **N'écrit de composition QUE pour les variétés qui n'existent PAS
+    DÉJÀ dans `hops`** -- une variété déjà connue (BarthHaas/Yakima, ex.
+    Cascade/Aramis/Strisselspalt...) est comptée mais SAUTÉE, jamais
+    fusionnée : cette source publie linalol/farnésène/géraniol en **mg/100g
+    de houblon** (`parsers.HOPS_COMPTOIR_LABELS`), une unité DIFFÉRENTE de
+    la convention `pct_oil` (% de l'huile totale) déjà utilisée par
+    BarthHaas/Yakima pour ces mêmes composés -- `matching.load()` MOYENNE
+    les mesures d'un même (variété, composé) sans jamais vérifier que
+    l'unité concorde (vérifié en lisant son code pendant ce ticket).
+    Mélanger les deux unités pour une variété déjà couverte corromprait
+    silencieusement un score déjà utilisé par amplify/contrast. Aucun
+    risque pour une variété SANS AUCUNE autre mesure (rien à moyenner avec)
+    -- c'est le seul cas traité ici. Étendre à la réconciliation des
+    variétés déjà connues (ex. Aramis/Strisselspalt/Triskel, mesurées ici
+    aussi) est un ticket de suivi distinct, pas ce ticket.
+
+    ⚠ **N'autorise la CRÉATION d'un houblon NOUVEAU que pour une page
+    listée sous "Our Hops"** (`parsers.parse_hops_comptoir_our_hops_paths`)
+    -- **bug réel trouvé en direct au premier crawl complet (2026-09-08)** :
+    "Cascade USA" (page "Hops of the world", REVENDU par Comptoir Agricole,
+    pas cultivé) n'a pas de correspondance de clé exacte avec notre
+    "cascade" existant (résolution par nom seul aurait créé un doublon
+    quasi certain du MÊME Cascade américain déjà en base, juste sous un
+    nom différent) -- sans preuve que "Hops of the world" désigne un
+    terroir réellement distinct (à l'inverse de "Our Hops" : Comptoir
+    Agricole cultive lui-même CES variétés-là en Alsace, un vrai terroir
+    différent des crops déjà en base -- même principe que la
+    désambiguïsation Amarillo US/Allemagne déjà établie ailleurs dans ce
+    projet), créer un houblon "Hops of the world" serait fabriquer une
+    distinction de crop non vérifiée. Une page "Hops of the world" reste
+    donc TOUJOURS ignorée pour la création, qu'elle ait une table
+    technique ou non, qu'une clé corresponde ou non.
+
+    Énumère TOUTES les pages catégorie du sitemap (~46, mélange variétés
+    françaises/revendues + pages non-houblon) plutôt qu'une liste figée :
+    `parsers.parse_hops_comptoir_variety` renvoie `None` pour toute page
+    sans section "Technical features" -- non-houblon, OU variété
+    réellement sans données publiées (vérifié en direct : P15-6/Teorem, 2
+    des 5 variétés "Our Hops" absentes de notre catalogue au moment de ce
+    ticket, n'ont RIEN de publié sur ce site -- page catégorie vide,
+    listing produit incohérent) -- sautée proprement, jamais une
+    composition fabriquée.
+
+    Nouvelle variété : `variety` dérivé du NOM affiché (`_normalize_hop_
+    key`, même convention que le reste du catalogue), PAS du slug d'URL
+    (`61-elixir`, `29-hop-barbe-rouge-alsace` -- porte un id numérique et
+    un habillage "-alsace" incohérent d'une page "Our Hops" à l'autre, sans
+    rapport avec notre clé interne). `region` toujours "France" (Alsace),
+    même convention que les variétés françaises déjà en base (Aramis/
+    Strisselspalt/Triskel) -- y compris pour une variété "Our Hops" dont le
+    NOM coïncide avec un houblon déjà connu sous une autre région (ex.
+    "Fuggle"/"Tradition", vérifiés en direct comme RÉELLEMENT cultivés en
+    Alsace par Comptoir Agricole, donc un terroir distinct du "Fuggle"
+    britannique/"Hallertauer Tradition" allemand déjà en base -- créés
+    comme houblons SÉPARÉS, désambiguïsés par région à l'affichage comme
+    n'importe quelle autre paire de crops distincts).
+
+    Composés en `pct`/`pct_oil`/`ml_100g` passés par `_ingest_variety`
+    (validation/réparation standard -- sûre ici : jamais 3 des 5 grands
+    terpènes du contrôle de somme de `schema.validate_and_repair` réunis
+    pour cette source, humulène/myrcène seuls au mieux). Composés en
+    `mg_100g` (linalol/farnésène/géraniol) insérés DIRECTEMENT, hors de ce
+    contrôle qui suppose implicitement une base `pct_oil` uniforme --
+    inapplicable ici, confidence='ok' (mesure propre d'une seule source,
+    rien à réconcilier).
+
+    Descripteurs : catégories brutes ("Citrus Fruit"...) résolues via
+    `data/mappings/hops_comptoir_categories.yaml` -- jamais les mots de la
+    légende associée à chaque catégorie (identiques d'une variété à
+    l'autre sur ce site, voir ce fichier -- une légende de catégorie n'est
+    pas une observation spécifique à la variété)."""
+    from .schema import connect
+
+    con = connect(out_db)
+    if not con.execute("SELECT name FROM sqlite_master WHERE name='hops'").fetchone():
+        init_db(con); seed_reference(con); con.commit()
+    category_map = _load_yaml_mapping("hops_comptoir_categories.yaml")
+
+    sitemap = _hops_comptoir_fetch(HOPS_COMPTOIR_SITEMAP_PATH, sleep=sleep, timeout=timeout)
+    paths = sorted(set(_HOPS_COMPTOIR_CATEGORY_URL_RE.findall(sitemap)))
+    if limit:
+        paths = paths[:limit]
+    print(f"hops-comptoir : {len(paths)} pages catégorie (sitemap)")
+
+    our_hops_paths: set[str] = set()
+    n_pages_with_table = n_new_varieties = n_already_known_skipped = n_resold_skipped = 0
+    n_compound_rows = n_descriptor_rows = n_parse_errors = 0
+    for path in paths:
+        try:
+            html = _hops_comptoir_fetch(f"/{path}", sleep=sleep, timeout=timeout)
+        except Exception as e:  # noqa
+            print(f"  !! {path}: {e}"); continue
+        # Nav "Our Hops" présente sur CHAQUE page (site-wide) -- extraite
+        # une seule fois, dès la première page qui la porte.
+        if not our_hops_paths:
+            our_hops_paths = set(parsers.parse_hops_comptoir_our_hops_paths(html))
+        try:
+            parsed = parsers.parse_hops_comptoir_variety(html)
+        except ValueError as e:
+            # Format inattendu sur CETTE page précise (ex. Ella : "Cohumulone"
+            # sans suffixe d'unité du tout, "36-45" au lieu de "36-45 %",
+            # vérifié en direct 2026-09-08) -- ne doit jamais faire échouer
+            # tout le crawl pour une seule page, souvent déjà hors périmètre
+            # (variété connue et/ou revendue, sautée de toute façon).
+            n_parse_errors += 1
+            print(f"  !! {path}: {e}"); continue
+        if parsed is None or not parsed["compounds"]:
+            continue
+        n_pages_with_table += 1
+        if path not in our_hops_paths:
+            # "Hops of the world" (revendu, pas cultivé par eux) -- jamais
+            # de houblon créé, voir la réserve en tête de docstring.
+            n_resold_skipped += 1
+            continue
+        name = parsed["name"]
+        variety = _normalize_hop_key(name)
+        if con.execute("SELECT 1 FROM hops WHERE variety=?", (variety,)).fetchone():
+            n_already_known_skipped += 1
+            continue
+        n_new_varieties += 1
+
+        pct_compounds = {c: v for c, v in parsed["compounds"].items()
+                         if v[2] in ("pct", "pct_oil", "ml_100g")}
+        mg_compounds = {c: v for c, v in parsed["compounds"].items() if v[2] == "mg_100g"}
+        descriptors = sorted({category_map[cat] for cat in parsed["categories"]
+                              if category_map.get(cat)})
+        _ingest_variety(con, variety, name, "France", pct_compounds, descriptors, "hops-comptoir")
+        n_compound_rows += len(pct_compounds)
+        n_descriptor_rows += len(descriptors)
+        for compound, (vmin, vmax, unit) in mg_compounds.items():
+            con.execute(
+                "INSERT OR REPLACE INTO hop_composition VALUES (?,?,?,?,?,?,?,?)",
+                (variety, compound, vmin, vmax, unit, "hops-comptoir", "ok", ""))
+            n_compound_rows += 1
+    con.commit(); con.close()
+    print(f"  {n_pages_with_table} pages avec tableau technique, {n_new_varieties} nouvelles "
+         f"variétés créées, {n_already_known_skipped} variétés déjà connues sautées "
+         f"(composition jamais fusionnée -- unité mg_100g incompatible), "
+         f"{n_resold_skipped} pages 'Hops of the world' (revendues) jamais créées, "
+         f"{n_parse_errors} pages en erreur de format, "
+         f"{n_compound_rows} lignes de composition, {n_descriptor_rows} descripteurs écrits")
+
+
 def reconcile_mmum_hop_varieties(recipes_db: str = "recipes.db", aroma_db: str = "aromahops.db",
                                  hops_csv_path: str | None = None) -> None:
     """T92 : résout `recipe_hops.hop_name` (brut, MMuM) -> `variety` (notre

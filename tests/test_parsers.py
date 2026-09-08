@@ -850,3 +850,133 @@ def test_parse_beer_analytics_hops_csv_empty_substitutes_give_empty_list():
     rows = parsers.parse_beer_analytics_hops_csv(_BA_HOPS_CSV_SAMPLE)
     solero = next(r for r in rows if r["name"] == "Solero")
     assert solero["substitutes"] == []
+
+
+# --------------------------------------------------------------------------- #
+# hops-comptoir.com -- fiche variété (T134)
+# --------------------------------------------------------------------------- #
+# Gabarit trimmé d'une vraie page catégorie (Elixir, vérifié en direct
+# 2026-09-08) -- coquille RÉELLE de la source conservée ("Coluplone", sans
+# "u"), agrégats de classe (Monoterpene/Sesquiterpene) et ratio (Humulene /
+# Caryophyllene) volontairement absents (hors périmètre de HOPS_COMPTOIR_LABELS).
+_HC_ELIXIR_HTML = (
+    '<div class="table-header"> Elixir</div><table><tbody>'
+    '<tr><td class="name">Alpha acid</td><td>5-7 %AA</td></tr>'
+    '<tr><td class="name">Cohumulone</td><td>25-30 %</td></tr>'
+    '<tr><td class="name">Beta acids</td><td>4.5-5.5 %</td></tr>'
+    '<tr><td class="name">Coluplone</td><td>35-40 %</td></tr>'
+    '<tr><td class="name">Total Oil</td><td>1.8-2.2 ml/100g</td></tr>'
+    '<tr><td class="name">Myrcene</td><td>70-75 %</td></tr>'
+    '<tr><td class="name">Monoterpene</td><td>800-900 mg/100g</td></tr>'
+    '<tr><td class="name">Linalool</td><td>6 mg/100g</td></tr>'
+    '<tr><td class="name">Farnesene</td><td>150-200 mg/100g</td></tr>'
+    '<tr><td class="name">Geraniol</td><td>5-10 mg/100g</td></tr>'
+    '</tbody></table>'
+    '<h3 class="name" style="background-color:#92f1ff"> Spiced</h3>'
+    '<p class="features"> Pepper, Lovage, Garlic</p>'
+    '<h3 class="name" style="background-color:#c7ffaa"> Citrus Fruit</h3>'
+    '<p class="features"> Kumquat, orange, lime, grapefruit</p>'
+)
+
+# Gabarit trimmé d'une vraie page (Barbe Rouge, vérifié en direct) -- coquilles
+# RÉELLES conservées (espace parasite dans un nombre décimal, espace autour
+# du tiret de plage, espace entre "mg" et "/100g") -- exactement ce que le
+# parseur doit survivre.
+_HC_BARBE_ROUGE_HTML = (
+    '<div class="table-header"> Barbe Rouge</div><table><tbody>'
+    '<tr><td class="name">Alpha acid</td><td>7,5 - 9,5 %</td></tr>'
+    '<tr><td class="name">Coluplone</td><td>42. 1-42.2 %</td></tr>'
+    '<tr><td class="name">Humulene</td><td>15-25 %</td></tr>'
+    '<tr><td class="name">Humulene / Caryophyllene</td><td>2.5-2-8</td></tr>'
+    '<tr><td class="name">Linalool</td><td>12- 16 mg/100g</td></tr>'
+    '<tr><td class="name">Geraniol</td><td>10 - 15mg / 100g</td></tr>'
+    '</tbody></table>'
+)
+
+_HC_NO_TABLE_HTML = "<div>No products in this category yet.</div>"
+
+
+def test_parse_hops_comptoir_variety_extracts_name_and_compounds():
+    result = parsers.parse_hops_comptoir_variety(_HC_ELIXIR_HTML)
+    assert result["name"] == "Elixir"
+    assert result["compounds"]["alpha_acid"] == (5.0, 7.0, "pct")
+    assert result["compounds"]["total_oil"] == (1.8, 2.2, "ml_100g")
+    assert result["compounds"]["myrcene"] == (70.0, 75.0, "pct_oil")
+
+def test_parse_hops_comptoir_variety_fixes_the_real_coluplone_typo():
+    # "Coluplone" est une coquille RÉELLE de la source (devrait être
+    # "Colupulone") -- notre clé interne doit rester correctement orthographiée.
+    result = parsers.parse_hops_comptoir_variety(_HC_ELIXIR_HTML)
+    assert result["compounds"]["colupulone"] == (35.0, 40.0, "pct")
+
+def test_parse_hops_comptoir_variety_uses_mg_100g_not_pct_oil_for_linalool():
+    # Unité RÉELLE différente de BarthHaas/Yakima pour ces 3 composés --
+    # jamais silencieusement traité comme un pct_oil comparable.
+    result = parsers.parse_hops_comptoir_variety(_HC_ELIXIR_HTML)
+    assert result["compounds"]["linalool"] == (6.0, 6.0, "mg_100g")
+    assert result["compounds"]["farnesene"] == (150.0, 200.0, "mg_100g")
+
+def test_parse_hops_comptoir_variety_skips_class_aggregates_and_ratios():
+    # "Monoterpene" (agrégat de classe) et "Humulene / Caryophyllene" (ratio)
+    # n'ont pas d'entrée dans HOPS_COMPTOIR_LABELS -- jamais une valeur
+    # devinée pour un champ hors périmètre du schéma EAV à un seul composé.
+    elixir = parsers.parse_hops_comptoir_variety(_HC_ELIXIR_HTML)
+    assert "monoterpene" not in elixir["compounds"]
+    barbe_rouge = parsers.parse_hops_comptoir_variety(_HC_BARBE_ROUGE_HTML)
+    assert not any("caryophyllene" in k for k in barbe_rouge["compounds"])
+
+def test_parse_hops_comptoir_variety_extracts_aroma_categories():
+    result = parsers.parse_hops_comptoir_variety(_HC_ELIXIR_HTML)
+    assert result["categories"] == ["Spiced", "Citrus Fruit"]
+
+def test_parse_hops_comptoir_variety_returns_none_without_technical_features():
+    # P15-6/Teorem, vérifié en direct : page catégorie sans AUCUNE section
+    # "Technical features" -- pas d'erreur, juste "rien à ingérer ici".
+    assert parsers.parse_hops_comptoir_variety(_HC_NO_TABLE_HTML) is None
+
+def test_parse_hops_comptoir_variety_survives_real_formatting_quirks():
+    # Barbe Rouge : espace parasite dans un décimal ("42. 1-42.2"), espaces
+    # autour du tiret ("7,5 - 9,5"), virgule décimale française, espace
+    # avant "mg" et autour du "/100g" -- toutes vérifiées en direct.
+    result = parsers.parse_hops_comptoir_variety(_HC_BARBE_ROUGE_HTML)
+    assert result["compounds"]["alpha_acid"] == (7.5, 9.5, "pct")
+    assert result["compounds"]["colupulone"] == (42.1, 42.2, "pct")
+    assert result["compounds"]["linalool"] == (12.0, 16.0, "mg_100g")
+    assert result["compounds"]["geraniol"] == (10.0, 15.0, "mg_100g")
+
+def test_parse_hops_comptoir_value_raises_on_unrecognized_unit():
+    with pytest.raises(ValueError):
+        parsers._parse_hops_comptoir_value("5-7 furlongs")
+
+def test_parse_hops_comptoir_value_single_value_has_equal_min_and_max():
+    assert parsers._parse_hops_comptoir_value("6 mg/100g") == (6.0, 6.0, "mg_100g")
+
+def test_parse_hops_comptoir_variety_raises_on_unit_mismatch():
+    # Étiquette "Total Oil" attend ml/100g -- si la source affichait soudain
+    # un "%", quelque chose a changé côté site : lever plutôt que mal-étiqueter.
+    bad_html = (
+        '<div class="table-header"> Test</div><table><tbody>'
+        '<tr><td class="name">Total Oil</td><td>50-60 %</td></tr>'
+        '</tbody></table>')
+    with pytest.raises(ValueError):
+        parsers.parse_hops_comptoir_variety(bad_html)
+
+_HC_NAV_HTML = (
+    '<a href="https://www.hops-comptoir.com/5-our-alsace-hops">Our Hops</a><ul>'
+    '<li> <a class="" href="https://www.hops-comptoir.com/6-hop-aramis-alsace">Aramis</a></li>'
+    '<li> <a class="" href="https://www.hops-comptoir.com/61-elixir">Elixir</a></li>'
+    '</ul>'
+    '<a href="https://www.hops-comptoir.com/51-hops-of-the-world">Hops of the world</a><ul>'
+    '<li> <a class="" href="https://www.hops-comptoir.com/60-cascade-usa">Cascade USA</a></li>'
+    '</ul>'
+)
+
+def test_parse_hops_comptoir_our_hops_paths_excludes_resold_varieties():
+    # "Cascade USA" (Hops of the world, revendu) ne doit JAMAIS apparaître
+    # -- seules les variétés cultivées par Comptoir Agricole lui-même.
+    paths = parsers.parse_hops_comptoir_our_hops_paths(_HC_NAV_HTML)
+    assert paths == ["6-hop-aramis-alsace", "61-elixir"]
+    assert "60-cascade-usa" not in paths
+
+def test_parse_hops_comptoir_our_hops_paths_empty_without_the_nav_section():
+    assert parsers.parse_hops_comptoir_our_hops_paths("<div>no nav here</div>") == []
