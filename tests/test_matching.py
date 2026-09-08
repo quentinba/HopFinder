@@ -362,12 +362,12 @@ def test_compound_survival_only_produces_the_four_ordinal_states():
         for entry in by_stage.values():
             assert entry["state"] in allowed
 
-def test_compound_survival_covers_all_eleven_compounds_and_four_stages():
-    # Périmètre exact du ticket : les 11 composés de
-    # reference.PROCESS_SURVIVAL (app._COMPARE_DETAIL_OIL_COMPOUNDS +
-    # thiols), chacun avec une décision sur les 4 stades -- pas de trou
-    # silencieux (composé mappé mais un stade oublié).
-    stages = {"boil", "whirlpool", "afdh", "pfdh"}
+def test_compound_survival_covers_all_eleven_compounds_and_five_stages():
+    # Périmètre exact du ticket (T119 + le 5e stade "late_boil" de T133) :
+    # les 11 composés de reference.PROCESS_SURVIVAL (app._COMPARE_DETAIL_
+    # OIL_COMPOUNDS + thiols), chacun avec une décision sur les 5 stades --
+    # pas de trou silencieux (composé mappé mais un stade oublié).
+    stages = {"boil", "late_boil", "whirlpool", "afdh", "pfdh"}
     assert set(matching.reference.PROCESS_STAGE_SURVIVAL) == set(matching.reference.PROCESS_SURVIVAL)
     for compound, by_stage in matching.reference.PROCESS_STAGE_SURVIVAL.items():
         assert set(by_stage) == stages, f"{compound} : stades manquants {stages - set(by_stage)}"
@@ -403,6 +403,14 @@ def test_compound_survival_humulene_and_caryophyllene_are_precursors_hot_side_on
         # Côté froid : le composé brut (pas le dérivé d'oxydation) domine à nouveau.
         assert matching.compound_survival(compound, "pfdh")["state"] == "kept"
 
+def test_compound_survival_sesquiterpenes_are_kept_not_precursor_at_late_boil():
+    # Coeur de la demande T133 : un ajout à 5 min reste SOUS le seuil
+    # d'oxydation (~20 min, même citation que "boil" ci-dessus) -- le
+    # composé brut n'a pas encore eu le temps de s'oxyder, contrairement au
+    # "boil"/"whirlpool" (exposition pleine, "precursor").
+    for compound in ("humulene", "caryophyllene", "farnesene", "selinene"):
+        assert matching.compound_survival(compound, "late_boil")["state"] == "kept"
+
 def test_compound_survival_myrcene_and_linalool_share_the_same_boil_loss():
     # Corrigé le 2026-08-29 vs. la proposition de départ du ticket (qui
     # avait linalol à "partial" au boil) : la source citée par le ticket
@@ -411,6 +419,25 @@ def test_compound_survival_myrcene_and_linalool_share_the_same_boil_loss():
     assert matching.compound_survival("myrcene", "boil")["state"] == "lost"
     assert matching.compound_survival("linalool", "boil")["state"] == "lost"
     assert matching.compound_survival("linalool", "whirlpool")["state"] == "kept"
+
+def test_compound_survival_myrcene_and_linalool_are_partial_at_late_boil():
+    # T133 : aucune mesure à 5 min (seulement un point à 10 min, ~50% de
+    # perte) -- interpolation VALIDÉE EXPLICITEMENT par l'utilisateur
+    # (2026-09-08), jamais devinée en silence. "partial", ni "lost" (comme
+    # au boil complet) ni "kept" (comme au whirlpool, exposition quasi nulle).
+    assert matching.compound_survival("myrcene", "late_boil")["state"] == "partial"
+    assert matching.compound_survival("linalool", "late_boil")["state"] == "partial"
+
+def test_compound_survival_no_time_data_compounds_default_to_boil_state_at_late_boil():
+    # T133 : beta-pinène/géraniol/isobutyrate/ketones/thiols n'ont AUCUNE
+    # citation résolue à la minute (même leur entrée "boil" est déjà
+    # qualitative/de classe) -- défaut = même état qu'au boil complet,
+    # jamais une valeur inventée pour combler un trou que la source ne
+    # permet pas de remplir.
+    for compound in ("beta-pinene", "geraniol", "isobutyrate", "ketones", "thiols"):
+        boil_state = matching.compound_survival(compound, "boil")["state"]
+        late_boil_state = matching.compound_survival(compound, "late_boil")["state"]
+        assert late_boil_state == boil_state, f"{compound} : {late_boil_state} != {boil_state}"
 
 def test_compound_survival_never_consulted_by_any_scoring_path(db, monkeypatch):
     # Même garde-fou structurel que test_process_survival_never_consulted_
@@ -458,6 +485,19 @@ def test_hopping_plan_coverage_precursor_never_delivers_the_compound(db):
     assert humulene["delivered_by"] == []
     assert len(humulene["precursor_by"]) == 1
     assert humulene["precursor_by"][0]["variety"] == "citra"
+
+def test_hopping_plan_coverage_late_boil_delivers_sesquiterpenes_precursor_at_boil_doesnt(db):
+    # T133 : coeur du ticket, bout en bout via hopping_plan_coverage (pas
+    # juste compound_survival isolé). Même houblon (citra), même composé
+    # (humulène), SEULE la stade change -- "boil" ne livre jamais humulène
+    # (precursor), "late_boil" le livre (kept, sous le seuil des ~20 min).
+    boil_rows = matching.hopping_plan_coverage(db, [("citra", "boil")])
+    late_boil_rows = matching.hopping_plan_coverage(db, [("citra", "late_boil")])
+    assert _coverage_row(boil_rows, "humulene")["state"] == "presumed_absent"
+    late_boil_humulene = _coverage_row(late_boil_rows, "humulene")
+    assert late_boil_humulene["state"] == "delivered"
+    assert late_boil_humulene["survival"] == "kept"
+    assert late_boil_humulene["precursor_by"] == []
 
 def test_hopping_plan_coverage_survival_is_the_best_of_several_contributors(db):
     # myrcène : whirlpool="partial", afdh="kept" (T119) -- un plan qui

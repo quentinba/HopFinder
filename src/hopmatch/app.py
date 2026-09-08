@@ -239,6 +239,15 @@ _TOOL_SUMMARY_BY_MODE = {t["mode"]: t for t in _TOOL_SUMMARIES}
 # un `git log` en direct exigerait aussi que `.git` soit présent dans le
 # conteneur déployé, ce qui n'est pas garanti.
 _RECENT_UPDATES = [
+    ("2026-09-08", "Hopping plan gained a 5th addition stage: \"Late boil\" "
+                   "(~5 minutes before the end of the boil) -- kept separate "
+                   "from \"Whirlpool\" on purpose, they're chemically "
+                   "different (still under active heat vs. after it). This "
+                   "matters for humulene/caryophyllene/farnesene/selinene: "
+                   "at Late boil they're still delivered as the raw compound "
+                   "(not enough time to oxidize into their spicy/woody "
+                   "derivatives yet), unlike a full Boil or Whirlpool "
+                   "addition where only the oxidized aroma comes through."),
     ("2026-09-07", "A style's page now shows \"Frequent hop combinations\": "
                    "hops REALLY found together in the same real recipe for "
                    "that style (MMuM corpus), pick 2/3/4-hop combinations, "
@@ -6326,7 +6335,14 @@ def _survivables(con) -> None:
             "from alpha acid. No marker = purpose unknown, not guessed.")
 
 
-_COVERAGE_STAGE_LABELS = {"boil": "Boil", "whirlpool": "Whirlpool", "afdh": "AFDH", "pfdh": "PFDH"}
+# T133 (2026-09-08) : "Late boil" (~5 min avant la fin d'ébullition, encore
+# sous ébullition ACTIVE) inséré entre "Boil" et "Whirlpool" -- ORDRE
+# chronologique du dict, dont dépendent le `segmented_control` par houblon
+# ET l'ordre des colonnes de la grille (voir docstring `_coverage`).
+# Délibérément PAS fusionné avec "Whirlpool" (décision de cadrage
+# explicite, BACKLOG.md T133 : chimiquement distincts).
+_COVERAGE_STAGE_LABELS = {"boil": "Boil", "late_boil": "Late boil", "whirlpool": "Whirlpool",
+                          "afdh": "AFDH", "pfdh": "PFDH"}
 _COVERAGE_MAX_HOPS = 6
 # Vocabulaire imposé par le ticket T121 pour le cas précurseur (T119 : "il
 # ne livre pas le composé, il en génère un autre") -- les 4 composés
@@ -6566,14 +6582,17 @@ def _coverage(con) -> None:
         st.caption(
             "Not every compound is equally informative for a plan like this one "
             "(measured on ~20 realistic plans, see BACKLOG.md T122): myrcene, linalool "
-            "and geraniol are delivered by almost any plan with at least one non-boil "
-            "addition, so their coverage rarely tells you much. Beta-pinene and the "
-            "sesquiterpenes (humulene/caryophyllene/farnesene/selinene) genuinely depend "
-            "on your plan's stages — the sesquiterpenes only ever reach \"Delivered\" "
-            "from a post-fermentation dry hop addition, generating their oxidized aroma "
-            "instead at boil/whirlpool/AFDH. Isobutyrate/ketones/thiols depend on "
-            "whether your hops are in BarthHaas' catalog at all. Selinene is essentially "
-            "never covered (2 hops in the whole database).")
+            "and geraniol are delivered by almost any plan with at least one addition "
+            "past a full active boil (late boil, whirlpool, AFDH, or PFDH), so their "
+            "coverage rarely tells you much. Beta-pinene and the sesquiterpenes "
+            "(humulene/caryophyllene/farnesene/selinene) genuinely depend on your "
+            "plan's stages — the sesquiterpenes reach \"Delivered\" only from a late "
+            "boil or post-fermentation dry hop addition (T133: under ~20 minutes of "
+            "active boil, the oxidation that would otherwise consume them hasn't "
+            "happened yet), generating their oxidized aroma instead at boil/whirlpool/"
+            "AFDH. Isobutyrate/ketones/thiols depend on whether your hops are in "
+            "BarthHaas' catalog at all. Selinene is essentially never covered (2 hops "
+            "in the whole database).")
 
 
 def main():

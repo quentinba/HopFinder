@@ -1622,11 +1622,14 @@ def test_coverage_explanatory_expander_shows_real_coverage_counts(toy_cwd):
 # proposition de blend (T120/T122 l'interdisent).
 
 def test_coverage_delivering_stages_excludes_precursor_and_lost():
-    # sélinène : precursor/precursor/lost/kept (T119) -- SEUL pfdh livre
-    # réellement le composé mesuré.
-    assert app._coverage_delivering_stages("selinene") == ["pfdh"]
-    # linalol : lost/kept/kept/kept -- tout sauf boil.
-    assert app._coverage_delivering_stages("linalool") == ["whirlpool", "afdh", "pfdh"]
+    # sélinène : precursor/kept/precursor/lost/kept (T119+T133) -- late_boil
+    # ET pfdh livrent réellement le composé mesuré (sous le seuil des ~20
+    # min d'oxydation à late_boil, plus de CO2-stripping à pfdh).
+    assert app._coverage_delivering_stages("selinene") == ["late_boil", "pfdh"]
+    # linalol : lost/partial/kept/kept/kept -- tout sauf boil (late_boil
+    # "partial" compte comme livré, T133).
+    assert app._coverage_delivering_stages("linalool") == [
+        "late_boil", "whirlpool", "afdh", "pfdh"]
 
 def test_coverage_delivering_stages_empty_for_a_compound_never_delivered():
     # Composé hors périmètre T119 -- compound_survival renvoie None partout,
@@ -1697,6 +1700,29 @@ def test_coverage_distinguishes_missing_entirely_from_precursor_only(toy_cwd):
     # Humulène : mesuré mais precursor au boil (T119) -- "precursor only".
     assert any("Myrcene" in c.value and "missing entirely" in c.value for c in at.caption)
     assert any("Humulene" in c.value and "precursor only" in c.value for c in at.caption)
+
+def test_coverage_late_boil_stage_delivers_sesquiterpenes_unlike_plain_boil(toy_cwd):
+    # T133 (2026-09-08) : "Late boil" doit apparaître comme un stade
+    # SÉPARÉ, sélectionnable indépendamment de "Boil" -- même houblon,
+    # même composé (humulène), seul le stade change l'issue (precursor au
+    # boil complet, kept sous le seuil des ~20 min à 5 min).
+    con = connect(os.path.join(os.getcwd(), "aromahops.db"))
+    con.execute("INSERT INTO hop_composition VALUES "
+               "('hopa', 'humulene', 5, 5, 'pct_oil', 'toy', 'ok', '')")
+    con.commit(); con.close()
+
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("coverage").run()
+    at.multiselect(key="coverage_hops").select("Hopa").run()
+    at.segmented_control(key="coverage_stage_hopa").set_value(["Boil", "Late boil"]).run()
+    assert not at.exception
+    grid = next(df.value for df in at.dataframe if "Compound" in df.value.columns)
+    boil_col = next(c for c in grid.columns if c.endswith("· Boil"))
+    late_boil_col = next(c for c in grid.columns if c.endswith("· Late boil"))
+    humulene_row = grid[grid["Compound"] == "Humulene"].iloc[0]
+    assert humulene_row[boil_col] == app._COVERAGE_PRECURSOR_CELL_TEXT
+    assert humulene_row[late_boil_col] == "Delivered"
 
 # --------------------------------------------------------------------------- #
 # T126 -- "Hop addition timing" (Browse, matching.hop_addition_timing)

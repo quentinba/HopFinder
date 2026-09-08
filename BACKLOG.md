@@ -3138,7 +3138,7 @@ Mais la transparence doit être RÉELLE, pas un simple adverbe :
 
   C'est l'analyse qui manquait à `combine()` et qui a coûté son retrait.
 
-- [ ] **T133 — Stade « Late boil » (5 min) distinct de « boil »**
+- [x] **T133 — Stade « Late boil » (5 min) distinct de « boil »**
 
   **Origine** : question utilisateur en direct (2026-08-30), en testant T121 :
   « I'm surprized we only have boil / whirlpool / afdh / pfdh. Why don't we
@@ -3199,6 +3199,62 @@ Mais la transparence doit être RÉELLE, pas un simple adverbe :
   CINQ stades), + un cas qui vérifie explicitement qu'humulène/caryophyllène
   ne sont PLUS `precursor` à "late_boil" (c'est le point central du
   ticket).
+
+  **FAIT (2026-09-08).** Question posée explicitement à l'utilisateur AVANT
+  d'écrire le moindre code (contrainte du ticket lui-même) : myrcène/linalol
+  n'ont qu'un point chiffré (~50 % de perte à 10 min, rien à 5 min) --
+  trois options proposées ("kept", "partial", ou aucune entrée). **Décision
+  utilisateur : "partial"** (perte réelle mais moindre que celle mesurée à
+  10 min, plus que l'exposition quasi nulle du whirlpool).
+
+  Trois groupes de justification, jamais mélangés (voir le commentaire en
+  tête de `reference.PROCESS_STAGE_SURVIVAL`) :
+  1. **Lecture directe d'un seuil déjà cité** -- humulène/caryophyllène/
+     farnésène/sélinène : 5 min < seuil d'oxydation ~20 min déjà cité au
+     boil -> `kept` (comparaison directe, pas une extrapolation).
+  2. **Interpolation validée par l'utilisateur** -- myrcène/linalol ->
+     `partial` (ci-dessus).
+  3. **Aucune donnée temporelle à AUCUNE granularité** -- beta-pinène/
+     géraniol/isobutyrate/ketones/thiols : leurs entrées "boil" existantes
+     sont déjà qualitatives/de classe, jamais un point chiffré -- défaut =
+     MÊME état qu'au boil complet (rien affirmé que la source ne permet
+     pas), jamais une valeur inventée.
+
+  `matching._PLAN_STAGES` (5 stades), `app._COVERAGE_STAGE_LABELS` ("Late
+  boil" inséré entre "Boil" et "Whirlpool", ordre chronologique dont
+  dépendent le `segmented_control` par houblon ET l'ordre des colonnes de
+  la grille). Réutilisation automatique par `_coverage_delivering_stages`/
+  `_coverage_source_suggestions` (T121) -- aucun code GUI supplémentaire
+  nécessaire au-delà du dict, ces fonctions itèrent déjà sur `_COVERAGE_
+  STAGE_LABELS` génériquement.
+
+  **T122 refait** (texte de l'encart explicatif mis à jour, pas un nouveau
+  script de simulation -- la conclusion découle directement de la table de
+  survie, pas d'un nouvel échantillonnage aléatoire) : la phrase "the
+  sesquiterpenes only ever reach 'Delivered' from a post-fermentation dry
+  hop addition" était devenue FAUSSE avec le 5e stade (ils sont aussi
+  `kept` à late_boil) -- corrigée en "...reach 'Delivered' only from a late
+  boil or post-fermentation dry hop addition". Conclusion qualitative
+  inchangée sinon (myrcène/linalol/géraniol restent peu informatifs,
+  beta-pinène/sesquiterpènes restent discriminants, sélinène reste à part).
+
+  Vérifié en direct (Chrome, thème clair ET sombre) : "Late boil" apparaît
+  comme option séparée du `segmented_control` (entre "Boil" et
+  "Whirlpool") ; sur Citra, la grille de couverture montre humulène/
+  caryophyllène/farnésène "Generates spicy/woody aroma through oxidation"
+  à "Citra · Boil" mais "Delivered" à "Citra · Late boil" (même houblon,
+  seul le stade change) -- exactement le point central du ticket. Panneau
+  "Where would these come from?" mentionne "Late boil" automatiquement
+  pour sélinène (repli générique sur `_COVERAGE_STAGE_LABELS`, pas de code
+  spécifique écrit pour ce cas).
+
+  5 nouveaux tests (3 `compound_survival` par groupe de justification, 1
+  `hopping_plan_coverage` bout en bout boil-vs-late_boil, 1 AppTest GUI),
+  suite verte (547 tests). `_RECENT_UPDATES` mis à jour dans le même
+  commit. Aucun changement de donnée en base (`reference.py` est du code,
+  pas `aromahops.db`) -- pas de push HopFinder-db ni de reboot nécessaires
+  pour ce ticket, le déploiement Streamlit Cloud suit automatiquement le
+  push git sur le code.
 
 ## 10bis. Idée hors épique (trouvée en auditant un concurrent)
 

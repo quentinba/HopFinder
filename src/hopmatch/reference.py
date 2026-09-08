@@ -725,14 +725,18 @@ PROCESS_SURVIVAL_EXPLANATIONS: dict[str, str] = {
 # côté chaud uniquement) -- c'est la demande utilisateur d'origine (T74/
 # T115) sur l'oxydation des sesquiterpènes.
 #
-# stage in {"boil", "whirlpool", "afdh", "pfdh"} (afdh = active fermentation
-# dry hop, pfdh = post-fermentation dry hop) -- même distinction que
-# CLAUDE.md "Règles procédé & survivables" (4 règles YCH, handbook 2022).
-# Les notes de séminaire BarthHaas (mémoire persistante
+# stage in {"boil", "late_boil", "whirlpool", "afdh", "pfdh"} (afdh = active
+# fermentation dry hop, pfdh = post-fermentation dry hop) -- même
+# distinction que CLAUDE.md "Règles procédé & survivables" (4 règles YCH,
+# handbook 2022). "late_boil" (T133, 2026-09-08) : ajout ~5 min avant la
+# fin d'ébullition, toujours sous ébullition ACTIVE -- délibérément PAS
+# fusionné avec "whirlpool" (décision de cadrage explicite, voir BACKLOG.md
+# T133 : chimiquement distincts, whirlpool est post-ébullition sans apport
+# de chaleur actif). Les notes de séminaire BarthHaas (mémoire persistante
 # `barthhaas_hop_flavorist_seminar_notes`, partagées par [redacted] le
 # 2026-08-29) affinent encore le AFDH en 3 sous-stades (fermentation
 # active/maturation/garde) -- volontairement HORS PÉRIMÈTRE ici, la matrice
-# reste aux 4 stades explicitement demandés par le ticket.
+# reste aux 5 stades explicitement demandés par les tickets T119/T133.
 #
 # Sources combinées, CHACUNE citée par ligne (jamais une affirmation sans
 # provenance) : PROCESS_SURVIVAL_EXPLANATIONS ci-dessus (Janish, The New
@@ -784,11 +788,47 @@ PROCESS_SURVIVAL_EXPLANATIONS: dict[str, str] = {
 # piège. Éviter le mot "early" seul dans une note "whirlpool" sans préciser
 # de quel axe il s'agit -- l'entrée linalool ci-dessous documente le
 # distinguo en toutes lettres.
+# T133 (2026-09-08) : 5e stade "late_boil" (ajout ~5 min avant la fin
+# d'ébullition, toujours sous ébullition ACTIVE -- distinct de "whirlpool",
+# décision de cadrage utilisateur explicite, voir BACKLOG.md T133 : ne
+# JAMAIS fusionner/renommer avec whirlpool malgré la proximité temporelle,
+# chimiquement différents (chauffe active vs. post-ébullition)). Trois
+# groupes de justification, jamais mélangés :
+#   1. **Lecture directe d'un seuil déjà cité** (humulène/caryophyllène/
+#      farnésène/sélinène) : la citation existante au stade "boil" donne un
+#      seuil temporel explicite (~20 min pour l'oxydation en dérivés
+#      épicés/boisés) -- 5 min < 20 min est une comparaison directe, pas une
+#      extrapolation. `state="kept"` (le composé brut n'a pas encore eu le
+#      temps de s'oxyder).
+#   2. **Interpolation explicitement validée par l'utilisateur**
+#      (myrcène/linalol) : la seule donnée chiffrée existante est un point à
+#      10 min (~50% de perte) -- rien à 5 min. Question posée
+#      explicitement (2026-09-08) plutôt que deviné en silence ; réponse
+#      utilisateur : `state="partial"` (une perte réelle mais moindre a
+#      déjà commencé, entre l'exposition quasi nulle du whirlpool et la
+#      perte mesurée à 10 min).
+#   3. **Aucune donnée temporelle à AUCUNE granularité** (beta-pinène,
+#      géraniol, isobutyrate, ketones, thiols) : leurs entrées "boil"
+#      existantes sont déjà des annotations de CLASSE/qualitatives, jamais
+#      un point chiffré à une minute précise (contrairement au groupe 2 qui
+#      a au moins UN point chiffré à défaut de deux) -- aucune base pour
+#      distinguer 5 min du reste de l'ébullition. Choix par défaut : MÊME
+#      `state` qu'au stade "boil" (ne rien affirmer de nouveau que la
+#      source ne permet pas), jamais une valeur inventée pour combler le
+#      tableau.
 PROCESS_STAGE_SURVIVAL: dict[str, dict[str, dict[str, str]]] = {
     "myrcene": {
         "boil": {"state": "lost", "source": "Janish, The New IPA / OSU Hop Lab",
                  "note": "~50% loss after 10 minutes of active boil, essentially gone "
                          "by the end of a full 60-minute boil."},
+        "late_boil": {"state": "partial",
+                      "source": "Interpolated between the two boil-stage data points above "
+                                "(no direct 5-minute measurement exists) -- explicitly "
+                                "confirmed with the user (2026-09-08) rather than assumed.",
+                      "note": "A real but smaller loss than the ~50% documented at 10 "
+                              "minutes -- less exposure than that point, but still under "
+                              "active boil (unlike whirlpool, where exposure is close to "
+                              "zero)."},
         "whirlpool": {"state": "partial", "source": "docs/mapping_compounds.txt",
                       "note": "Past active boiling, exposure is lower -- a meaningful "
                               "aromatic contributor at whirlpool, but not the full "
@@ -806,6 +846,14 @@ PROCESS_STAGE_SURVIVAL: dict[str, dict[str, dict[str, str]]] = {
                  "note": "Volatile monoterpene hydrocarbon, stripped by evaporation during "
                          "a boil -- same subclass as myrcene, but without a specifically "
                          "quantified boil-time figure of its own."},
+        "late_boil": {"state": "lost",
+                      "source": "Same as \"boil\" above -- no time-resolved citation exists "
+                                "at any granularity for this compound, not even a single "
+                                "data point (unlike myrcene/linalool).",
+                      "note": "No basis to claim anything different from the full-boil "
+                              "annotation at 5 minutes specifically -- defaulting to the "
+                              "same state rather than inventing a distinction the source "
+                              "doesn't support."},
         "whirlpool": {"state": "lost",
                       "source": "reference.PROCESS_SURVIVAL_EXPLANATIONS['dry hop / late additions']",
                       "note": "Unlike myrcene, no source documents whirlpool survival for "
@@ -825,6 +873,11 @@ PROCESS_STAGE_SURVIVAL: dict[str, dict[str, dict[str, str]]] = {
                          "study puts it over ~20 minutes) oxidizes it into humulene "
                          "epoxides I/II/III -- the noble, spicy character comes from "
                          "these derivatives, not the measured compound itself."},
+        "late_boil": {"state": "kept",
+                      "source": "Direct reading of the ~20-minute oxidation threshold cited "
+                                "above (Janish/JAFC) -- 5 minutes is under that threshold.",
+                      "note": "Too short for the oxidation that produces humulene epoxides "
+                              "to occur -- the raw hydrocarbon persists, unlike a full boil."},
         "whirlpool": {"state": "precursor", "source": "docs/mapping_compounds.txt",
                       "note": "The same oxidation continues at kettle/whirlpool "
                               "temperature (wort stays above the ~79°C isomerization "
@@ -843,6 +896,11 @@ PROCESS_STAGE_SURVIVAL: dict[str, dict[str, dict[str, str]]] = {
                  "note": "Same mechanism as humulene: the raw hydrocarbon evaporates "
                          "as-is, but a long boil oxidizes it into caryophyllene oxide, "
                          "the source of its persistent spicy character."},
+        "late_boil": {"state": "kept",
+                      "source": "Same ~20-minute oxidation threshold as humulene above "
+                                "(same mechanism) -- 5 minutes is under that threshold.",
+                      "note": "Too short for oxidation into caryophyllene oxide -- the raw "
+                              "hydrocarbon persists, unlike a full boil."},
         "whirlpool": {"state": "precursor", "source": "docs/mapping_compounds.txt",
                       "note": "Same oxidation continues at kettle/whirlpool temperature."},
         "afdh": {"state": "lost",
@@ -858,6 +916,13 @@ PROCESS_STAGE_SURVIVAL: dict[str, dict[str, dict[str, str]]] = {
                  "note": "Same sesquiterpene-hydrocarbon class behavior as humulene/"
                          "caryophyllene (can oxidize into farnesol) -- no farnesene-"
                          "specific boil-time citation found, class-level annotation only."},
+        "late_boil": {"state": "kept",
+                      "source": "Same class-level ~20-minute oxidation threshold as "
+                                "humulene/caryophyllene above -- 5 minutes is under that "
+                                "threshold.",
+                      "note": "Too short for oxidation into farnesol -- the raw "
+                              "hydrocarbon persists, same class-level reasoning as "
+                              "humulene/caryophyllene."},
         "whirlpool": {"state": "precursor",
                       "source": "reference.PROCESS_SURVIVAL_EXPLANATIONS['direct traces, contributes via oxidation']",
                       "note": "Same class-level reasoning as humulene/caryophyllene."},
@@ -874,6 +939,13 @@ PROCESS_STAGE_SURVIVAL: dict[str, dict[str, dict[str, str]]] = {
                  "note": "Same sesquiterpene-hydrocarbon class behavior as humulene/"
                          "caryophyllene -- no selinene-specific boil-time citation found, "
                          "class-level annotation only."},
+        "late_boil": {"state": "kept",
+                      "source": "Same class-level ~20-minute oxidation threshold as "
+                                "humulene/caryophyllene above -- 5 minutes is under that "
+                                "threshold.",
+                      "note": "Too short for oxidation into its epoxide derivatives -- the "
+                              "raw hydrocarbon persists, same class-level reasoning as "
+                              "humulene/caryophyllene."},
         "whirlpool": {"state": "precursor",
                       "source": "reference.PROCESS_SURVIVAL_EXPLANATIONS['direct traces, contributes via oxidation']",
                       "note": "Same class-level reasoning as humulene/caryophyllene."},
@@ -895,6 +967,16 @@ PROCESS_STAGE_SURVIVAL: dict[str, dict[str, dict[str, str]]] = {
                          "properties. YCH's own list of 'early' uses for high "
                          "survivables (rule 1: late kettle, whirlpool, AFDH) never "
                          "includes a full active boil."},
+        "late_boil": {"state": "partial",
+                      "source": "Interpolated between the two boil-stage data points above "
+                                "(no direct 5-minute measurement exists) -- explicitly "
+                                "confirmed with the user (2026-09-08) rather than assumed, "
+                                "same reasoning as myrcene above (same documented loss "
+                                "curve).",
+                      "note": "A real but smaller loss than the ~50% documented at 10 "
+                              "minutes -- less exposure than that point, but still under "
+                              "active boil (unlike whirlpool, where exposure is close to "
+                              "zero)."},
         "whirlpool": {"state": "kept", "source": "CLAUDE.md — YCH handbook rule 1",
                       "note": "One of the 8 officially published YCH survivable "
                               "compounds. YCH rule 1's 'early' means early relative to "
@@ -917,6 +999,13 @@ PROCESS_STAGE_SURVIVAL: dict[str, dict[str, dict[str, str]]] = {
                  "note": "Higher boiling point than linalool/myrcene -- decreases "
                          "gradually over a full boil but is still measurable at 60 "
                          "minutes."},
+        "late_boil": {"state": "partial",
+                      "source": "Same as \"boil\" above -- the existing citation is already "
+                                "a qualitative \"decreases gradually\" note, not a "
+                                "minute-specific figure, so there's no finer basis to work "
+                                "from at 5 minutes.",
+                      "note": "No basis to claim anything different from the full-boil "
+                              "annotation at 5 minutes specifically."},
         "whirlpool": {"state": "kept", "source": "CLAUDE.md — YCH handbook rule 1",
                       "note": "One of the 8 officially published YCH survivable "
                               "compounds."},
@@ -934,6 +1023,11 @@ PROCESS_STAGE_SURVIVAL: dict[str, dict[str, dict[str, str]]] = {
                          "2-methylbutyl isobutyrate) -- all 3 are officially published "
                          "YCH survivables, but boil exposure still reduces the amount "
                          "that carries through."},
+        "late_boil": {"state": "partial",
+                      "source": "Same as \"boil\" above -- no minute-specific figure exists "
+                                "for this aggregate at any point in the boil.",
+                      "note": "No basis to claim anything different from the full-boil "
+                              "annotation at 5 minutes specifically."},
         "whirlpool": {"state": "kept", "source": "CLAUDE.md — YCH handbook rule 1",
                       "note": "All 3 named esters in this aggregate are officially "
                               "published YCH survivable compounds."},
@@ -950,6 +1044,11 @@ PROCESS_STAGE_SURVIVAL: dict[str, dict[str, dict[str, str]]] = {
                          "survivable, but the BarthHaas 'ketones' aggregate also includes "
                          "2-undecanone, which isn't -- lower confidence than isobutyrate "
                          "for this reason (see reference.PROCESS_SURVIVAL['ketones'])."},
+        "late_boil": {"state": "partial",
+                      "source": "Same as \"boil\" above, same aggregate caveat -- no "
+                                "minute-specific figure exists at any point in the boil.",
+                      "note": "No basis to claim anything different from the full-boil "
+                              "annotation at 5 minutes specifically."},
         "whirlpool": {"state": "kept", "source": "CLAUDE.md — YCH handbook rule 1 (2-nonanone only)",
                       "note": "2-nonanone specifically is a high survivable, usable at "
                               "whirlpool -- but the aggregate mixes in an undocumented "
@@ -964,6 +1063,11 @@ PROCESS_STAGE_SURVIVAL: dict[str, dict[str, dict[str, str]]] = {
         "boil": {"state": "partial", "source": "CLAUDE.md — YCH handbook (order-of-magnitude thresholds)",
                  "note": "Present in vanishingly small quantities (µg/kg) and highly "
                          "volatile -- boiling drives off most of it."},
+        "late_boil": {"state": "partial",
+                      "source": "Same as \"boil\" above -- no minute-specific figure exists, "
+                                "only the order-of-magnitude threshold comparison.",
+                      "note": "No basis to claim anything different from the full-boil "
+                              "annotation at 5 minutes specifically."},
         "whirlpool": {"state": "kept",
                       "source": "CLAUDE.md — YCH handbook (\"wort-soluble compounds pass to the fermenter\")",
                       "note": "3-mercaptohexanol (3MH) specifically is named as surviving "

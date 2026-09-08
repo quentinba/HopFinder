@@ -716,26 +716,27 @@ def process_survival(compound: str) -> dict[str, str] | None:
 
 
 def compound_survival(compound: str, stage: str) -> dict[str, str] | None:
-    """T119 (2026-08-29) : survie de `compound` à un `stage` de procédé
-    donné (`stage` in {"boil", "whirlpool", "afdh", "pfdh"}) -- question
-    PLUS FINE que `process_survival` ci-dessus (qui donne une annotation
-    par CLASSE de composé, pas par stade). Lecture pure de
-    `reference.PROCESS_STAGE_SURVIVAL`, aucune requête DB -- même
-    justification que `process_survival` : c'est une propriété de la
-    molécule/du procédé, pas du houblon qui la porte.
+    """T119 (2026-08-29), 5e stade "late_boil" ajouté par T133 (2026-09-08) :
+    survie de `compound` à un `stage` de procédé donné (`stage` in
+    {"boil", "late_boil", "whirlpool", "afdh", "pfdh"}) -- question PLUS
+    FINE que `process_survival` ci-dessus (qui donne une annotation par
+    CLASSE de composé, pas par stade). Lecture pure de `reference.
+    PROCESS_STAGE_SURVIVAL`, aucune requête DB -- même justification que
+    `process_survival` : c'est une propriété de la molécule/du procédé,
+    pas du houblon qui la porte.
 
     Retourne `{"state", "source", "note"}` -- `state` in {"kept", "partial",
     "lost", "precursor"}, ordinal QUALITATIF, jamais un pourcentage inventé
     (aucune source ne donne de facteur de survie chiffré réel). Retourne
     `None` si `compound` n'est pas dans la matrice (composé hors du
-    périmètre des 11 de `reference.PROCESS_SURVIVAL`) OU si `stage` n'est
-    pas l'un des 4 stades reconnus -- JAMAIS une valeur par défaut
+    périmètre des 11 de `reference.PROCESS_STAGE_SURVIVAL`) OU si `stage`
+    n'est pas l'un des 5 stades reconnus -- JAMAIS une valeur par défaut
     fabriquée, même contrainte que `process_survival`. Purement informatif
     -- n'est appelé par AUCUN chemin de scoring, uniquement par la GUI."""
     return reference.PROCESS_STAGE_SURVIVAL.get(compound, {}).get(stage)
 
 
-_PLAN_STAGES = frozenset({"boil", "whirlpool", "afdh", "pfdh"})
+_PLAN_STAGES = frozenset({"boil", "late_boil", "whirlpool", "afdh", "pfdh"})
 
 
 def hopping_plan_coverage(con, plan: list[tuple[str, str]]) -> list[dict]:
