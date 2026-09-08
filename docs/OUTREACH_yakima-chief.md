@@ -83,7 +83,7 @@ On mentionne explicitement qu'on a vu l'API `/api/lot` et qu'on **ne l'a pas
 > it's genuinely changed how I think about whirlpool additions.
 >
 > Best regards,
-> Quentin
+> [name]
 > [adresse email]
 > [lien vers l'outil, si public au moment de l'envoi]
 
