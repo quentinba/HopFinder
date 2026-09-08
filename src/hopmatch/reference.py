@@ -733,8 +733,8 @@ PROCESS_SURVIVAL_EXPLANATIONS: dict[str, str] = {
 # fusionné avec "whirlpool" (décision de cadrage explicite, voir BACKLOG.md
 # T133 : chimiquement distincts, whirlpool est post-ébullition sans apport
 # de chaleur actif). Les notes de séminaire BarthHaas (mémoire persistante
-# `barthhaas_hop_flavorist_seminar_notes`, partagées par [redacted] le
-# 2026-08-29) affinent encore le AFDH en 3 sous-stades (fermentation
+# `barthhaas_hop_flavorist_seminar_notes`, partagées en privé par un contact
+# de l'industrie le 2026-08-29) affinent encore le AFDH en 3 sous-stades (fermentation
 # active/maturation/garde) -- volontairement HORS PÉRIMÈTRE ici, la matrice
 # reste aux 5 stades explicitement demandés par les tickets T119/T133.
 #
@@ -883,7 +883,7 @@ PROCESS_STAGE_SURVIVAL: dict[str, dict[str, dict[str, str]]] = {
                               "temperature (wort stays above the ~79°C isomerization "
                               "threshold)."},
         "afdh": {"state": "lost",
-                 "source": "barthhaas_hop_flavorist_seminar_notes ([redacted], BarthHaas Academy)",
+                 "source": "barthhaas_hop_flavorist_seminar_notes (private BarthHaas Academy contact)",
                  "note": "As a raw, non-polar hydrocarbon it isn't produced by a cold dry "
                          "hop addition, and active fermentation strips volatiles via "
                          "CO2 off-gassing and yeast adsorption."},
@@ -904,7 +904,7 @@ PROCESS_STAGE_SURVIVAL: dict[str, dict[str, dict[str, str]]] = {
         "whirlpool": {"state": "precursor", "source": "docs/mapping_compounds.txt",
                       "note": "Same oxidation continues at kettle/whirlpool temperature."},
         "afdh": {"state": "lost",
-                 "source": "barthhaas_hop_flavorist_seminar_notes ([redacted], BarthHaas Academy)",
+                 "source": "barthhaas_hop_flavorist_seminar_notes (private BarthHaas Academy contact)",
                  "note": "Raw, non-polar hydrocarbon -- stripped by CO2 off-gassing and "
                          "yeast adsorption during active fermentation, same as humulene."},
         "pfdh": {"state": "kept", "source": "docs/mapping_compounds.txt",
@@ -927,7 +927,7 @@ PROCESS_STAGE_SURVIVAL: dict[str, dict[str, dict[str, str]]] = {
                       "source": "reference.PROCESS_SURVIVAL_EXPLANATIONS['direct traces, contributes via oxidation']",
                       "note": "Same class-level reasoning as humulene/caryophyllene."},
         "afdh": {"state": "lost",
-                 "source": "barthhaas_hop_flavorist_seminar_notes ([redacted], BarthHaas Academy)",
+                 "source": "barthhaas_hop_flavorist_seminar_notes (private BarthHaas Academy contact)",
                  "note": "Raw sesquiterpene hydrocarbon -- same CO2-stripping mechanism "
                          "as humulene/caryophyllene."},
         "pfdh": {"state": "kept", "source": "docs/mapping_compounds.txt",
@@ -950,7 +950,7 @@ PROCESS_STAGE_SURVIVAL: dict[str, dict[str, dict[str, str]]] = {
                       "source": "reference.PROCESS_SURVIVAL_EXPLANATIONS['direct traces, contributes via oxidation']",
                       "note": "Same class-level reasoning as humulene/caryophyllene."},
         "afdh": {"state": "lost",
-                 "source": "barthhaas_hop_flavorist_seminar_notes ([redacted], BarthHaas Academy)",
+                 "source": "barthhaas_hop_flavorist_seminar_notes (private BarthHaas Academy contact)",
                  "note": "Raw sesquiterpene hydrocarbon -- same CO2-stripping mechanism "
                          "as humulene/caryophyllene."},
         "pfdh": {"state": "kept", "source": "docs/mapping_compounds.txt",

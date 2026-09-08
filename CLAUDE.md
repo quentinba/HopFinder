@@ -530,8 +530,8 @@ valeur numérique inventée, cf. la vérification programmatique déjà en place
 un pourcentage). Sesquiterpènes bruts (humulène/caryophyllène/farnésène/
 sélinène) : `precursor` au boil/whirlpool (oxydation), `lost` en AFDH
 (CO2-stripping pendant la fermentation active, sourcé des notes de séminaire
-BarthHaas de [redacted] — mémoire `barthhaas_hop_flavorist_seminar_
-notes`), `kept` en PFDH. Purement informatif (jamais consulté par un chemin
+BarthHaas Academy partagées en privé par un contact de l'industrie — mémoire
+`barthhaas_hop_flavorist_seminar_notes`), `kept` en PFDH. Purement informatif (jamais consulté par un chemin
 de scoring, testé). Pas encore câblé en GUI ni de surcharge utilisateur —
 voir T120/T121.
 

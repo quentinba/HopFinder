@@ -891,7 +891,7 @@ Elles sont écrites pour qu'aucune décision implicite ne reste à deviner.
     d'attribution est documentée pour la première GUI qui les affichera,
     rien à câbler aujourd'hui.
   - **Prise de contact : PAS envoyée par l'assistant.** Message à un tiers
-    réel ([redacted]) au nom de l'utilisateur — hors du périmètre
+    réel (l'auteur de beer-analytics.com) au nom de l'utilisateur — hors du périmètre
     d'une action autonome même avec l'accord large donné pour le reste de
     cette session (« you have my permission to launch command lines and
     other access » ne couvre pas l'envoi d'un message externe en son nom,
@@ -2900,7 +2900,8 @@ Mais la transparence doit être RÉELLE, pas un simple adverbe :
   `PROCESS_SURVIVAL["ketones"]` (agrégat BarthHaas mélangeant aussi le
   2-undécanone, non documenté). AFDH="lost" pour les sesquiterpènes bruts
   (humulène/caryophyllène/farnésène/sélinène) sourcé par le mécanisme de
-  CO2-stripping des notes de séminaire BarthHaas de [redacted] (mémoire
+  CO2-stripping des notes de séminaire BarthHaas Academy partagées en privé
+  par un contact de l'industrie (mémoire
   `barthhaas_hop_flavorist_seminar_notes`, reçues le jour même) -- première
   utilisation concrète de ces notes dans le code. Pas de câblage GUI (hors
   périmètre de ce ticket, voir T121) ni de surcharge utilisateur (dépend de
@@ -3596,7 +3597,7 @@ Mais la transparence doit être RÉELLE, pas un simple adverbe :
 
 - [ ] **T132 — Revue de licence : CC-BY-SA 4.0 (beer-analytics.com)**
 
-  **Origine** : réponse de [redacted] (mainteneur beer-analytics.com)
+  **Origine** : réponse du mainteneur de beer-analytics.com
   à la prise de contact T89 (2026-08-29, voir mémoire `beer_analytics_
   contact_outcome`) -- crawl explicitement autorisé, mais "All content...
   is licensed under CC-BY-SA 4.0. So please have a look at the license

@@ -1,4 +1,4 @@
-# Message à [redacted] (auteur de beer-analytics) — LinkedIn
+# Message à l'auteur de beer-analytics — LinkedIn
 
 Contexte : on réutilise ses endpoints JSON publics (agrégats par style et par
 houblon) et son dictionnaire d'alias `recipe_db/data/hops.csv`. Le message a
@@ -14,7 +14,7 @@ relation, ou via InMail) accepte largement le texte ci-dessous.
 
 ## Version longue (message direct)
 
-> Hi [redacted],
+> Hi,
 >
 > I'm a homebrewer building a small open-source hobby tool called HopFinder. It
 > works from the other end than Beer Analytics: it starts from aroma chemistry —
@@ -47,11 +47,10 @@ relation, ou via InMail) accepte largement le texte ci-dessous.
 > take.
 >
 > Best,
-> Quentin
 
 ## Version courte (si limite de caractères)
 
-> Hi [redacted] — homebrewer here, building a small open-source hop tool
+> Hi — homebrewer here, building a small open-source hop tool
 > (aroma-chemistry side: BarthHaas/Yakima oil composition, Flavornet). Beer
 > Analytics is the empirical half I don't have. Two things: (1) a heads-up that
 > I'd like to read your public chart endpoints, one cached pass, identified UA,
