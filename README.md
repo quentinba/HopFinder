@@ -1,5 +1,8 @@
 <div align="center">
-  <img src="assets/logo.png" alt="HopFinder" width="480">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo_dark.png">
+    <img src="assets/logo.png" alt="HopFinder" width="360">
+  </picture>
 </div>
 
 ## Aperçu
