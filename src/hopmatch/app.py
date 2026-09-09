@@ -239,6 +239,12 @@ _TOOL_SUMMARY_BY_MODE = {t["mode"]: t for t in _TOOL_SUMMARIES}
 # un `git log` en direct exigerait aussi que `.git` soit présent dans le
 # conteneur déployé, ce qui n'est pas garanti.
 _RECENT_UPDATES = [
+    ("2026-09-09", "Amplify's pre-filled descriptor suggestions got more "
+                   "precise for ~25 ingredients (coriander, rosemary, "
+                   "tarragon, basil, cranberry, kiwi, celeriac, artichoke, "
+                   "butter, cream...) now that the aroma-wheel vocabulary has "
+                   "an exact word for them, instead of a generic stand-in "
+                   "like \"herbal\" or \"fruity\"."),
     ("2026-09-08", "Free thiol species (3MH, 4MMP, 3M4MP) added for a handful "
                    "of hops, on top of our existing \"thiols\" aggregate -- "
                    "sourced from a 2024 peer-reviewed paper (Hopsteiner, "
