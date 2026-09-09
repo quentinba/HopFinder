@@ -1,0 +1,35 @@
+# T128 (2026-09-09) : numéros de lot YCH réellement publiés, trouvés par
+# recherche web (jamais générés/énumérés à partir du format observé --
+# exclusion explicite du ticket). Un numéro par ligne, source en commentaire
+# au-dessus. 13 numéros, 5 variétés réelles + 1 blend (Falconer's Flight),
+# vérifiés en direct contre l'API le jour de la collecte -- tous valides.
+#
+# CONCLUSION DU TICKET : volume insuffisant pour un socle systématique
+# (critère d'arrêt pré-établi : ~30 numéros / 10 variétés). Ce fichier reste
+# la collecte actuelle, T116 reste dormant -- voir BACKLOG.md T128.
+
+# Déjà connus avant ce ticket (T124, trouvés via URL de partage indexée)
+23-WA346-027
+# https://tools.yakimachief.com/lookup?lots%5B%5D=P92-IUCIT3082&lots%5B%5D=PC1-IUCIT1079&lots%5B%5D=23-WA346-027
+P92-IUCIT3082
+PC1-IUCIT1079
+
+# Trouvés le 2026-09-09 (T128), recherche web sur le motif d'URL de partage
+# https://tools.yakimachief.com/lookup?lots%5B%5D=P91-IUCIT8118 (page indexée directement)
+P91-IUCIT8118
+# https://hopqueries.com/two-faces-of-citra/ (article citant l'outil de lookup)
+PC1-IUCIT1275
+P92-IUMOS3180
+PC1-IUMOS1250
+# https://tools.yakimachief.com/lookup?lots%5B%5D=25-037 (page indexée, format court -- Nectaron)
+25-037
+# https://tools.yakimachief.com/lookup?lots%5B%5D=P91-IUEKU8278 (page indexée)
+P91-IUEKU8278
+# https://tools.yakimachief.com/lookup?lots%5B%5D=P91-IUCIT8500 (page indexée)
+P91-IUCIT8500
+# https://tools.yakimachief.com/lookup?lots%5B%5D=P91-JUMOS9105 (page indexée)
+P91-JUMOS9105
+# https://tools.yakimachief.com/lookup?lots%5B%5D=P92-IUSIM3020 (page indexée)
+P92-IUSIM3020
+# https://tools.yakimachief.com/lookup?lots%5B%5D=P92-JUFAL4138 (page indexée -- Falconer's Flight, un BLEND, pas une variété unique)
+P92-JUFAL4138
