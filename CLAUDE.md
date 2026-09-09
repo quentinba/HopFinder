@@ -300,9 +300,40 @@ affiché, ex. page `/styles/india-pale-ale/american-ipa/` mais charts sous
   tuer + relancer si zéro progression, laisser tourner si lente mais non
   nulle, pas la peine de diagnostiquer plus loin avant d'essayer.
 
+### hops-comptoir.com (Comptoir Agricole) — variétés françaises (T134)
+5 variétés (Elixir, Mistral, Barbe Rouge, Fuggle France, Tradition France),
+producteur alsacien réel (pas un revendeur — gate sur la nav "Our Hops" du
+site). `ingest.ingest_hops_comptoir` n'écrit de composition que pour une
+variété ABSENTE de `hops` avant crawl (jamais fusionnée à une variété
+existante).
+- **Unité `mg_100g`** (linalol/farnésène/géraniol, mg pour 100 g de houblon —
+  DIFFÉRENTE de `pct_oil`, % de l'huile totale, utilisée par BarthHaas/Yakima
+  pour ces mêmes composés) — introduite précisément pour éviter le bug de
+  moyenne inter-source de `matching.load()` (jamais écrite pour une variété
+  déjà connue). **Bug réel trouvé en aval (signalé par l'utilisateur,
+  2026-09-09)** : `app._compare_detail_value` (Compare Hops, barplot
+  "Detailed composition") ignorait l'unité et renvoyait `mg_100g` brut tel
+  quel (même branche que les thiols, "toute unité ≠ pct_oil est déjà
+  absolue") — sur le même axe que les % d'huile des autres houblons
+  (ex. Elixir : farnésène 150-200 mg_100g, un ordre de grandeur au-dessus
+  de n'importe quel % d'huile réel, écrasait tout l'axe). Corrigé par
+  `app._COMPARE_DETAIL_ABSOLUTE_UNITS` (liste blanche explicite des unités
+  déjà-absolues reconnues, `mg_100g` volontairement absente → `None`, jamais
+  tracé) + caption dédiée nommant houblon/composé exclus. Corrige aussi
+  l'indice de précocité/Survivables (`_survivable_compound_positions_all`,
+  T99/T117) qui partage le même socle (`_compare_field_db_values`) — sa
+  distribution `linalool`/`geraniol` DB-wide était polluée par les mêmes
+  valeurs mg_100g avant ce correctif. Aucune conversion tentée (pas de
+  densité d'huile sourcée pour mg/100g de houblon → % d'huile) : la valeur
+  reste visible ailleurs (tableaux de composition génériques, colonne
+  "Unit"), simplement absente de ce graphique. Étendre `matching.load()`
+  lui-même pour vérifier l'unité avant de moyenner (le "bug latent" déjà
+  documenté par T134) reste un ticket de suivi distinct.
+
 ### Licence
 Code MIT. FooDB/FlavorDB2 non commerciales. BeerMaverick sans licence de données
 publiée — attribution systématique, lecture seule, esprit non-commercial.
+hops-comptoir.com sans licence de données publiée non plus — même traitement.
 
 ## Fonctionnalités clés (état actuel)
 

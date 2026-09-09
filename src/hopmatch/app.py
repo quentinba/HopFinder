@@ -239,6 +239,14 @@ _TOOL_SUMMARY_BY_MODE = {t["mode"]: t for t in _TOOL_SUMMARIES}
 # un `git log` en direct exigerait aussi que `.git` soit présent dans le
 # conteneur déployé, ce qui n'est pas garanti.
 _RECENT_UPDATES = [
+    ("2026-09-09", "Fixed Compare Hops' \"Detailed composition\" chart: "
+                   "linalool/geraniol/farnesene for the 5 French hops-comptoir "
+                   "varieties are measured in mg per 100g of hop (a different "
+                   "unit than the % of oil used elsewhere), and were plotted "
+                   "on the same axis, throwing off the whole scale. They're "
+                   "now left out of this chart with an explanatory note "
+                   "instead -- the raw value is still visible in the "
+                   "composition table on that hop's Browse page."),
     ("2026-09-09", "Amplify's pre-filled descriptor suggestions got more "
                    "precise for ~25 ingredients (coriander, rosemary, "
                    "tarragon, basil, cranberry, kiwi, celeriac, artichoke, "
@@ -3402,11 +3410,15 @@ _COMPARE_DETAIL_OIL_COMPOUNDS = ["myrcene", "humulene", "caryophyllene", "farnes
                                 "linalool", "geraniol", "beta-pinene", "selinene",
                                 "isobutyrate", "ketones"]
 # thiols : SEUL composé de la liste "détaillée" en µg/kg (tous les autres
-# sont en % d'huile, pct_oil) -- piège d'unité découvert en écrivant ce
-# ticket (l'utilisateur n'avait signalé le mélange % / % de % / ml-100g que
-# pour le barplot 1) : mélanger thiols (~0.06 µg/kg) avec myrcène (~40%
-# d'huile) sur le même axe écraserait sa barre. Même traitement à double
-# axe que le barplot 1, jamais fusionné sur le même axe que le reste.
+# sont NORMALEMENT en % d'huile, pct_oil -- sauf `mg_100g`, voir
+# `_COMPARE_DETAIL_ABSOLUTE_UNITS`, une variété hops-comptoir peut mesurer
+# linalool/geraniol/farnesene dans cette unité-là ; `_compare_detail_value`
+# exclut ces valeurs de ce graphique plutôt que de les tracer sur cet axe) --
+# piège d'unité découvert en écrivant ce ticket (l'utilisateur n'avait
+# signalé le mélange % / % de % / ml-100g que pour le barplot 1) : mélanger
+# thiols (~0.06 µg/kg) avec myrcène (~40% d'huile) sur le même axe écraserait
+# sa barre. Même traitement à double axe que le barplot 1, jamais fusionné
+# sur le même axe que le reste.
 # 4mmp/3mh/3m4mp (T96, 2026-09-08) : les 3 espèces individuelles derrière
 # l'agrégat "thiols" (hopsteiner-thiol-2024, per-variety) -- même unité
 # µg/kg, donc même axe secondaire. Un houblon peut porter les DEUX (l'agrégat
@@ -3445,6 +3457,27 @@ def _compare_principal_values(hcomp: dict) -> dict[str, float | None]:
            "Co-humulone\n(% of hop)": co_h_abs, "Total oil\n(ml/100g)": oil}
 
 
+# Unités reconnues par `_compare_detail_value`, hors `pct_oil` (converti/
+# affiché normalement) : chacune est déjà une quantité ABSOLUE, jamais
+# convertie quel que soit `absolute`, EXACTEMENT le même traitement que
+# les thiols avant l'introduction de ce garde-fou -- voir sa docstring.
+# `mg_100g` (T134, hops-comptoir : linalol/farnésène/géraniol de 5 variétés
+# françaises) N'EST PAS dedans -- bug réel signalé par l'utilisateur
+# (2026-09-09) : avant ce garde-fou, `_compare_detail_value` renvoyait ce
+# `mg_100g` brut tel quel dès que l'unité n'était pas `pct_oil`, exactement
+# comme pour les thiols -- sauf que `linalool`/`geraniol`/`farnesene` sont
+# dans `_COMPARE_DETAIL_OIL_COMPOUNDS` (axe "% d'huile"/"ml/100g" partagé
+# avec myrcène etc.), pas dans l'axe secondaire dédié des thiols. Un houblon
+# hops-comptoir affichait donc son linalol en mg/100g DE HOUBLON directement
+# sur le même axe que le % d'huile des autres sources -- ordres de grandeur
+# incomparables, axe entier écrasé. Pas de conversion tentée (pas de densité
+# d'huile sourcée pour transformer mg/100g de houblon en % d'huile) : ce
+# composé est simplement exclu de ce graphique pour cette variété (voir
+# `incompatible_unit` dans `app._compare`), la valeur mg/100g reste visible
+# ailleurs (tableaux de composition génériques, colonne "Unit").
+_COMPARE_DETAIL_ABSOLUTE_UNITS = {"ug_kg"}
+
+
 def _compare_detail_value(hcomp: dict, compound: str, absolute: bool) -> float | None:
     """Valeur d'UN composé du barplot 2 pour UN houblon, en % d'huile (par
     défaut) ou en quantité absolue ml/100g (`absolute=True`, bascule
@@ -3452,19 +3485,27 @@ def _compare_detail_value(hcomp: dict, compound: str, absolute: bool) -> float |
     lue telle quelle : convertir `% d'huile × huile_totale / 100`, EXACTEMENT
     la même conversion que `matching.amount()` applique déjà pour l'unité
     `pct_oil` côté scoring, réappliquée ici pour l'affichage). Composés en
-    dehors de `pct_oil` (thiols, en µg/kg) ne sont JAMAIS convertis, quel
-    que soit `absolute` -- déjà une quantité absolue. `None` si le composé
-    est absent, OU si `absolute=True` et que `total_oil` de ce houblon est
-    inconnu (aucune conversion possible) -- jamais une valeur fabriquée."""
+    dehors de `pct_oil` mais dans `_COMPARE_DETAIL_ABSOLUTE_UNITS` (thiols,
+    en µg/kg) ne sont JAMAIS convertis, quel que soit `absolute` -- déjà une
+    quantité absolue. `None` si le composé est absent, si `absolute=True` et
+    que `total_oil` de ce houblon est inconnu (aucune conversion possible),
+    OU si l'unité n'est reconnue dans AUCUN des deux cas ci-dessus (ex.
+    `mg_100g`, voir `_COMPARE_DETAIL_ABSOLUTE_UNITS`) -- jamais une valeur
+    d'une unité incompatible tracée sur cet axe."""
     rec = hcomp.get(compound)
     if not rec or rec.get("mid") is None:
         return None
-    if not absolute or rec.get("unit") != "pct_oil":
+    unit = rec.get("unit")
+    if unit == "pct_oil":
+        if not absolute:
+            return rec["mid"]
+        oil = hcomp.get("total_oil", {}).get("mid")
+        if oil is None:
+            return None
+        return rec["mid"] * oil / 100.0
+    if unit in _COMPARE_DETAIL_ABSOLUTE_UNITS:
         return rec["mid"]
-    oil = hcomp.get("total_oil", {}).get("mid")
-    if oil is None:
-        return None
-    return rec["mid"] * oil / 100.0
+    return None
 
 
 def _compare_field_db_values(comp: dict, field: str, absolute: bool) -> list[float]:
@@ -5279,18 +5320,29 @@ def _compare(con):
                                     for v in selected)]
     detail_rows = []
     missing_oil = []
+    # {nom houblon: {composés}} exclus de ce graphique parce que mesurés dans
+    # une unité incompatible avec cet axe (ex. `mg_100g` hops-comptoir pour
+    # linalool/geraniol/farnesene, T134) -- jamais silencieux, voir la
+    # docstring de `_compare_detail_value`/`_COMPARE_DETAIL_ABSOLUTE_UNITS`
+    # et la caption plus bas.
+    incompatible_unit: dict[str, set[str]] = {}
     for v in selected:
         name = hops[v]["name"]
         hcomp = comp.get(v, {})
         for c in present_oil_compounds:
+            rec = hcomp.get(c, {})
             val = _compare_detail_value(hcomp, c, show_absolute)
             if val is not None:
                 detail_rows.append({"Hop": name, "Field": c, "Value": val})
-            elif show_absolute and hcomp.get(c, {}).get("mid") is not None:
-                # Composé mesuré (% d'huile) mais `total_oil` inconnu pour CE
-                # houblon -- pas de conversion possible, jamais une barre
-                # fabriquée à partir d'une huile totale devinée.
-                missing_oil.append(name)
+            elif rec.get("mid") is not None:
+                unit = rec.get("unit")
+                if unit == "pct_oil":
+                    # Composé mesuré (% d'huile) mais `total_oil` inconnu
+                    # pour CE houblon -- pas de conversion possible, jamais
+                    # une barre fabriquée à partir d'une huile totale devinée.
+                    missing_oil.append(name)
+                elif unit not in _COMPARE_DETAIL_ABSOLUTE_UNITS:
+                    incompatible_unit.setdefault(name, set()).add(c)
         for tc in _COMPARE_THIOL_SPECIES_COMPOUNDS:
             thiols_val = _compare_detail_value(hcomp, tc, show_absolute)
             if thiols_val is not None:
@@ -5404,6 +5456,25 @@ def _compare(con):
         with _panel():
             st.caption(":material/info: Total oil unknown for: " + ", ".join(sorted(set(missing_oil)))
                       + " — their % of oil composition can't be converted to an absolute amount.")
+    if incompatible_unit:
+        # T134 follow-up (2026-09-09, bug signalé par l'utilisateur en direct :
+        # "Detailed composition... les données sont illisibles... pas sur la
+        # même échelle" depuis l'ajout de hops-comptoir) : linalool/geraniol/
+        # farnesene de ses 5 variétés françaises sont mesurés en mg/100g de
+        # houblon, une unité différente du % d'huile (`pct_oil`) utilisé par
+        # BarthHaas/Yakima pour ces mêmes composés -- `_compare_detail_value`
+        # les excluait déjà silencieusement de ce graphique (aucune conversion
+        # fiable sans densité d'huile sourcée), mais sans jamais le dire à
+        # l'écran. Même traitement que `missing_oil` juste au-dessus : une
+        # ligne nommant précisément quel houblon/composé est absent et
+        # pourquoi, jamais une barre à l'échelle fausse.
+        parts = [f"{name} ({', '.join(sorted(cs))})"
+                for name, cs in sorted(incompatible_unit.items())]
+        with _panel():
+            st.caption(":material/info: Measured in a different unit than this chart "
+                      "(not shown, to avoid a misleading scale — see the composition "
+                      "table on the hop's Browse page for the raw value): "
+                      + "; ".join(parts))
 
     # T102 : "Blend Explorer", BRANCHÉ sur ce mode existant (pas un nouveau
     # mode, ticket explicite) -- une blend a besoin d'AU MOINS 2 houblons,

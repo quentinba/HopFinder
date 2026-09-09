@@ -1066,6 +1066,46 @@ def test_usage_share_db_values_collects_one_stage_across_varieties():
     assert app._usage_share_db_values(usage_all, "Aroma") == [0.6]
     assert sorted(app._usage_share_db_values(usage_all, "Boil")) == [0.4, 1.0]
 
+def test_compare_detail_value_excludes_mg_100g_from_pct_oil_axis():
+    # 2026-09-09, bug utilisateur : "depuis qu'on a rajouté la base de donnée
+    # FR... on est pas sur la meme echelle" -- hops-comptoir (T134) publie
+    # linalool/geraniol/farnesene en mg/100g de houblon pour ses 5 variétés
+    # françaises, une unité différente du pct_oil (% de l'huile) utilisé par
+    # BarthHaas/Yakima pour ces mêmes composés. Avant ce correctif,
+    # `_compare_detail_value` renvoyait ce mg_100g brut tel quel (même
+    # branche que les thiols, "toute unité != pct_oil est déjà absolue") --
+    # une valeur ~40-80 mg/100g tracée sur le même axe qu'un % d'huile
+    # ~0.1-2 écrasait tout le graphique. Unité inconnue de ce graphique ->
+    # None, jamais une valeur d'une autre échelle.
+    hcomp = {"linalool": {"mid": 45.0, "unit": "mg_100g"},
+             "total_oil": {"mid": 1.5, "unit": "ml_100g"}}
+    assert app._compare_detail_value(hcomp, "linalool", absolute=False) is None
+    assert app._compare_detail_value(hcomp, "linalool", absolute=True) is None
+    # pct_oil et ug_kg (thiols) restent inchangés par ce correctif.
+    hcomp_pct = {"myrcene": {"mid": 40.0, "unit": "pct_oil"},
+                "total_oil": {"mid": 2.0, "unit": "ml_100g"}}
+    assert app._compare_detail_value(hcomp_pct, "myrcene", absolute=False) == 40.0
+    assert app._compare_detail_value(hcomp_pct, "myrcene", absolute=True) == pytest.approx(0.8)
+    hcomp_thiol = {"thiols": {"mid": 0.7, "unit": "ug_kg"}}
+    assert app._compare_detail_value(hcomp_thiol, "thiols", absolute=False) == 0.7
+    assert app._compare_detail_value(hcomp_thiol, "thiols", absolute=True) == 0.7
+
+def test_survivable_compound_positions_all_ignores_mg_100g_variety():
+    # Même bug que ci-dessus, vérifié un cran plus loin : `_compare_field_
+    # db_values` (socle de la normalisation quantile de l'indice de
+    # précocité/Survivables) doit exclure la variété mg_100g de la
+    # distribution "linalool", pas seulement de l'affichage Compare Hops --
+    # sinon son ranking pour TOUS les houblons de la base était faussé.
+    comp = {
+        "hopx": {"linalool": {"mid": 10.0, "unit": "pct_oil"}},
+        "hopy": {"linalool": {"mid": 2.0, "unit": "pct_oil"}},
+        "hopfr": {"linalool": {"mid": 45.0, "unit": "mg_100g"}},
+    }
+    hops = {"hopx": {}, "hopy": {}, "hopfr": {}}
+    out = app._survivable_compound_positions_all(hops, comp)
+    assert "hopfr" not in out
+    assert set(out) == {"hopx", "hopy"}
+
 def test_survivable_compound_positions_all_matches_chemical_index_inputs():
     # T117 : même socle que _chemical_earliness_index_all (T99), vérifié
     # avec les mêmes chiffres que test_chemical_earliness_index_all_
