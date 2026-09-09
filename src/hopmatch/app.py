@@ -570,7 +570,7 @@ _RECENT_UPDATES = [
                    "old nested checkboxes."),
     ("2026-08-22", "Contrast: new optional \"Ingredient\" picker at the top "
                    "auto-fills the descriptor list below (editable), same "
-                   "AI-assisted mapping as Amplify — no need to type "
+                   "descriptor mapping as Amplify — no need to type "
                    "descriptors by hand anymore."),
     ("2026-08-22", "Amplify reworked: pick an \"Ingredient\" and its typical "
                    "aroma descriptors now auto-fill (editable) as the main "
@@ -1904,8 +1904,8 @@ def _amplify(con):
                        if d in _descriptors(con)]
     with panel_a:
         if _suggested_desc:
-            st.caption(f"Prefilled from {note}'s typical aroma (AI-assisted "
-                      "suggestion, not measured data) — feel free to edit.")
+            st.caption(f"Prefilled from {note}'s typical aroma (a suggested "
+                      "starting point, not measured data) — feel free to edit.")
         else:
             st.caption(f"No auto-suggested descriptors for {note} yet — add any "
                       "that apply manually, or rely on the molecular layer below.")
@@ -2261,8 +2261,8 @@ def _contrast(con):
     with panel_a:
         if ingredient:
             if _suggested_desc:
-                st.caption(f"Prefilled from {ingredient}'s typical aroma (AI-assisted "
-                          "suggestion, not measured data) — feel free to edit.")
+                st.caption(f"Prefilled from {ingredient}'s typical aroma (a suggested "
+                          "starting point, not measured data) — feel free to edit.")
             else:
                 st.caption(f"No auto-suggested descriptors for {ingredient} yet — "
                           "add any that apply manually below.")
