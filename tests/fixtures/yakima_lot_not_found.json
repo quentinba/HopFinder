@@ -1,0 +1,1 @@
+{"message":"success","success":true,"code":"","data":{"lots":null,"errors":[{"method":"getMultiLotAnalytics","params":["DOES-NOT-EXIST-999"],"response":{"code":"0x7106","message":"An expected resource was not found with the provided parameters."}}],"exceptions":[]}}

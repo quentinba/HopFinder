@@ -2936,6 +2936,122 @@ def ingest_hopsteiner_thiols(out_db: str) -> None:
              f"région catalogue jamais testée) : {', '.join(sorted(no_region_match_names))}")
 
 
+YAKIMA_LOT_API_URL = "https://tools.yakimachief.com/api/lot"
+YAKIMA_LOT_CACHE_DIR = os.path.join("data", "cache", "yakima_lots")
+
+
+def _yakima_lot_fetch_batch(lot_numbers: list[str], timeout: float = 30.0) -> dict:
+    """Un seul appel réseau pour un batch de numéros de lot (<=20, voir
+    `lookup_yakima_lots`) -- SANS cache ici, le cache est géré PAR NUMÉRO DE
+    LOT par l'appelant (un batch de 20 dont 3 sont déjà en cache ne
+    redemande que les 17 manquants, jamais les 20 -- le cache par-batch
+    n'aurait pas cette propriété)."""
+    import requests
+
+    resp = requests.get(
+        YAKIMA_LOT_API_URL, timeout=timeout,
+        params=[("lotNumber[]", n) for n in lot_numbers],
+        headers={"Accept": "application/json", "User-Agent": "hopmatch/0.1 (research)"})
+    resp.raise_for_status()
+    return resp.json()
+
+
+def lookup_yakima_lots(lot_numbers: list[str], out_db: str, sleep: float = 1.0,
+                       timeout: float = 30.0,
+                       cache_dir: str = YAKIMA_LOT_CACHE_DIR) -> dict[str, bool]:
+    """T116 : interroge l'API de lot YCH pour EXACTEMENT les numéros
+    fournis par l'utilisateur -- **aucune énumération, aucune génération de
+    numéros** (contrat du ticket).
+
+    Cache PAR NUMÉRO DE LOT sous `data/cache/yakima_lots/<lot>.json`
+    (écriture atomique, même patron que `_hops_comptoir_fetch`) -- un lot
+    déjà vu (trouvé OU introuvable, les deux sont mis en cache -- même
+    principe que les "trous" MMuM déjà cachés en T91) n'est jamais refetché.
+    Batches de 20 max pour les lots non encore en cache (l'API accepte
+    plusieurs `lotNumber[]` par requête, vérifié en direct jusqu'à 3 lots --
+    20 est une marge prudente, pas une limite documentée par YCH).
+
+    Un lot demandé qui n'apparaît PAS dans la réponse est considéré
+    introuvable -- **jamais via `data.errors`**, par comparaison directe
+    entre les numéros demandés et `parsers.parse_yakima_lot_response(data)`
+    (voir sa docstring pour le piège de batch réel : un lot invalide mêlé à
+    des lots valides dans la même requête n'apparaît NULLE PART dans la
+    réponse, ni dans `lots` ni dans `errors`).
+
+    Écrit dans `hop_lot_analysis` (JAMAIS `hop_composition`, voir
+    `schema.HOP_LOT_ANALYSIS_SCHEMA`). `variety` résolu depuis
+    `variety_name` via `_build_hop_name_index`/`_resolve_hop_variety`
+    (même mécanisme que la réconciliation BeerMaverick/beer-analytics),
+    `NULL` si non reconnu -- jamais deviné.
+
+    Retourne `{lot_number: bool}` (trouvé ou non) pour que l'appelant CLI
+    rapporte précisément quels numéros ont échoué, plutôt qu'un simple
+    compte agrégé."""
+    from .schema import connect, ensure_table, HOP_LOT_ANALYSIS_SCHEMA
+    from datetime import datetime, timezone
+    import json
+    import tempfile
+    import time
+
+    os.makedirs(cache_dir, exist_ok=True)
+
+    def _cache_path(lot_number: str) -> str:
+        return os.path.join(cache_dir,
+                            re.sub(r"[^a-zA-Z0-9_-]", "_", lot_number) + ".json")
+
+    parsed_by_lot: dict[str, dict | None] = {}
+    to_fetch = []
+    for n in lot_numbers:
+        cache_path = _cache_path(n)
+        if os.path.exists(cache_path):
+            with open(cache_path, encoding="utf-8") as f:
+                parsed_by_lot[n] = json.load(f)
+        else:
+            to_fetch.append(n)
+
+    for i in range(0, len(to_fetch), 20):
+        batch = to_fetch[i:i + 20]
+        data = _yakima_lot_fetch_batch(batch, timeout=timeout)
+        parsed = parsers.parse_yakima_lot_response(data)
+        for n in batch:
+            result = parsed.get(n)  # None -- lot absent de la réponse (introuvable)
+            parsed_by_lot[n] = result
+            fd, tmp_path = tempfile.mkstemp(dir=cache_dir)
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    json.dump(result, f)
+                os.replace(tmp_path, _cache_path(n))
+            except BaseException:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+                raise
+        time.sleep(sleep)
+
+    con = connect(out_db)
+    if not con.execute("SELECT name FROM sqlite_master WHERE name='hops'").fetchone():
+        init_db(con); seed_reference(con); con.commit()
+    ensure_table(con, "hop_lot_analysis", HOP_LOT_ANALYSIS_SCHEMA)
+    index = _build_hop_name_index(con)
+    fetched_at = datetime.now(timezone.utc).isoformat()
+
+    found: dict[str, bool] = {}
+    for n in lot_numbers:
+        result = parsed_by_lot.get(n)
+        found[n] = result is not None
+        if result is None:
+            continue
+        variety_name = result["variety_name"]
+        variety = _resolve_hop_variety(index, variety_name) if variety_name else None
+        for compound, (value, unit) in result["compounds"].items():
+            con.execute(
+                "INSERT OR REPLACE INTO hop_lot_analysis VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (n, compound, value, unit, variety_name, variety,
+                 result["crop_year"], result["product_code"], result["grown_by"],
+                 "yakima-lot-api", fetched_at))
+    con.commit(); con.close()
+    return found
+
+
 def reconcile_mmum_hop_varieties(recipes_db: str = "recipes.db", aroma_db: str = "aromahops.db",
                                  hops_csv_path: str | None = None) -> None:
     """T92 : résout `recipe_hops.hop_name` (brut, MMuM) -> `variety` (notre

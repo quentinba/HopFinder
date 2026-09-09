@@ -401,6 +401,40 @@ CREATE TABLE hop_thiol_impact (
 """
 SCHEMA += HOP_THIOL_IMPACT_SCHEMA
 
+# T116 (2026-09-09) : lookup de LOT YCH (endpoint public `/api/lot`, vérifié
+# en direct sur des numéros de lot réels) -- mesure de LOT, PAS de variété.
+# **JAMAIS dans `hop_composition`** : sur 3 lots Citra 2023 déjà comparés
+# (CLAUDE.md), le Cryo (PEL06) affiche ~2x les survivables du T90 (PEL02) --
+# traiter un lot comme représentatif d'une variété serait une fabrication.
+# `variety` = notre slug résolu depuis `variety` API ("Citra® Brand") via
+# `_build_hop_name_index`/`_resolve_hop_variety`, `NULL` si non reconnu --
+# jamais deviné. `compound` couvre 3 groupes de champs API, préfixés pour
+# ne JAMAIS collisionner entre eux sur la clé primaire (linalool/géraniol/
+# myrcène apparaissent à la fois dans `oilComponents` -- % de l'huile -- et
+# dans `survivables` -- unité NON déclarée par l'API, valeurs sur une toute
+# autre échelle -- même houblon, même nom de composé, deux mesures
+# incomparables) : `survivable_*` pour les 22 champs `survivables`
+# (`unit` TOUJOURS NULL, voir ci-dessous), noms bruts pour `brewingValues`/
+# `oilComponents` (uv_alpha, hplc_cohumulone, beta-pinene...).
+# ⚠ **`unit` volontairement NULL pour tout `survivable_*`** : l'API ne
+# déclare pas l'unité, et le 3MH (`survivable_three_mercaptohexanol`) y est
+# 20 à 50x au-dessus de l'agrégat `thiols` BarthHaas pour la même variété
+# (probable total lié aux précurseurs cystéine/glutathion, jamais élucidé --
+# voir docs/OUTREACH_yakima-chief.md, réponse jamais reçue). Tant que ce
+# point n'est pas élucidé, ces valeurs ne sont JAMAIS affichées à côté des
+# nôtres en GUI (le client peut écrire et lire cette table sans qu'aucune
+# page ne les montre) -- voir `app.py` (aucune référence à cette table pour
+# l'instant, volontairement).
+HOP_LOT_ANALYSIS_SCHEMA = """
+CREATE TABLE hop_lot_analysis (
+    lot_number TEXT, compound TEXT, value REAL, unit TEXT,
+    variety_name TEXT, variety TEXT, crop_year INTEGER,
+    product_code TEXT, grown_by TEXT, source TEXT, fetched_at TEXT,
+    PRIMARY KEY (lot_number, compound)
+);
+"""
+SCHEMA += HOP_LOT_ANALYSIS_SCHEMA
+
 # T91 (2026-08-30, D4 tranchée) : corpus BRUT de recettes (MMuM, puis
 # Brewfather/DIY Dog) -- fichier `recipes.db` SÉPARÉ d'`aromahops.db`,
 # jamais référencé par `app._fetch_remote_db`, jamais dans `SCHEMA`/
@@ -495,7 +529,8 @@ def init_db(con: sqlite3.Connection) -> None:
         "DROP TABLE IF EXISTS hop_combinations;"
         "DROP TABLE IF EXISTS hop_addition_timing;"
         "DROP TABLE IF EXISTS beer_style_aliases;"
-        "DROP TABLE IF EXISTS hop_thiol_impact;")
+        "DROP TABLE IF EXISTS hop_thiol_impact;"
+        "DROP TABLE IF EXISTS hop_lot_analysis;")
     con.executescript(SCHEMA)
 
 

@@ -221,6 +221,14 @@ def main(argv=None):
                               "depuis data/mappings/hopsteiner_thiol_species_2024.yaml -- T96")
     hts.add_argument("--db", default=DEFAULT_DB)
 
+    ll = sub.add_parser("lookup-lot",
+                        help="lookup de lot(s) YCH fournis explicitement (API publique "
+                             "/api/lot, mesure de LOT jamais de variété) -- T116")
+    ll.add_argument("lots", nargs="*", help="numéros de lot (ex. 23-WA346-027)")
+    ll.add_argument("--file", help="fichier avec un numéro de lot par ligne")
+    ll.add_argument("--db", default=DEFAULT_DB)
+    ll.add_argument("--sleep", type=float, default=1.0)
+
     msr = sub.add_parser("reconcile-mmum-styles",
                          help="résout recipes.style_raw -> style_id BJCP dans recipes.db "
                               "(data/mappings/beer_style_aliases.yaml) -- T94")
@@ -340,6 +348,24 @@ def main(argv=None):
         ingest.ingest_hops_comptoir(a.db, sleep=a.sleep, limit=a.limit); return 0
     if a.cmd == "ingest-hopsteiner-thiols":
         ingest.ingest_hopsteiner_thiols(a.db); return 0
+    if a.cmd == "lookup-lot":
+        lots = list(a.lots)
+        if a.file:
+            with open(a.file, encoding="utf-8") as f:
+                lots += [line.strip() for line in f if line.strip()]
+        # Dédoublonnage en préservant l'ordre -- un même numéro passé deux
+        # fois (positionnel + --file, ou doublon dans --file) ne doit être
+        # ni refetché ni rapporté deux fois.
+        lots = list(dict.fromkeys(lots))
+        if not lots:
+            print("Aucun numéro de lot fourni (positionnel ou --file)."); return 1
+        found = ingest.lookup_yakima_lots(lots, a.db, sleep=a.sleep)
+        n_found = sum(found.values())
+        print(f"{n_found}/{len(lots)} lot(s) trouvé(s)")
+        missing = [n for n, ok in found.items() if not ok]
+        if missing:
+            print(f"  introuvable(s) : {', '.join(missing)}")
+        return 0
     if a.cmd == "reconcile-mmum-styles":
         ingest.reconcile_mmum_style_ids(a.recipes_db); return 0
     if a.cmd == "compute-hop-combinations":

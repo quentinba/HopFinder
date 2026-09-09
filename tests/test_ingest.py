@@ -2098,6 +2098,113 @@ def test_ingest_hopsteiner_thiols_is_idempotent(tmp_path, monkeypatch):
     assert n_comp == 3  # mosaic + 2 lignes Nelson Sauvin (Eureka! sautée)
 
 
+def _yakima_lot_fixture(name):
+    import json
+    from pathlib import Path
+    with open(Path(__file__).parent / "fixtures" / name, encoding="utf-8") as f:
+        return json.load(f)
+
+def test_lookup_yakima_lots_writes_hop_lot_analysis_not_composition(tmp_path, monkeypatch):
+    fixture = _yakima_lot_fixture("yakima_lot_found.json")
+    monkeypatch.setattr(ingest, "_yakima_lot_fetch_batch", lambda batch, **kw: fixture)
+    db_path = str(tmp_path / "t.db")
+    con = connect(db_path); init_db(con)
+    con.execute("INSERT INTO hops (variety, name, region, sources, purpose) "
+               "VALUES ('citra', 'Citra', 'United States', 'barthhaas', NULL)")
+    con.commit(); con.close()
+
+    found = ingest.lookup_yakima_lots(["23-WA346-027"], db_path, sleep=0,
+                                      cache_dir=str(tmp_path / "cache"))
+    assert found == {"23-WA346-027": True}
+
+    con = connect(db_path)
+    row = con.execute(
+        "SELECT * FROM hop_lot_analysis WHERE lot_number='23-WA346-027' "
+        "AND compound='survivable_three_mercaptohexanol'").fetchone()
+    n_comp_rows = con.execute(
+        "SELECT COUNT(*) FROM hop_composition WHERE source='yakima-lot-api'").fetchone()[0]
+    con.close()
+    assert row["value"] == 0.7 and row["unit"] is None
+    assert row["variety_name"] == "Citra® Brand"
+    assert row["variety"] == "citra"
+    assert row["crop_year"] == 2023
+    assert row["source"] == "yakima-lot-api"
+    assert n_comp_rows == 0  # JAMAIS dans hop_composition
+
+def test_lookup_yakima_lots_resolves_variety_via_name(tmp_path, monkeypatch):
+    fixture = _yakima_lot_fixture("yakima_lot_found.json")
+    monkeypatch.setattr(ingest, "_yakima_lot_fetch_batch", lambda batch, **kw: fixture)
+    db_path = str(tmp_path / "t.db")
+    con = connect(db_path); init_db(con)
+    con.commit(); con.close()  # AUCUN houblon "citra" en base
+
+    ingest.lookup_yakima_lots(["23-WA346-027"], db_path, sleep=0, cache_dir=str(tmp_path / "cache"))
+
+    con = connect(db_path)
+    row = con.execute(
+        "SELECT variety FROM hop_lot_analysis WHERE lot_number='23-WA346-027' "
+        "AND compound='total_oil'").fetchone()
+    con.close()
+    assert row["variety"] is None  # jamais deviné
+
+def test_lookup_yakima_lots_unknown_lot_reported_not_found(tmp_path, monkeypatch):
+    fixture = _yakima_lot_fixture("yakima_lot_not_found.json")
+    monkeypatch.setattr(ingest, "_yakima_lot_fetch_batch", lambda batch, **kw: fixture)
+    db_path = str(tmp_path / "t.db")
+    con = connect(db_path); init_db(con); con.commit(); con.close()
+
+    found = ingest.lookup_yakima_lots(["DOES-NOT-EXIST-999"], db_path, sleep=0,
+                                      cache_dir=str(tmp_path / "cache"))
+    assert found == {"DOES-NOT-EXIST-999": False}
+
+    con = connect(db_path)
+    n = con.execute("SELECT COUNT(*) FROM hop_lot_analysis").fetchone()[0]
+    con.close()
+    assert n == 0
+
+def test_lookup_yakima_lots_mixed_batch_partial_found(tmp_path, monkeypatch):
+    fixture = _yakima_lot_fixture("yakima_lot_mixed_batch.json")
+    monkeypatch.setattr(ingest, "_yakima_lot_fetch_batch", lambda batch, **kw: fixture)
+    db_path = str(tmp_path / "t.db")
+    con = connect(db_path); init_db(con); con.commit(); con.close()
+
+    found = ingest.lookup_yakima_lots(
+        ["23-WA346-027", "P92-IUCIT3082", "DOES-NOT-EXIST-999"], db_path, sleep=0,
+        cache_dir=str(tmp_path / "cache"))
+    assert found == {"23-WA346-027": True, "P92-IUCIT3082": True,
+                     "DOES-NOT-EXIST-999": False}
+
+def test_lookup_yakima_lots_second_call_never_refetches_cached_lot(tmp_path, monkeypatch):
+    fixture = _yakima_lot_fixture("yakima_lot_found.json")
+    calls = []
+    def _fake_fetch(batch, **kw):
+        calls.append(list(batch))
+        return fixture
+    monkeypatch.setattr(ingest, "_yakima_lot_fetch_batch", _fake_fetch)
+    db_path = str(tmp_path / "t.db")
+    con = connect(db_path); init_db(con); con.commit(); con.close()
+    cache_dir = str(tmp_path / "cache")
+
+    ingest.lookup_yakima_lots(["23-WA346-027"], db_path, sleep=0, cache_dir=cache_dir)
+    ingest.lookup_yakima_lots(["23-WA346-027"], db_path, sleep=0, cache_dir=cache_dir)
+    assert len(calls) == 1  # 2e appel entièrement servi depuis le cache disque
+
+def test_lookup_yakima_lots_caches_not_found_lots_too(tmp_path, monkeypatch):
+    fixture = _yakima_lot_fixture("yakima_lot_not_found.json")
+    calls = []
+    def _fake_fetch(batch, **kw):
+        calls.append(list(batch))
+        return fixture
+    monkeypatch.setattr(ingest, "_yakima_lot_fetch_batch", _fake_fetch)
+    db_path = str(tmp_path / "t.db")
+    con = connect(db_path); init_db(con); con.commit(); con.close()
+    cache_dir = str(tmp_path / "cache")
+
+    ingest.lookup_yakima_lots(["DOES-NOT-EXIST-999"], db_path, sleep=0, cache_dir=cache_dir)
+    ingest.lookup_yakima_lots(["DOES-NOT-EXIST-999"], db_path, sleep=0, cache_dir=cache_dir)
+    assert len(calls) == 1
+
+
 def test_reconcile_mmum_hop_varieties_writes_variety_and_product_form(tmp_path, monkeypatch):
     aroma_path = str(tmp_path / "aromahops.db")
     con = connect(aroma_path)

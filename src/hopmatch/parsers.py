@@ -1271,3 +1271,128 @@ def parse_hops_comptoir_our_hops_paths(html: str) -> list[str]:
     if not m:
         return []
     return _HOPS_COMPTOIR_NAV_LINK_RE.findall(m.group(1))
+
+
+# --------------------------------------------------------------------------- #
+# YAKIMA CHIEF — lookup de lot (T116, endpoint /api/lot, mesure de LOT)
+# --------------------------------------------------------------------------- #
+# `brewingValues` : préfixe RAW (pas "survivable_"), toutes en `pct` sauf
+# `hsi` (Hop Storage Index, ratio d'absorbance sans dimension par
+# construction, jamais un %) -- `lcvAlpha75` marqué `pct` par déduction de
+# grandeur (11.9/23.2 sur les mêmes lots que uvAlpha 12.8/23.7 et hplcAlpha
+# 10.5/20.1 -- même ordre de grandeur qu'une mesure d'acide alpha, pas une
+# supposition de nom seul).
+_YAKIMA_LOT_BREWING_VALUE_FIELDS: dict[str, tuple[str, str | None]] = {
+    "uvAlpha": ("uv_alpha", "pct"),
+    "uvBeta": ("uv_beta", "pct"),
+    "hsi": ("hsi", "ratio"),
+    "hplcAlpha": ("hplc_alpha", "pct"),
+    "hplcBeta": ("hplc_beta", "pct"),
+    "hplcCohumulone": ("hplc_cohumulone", "pct"),
+    "hplcColupulone": ("hplc_colupulone", "pct"),
+    "moisture": ("moisture", "pct"),
+    "lcvAlpha75": ("lcv_alpha_75", "pct"),
+}
+
+# `oilComponents` : `totalOil` en `ml_100g` (même convention que BarthHaas/
+# Yakima/hops-comptoir pour le même nom de champ ailleurs dans ce projet),
+# le reste en `pct_oil` (vérifié : les composants + "other" totalisent
+# ~100 sur les 3 lots réels observés). `other` -> "oil_other" (jamais un nom
+# de composé "other" nu, ambigu dans un tableau composé/valeur générique).
+_YAKIMA_LOT_OIL_COMPONENT_FIELDS: dict[str, tuple[str, str]] = {
+    "totalOil": ("total_oil", "ml_100g"),
+    "betaPinene": ("beta-pinene", "pct_oil"),
+    "myrcene": ("myrcene", "pct_oil"),
+    "linalool": ("linalool", "pct_oil"),
+    "caryophyllene": ("caryophyllene", "pct_oil"),
+    "farnesene": ("farnesene", "pct_oil"),
+    "humulene": ("humulene", "pct_oil"),
+    "geraniol": ("geraniol", "pct_oil"),
+    "other": ("oil_other", "pct_oil"),
+}
+
+# `survivables` (22 champs, CLAUDE.md) : préfixe `survivable_` SYSTÉMATIQUE
+# -- linalool/géraniol/myrcène/beta-pinène/humulène apparaissent AUSSI dans
+# `oilComponents` ci-dessus (même houblon, même nom de molécule, échelle et
+# méthodologie totalement différentes -- l'unité n'est même pas déclarée
+# ici, voir `unit=None` ci-dessous) : sans ce préfixe, les deux mesures
+# collisionneraient sur la même clé primaire (lot_number, compound) et
+# s'écraseraient silencieusement. `unit` TOUJOURS `None` -- voir
+# `schema.HOP_LOT_ANALYSIS_SCHEMA` pour l'ambiguïté documentée (3MH 20-50x
+# au-dessus de l'agrégat `thiols` BarthHaas, jamais élucidé).
+_YAKIMA_LOT_SURVIVABLE_FIELDS: dict[str, str] = {
+    "isobutylIsobutyrate": "survivable_isobutyl_isobutyrate",
+    "twoMethylbutylIsobutyrate": "survivable_two_methylbutyl_isobutyrate",
+    "isoamylIsobutyrate": "survivable_isoamyl_isobutyrate",
+    "methylGeranate": "survivable_methyl_geranate",
+    "twoNonanone": "survivable_two_nonanone",
+    "linalool": "survivable_linalool",
+    "geraniol": "survivable_geraniol",
+    "threeMercaptohexanol": "survivable_three_mercaptohexanol",
+    "methylHexanoate": "survivable_methyl_hexanoate",
+    "alphaPinene": "survivable_alpha_pinene",
+    "myrcene": "survivable_myrcene",
+    "betaPinene": "survivable_beta_pinene",
+    "methylHeptanoate": "survivable_methyl_heptanoate",
+    "limonene": "survivable_limonene",
+    "methylOctanoate": "survivable_methyl_octanoate",
+    "methylNonanoate": "survivable_methyl_nonanoate",
+    "methylDecanoate": "survivable_methyl_decanoate",
+    "geranylAcetate": "survivable_geranyl_acetate",
+    "transCaryophyllene": "survivable_trans_caryophyllene",
+    "humulene": "survivable_humulene",
+    "caryophylleneOxide": "survivable_caryophyllene_oxide",
+    "transBetaFarnesene": "survivable_trans_beta_farnesene",
+}
+
+
+def parse_yakima_lot_response(data: dict) -> dict[str, dict]:
+    """Parse la réponse JSON de `GET /api/lot?lotNumber[]=...` (T116) --
+    fonction pure, aucun appel réseau. Renvoie {lot_number: {"variety_name",
+    "crop_year", "product_code", "grown_by", "compounds": {compound:
+    (value, unit)}}} pour chaque lot RÉELLEMENT présent dans `data.lots`
+    (un lot inconnu, absent de la réponse -- voir le piège de batch
+    ci-dessous -- n'a simplement pas d'entrée, jamais une entrée vide
+    fabriquée).
+
+    ⚠ **Piège de batch réel, vérifié en direct (2026-09-09) sur l'API
+    réelle avec un mélange de lots valides/invalides dans la MÊME
+    requête** : `data.errors` (avec le code `0x7106` documenté dans le
+    ticket) n'apparaît QUE quand TOUS les lots demandés dans une requête
+    sont invalides -- un lot invalide MÊLÉ à des lots valides dans le même
+    batch est **silencieusement absent de `data.lots` ET de `data.errors`**
+    (aucun signal explicite du tout, contrairement à ce que le ticket
+    supposait). Cette fonction ne peut donc PAS distinguer un lot
+    "invalide" d'un lot "jamais demandé" à partir de la seule réponse --
+    c'est à l'appelant (`ingest.lookup_yakima_lots`) de comparer les
+    numéros de lot RÉELLEMENT demandés à `set(parse_yakima_lot_response(
+    data))` pour savoir lesquels manquent, jamais de compter sur
+    `data.errors` pour un batch mixte."""
+    out = {}
+    lots = (data.get("data") or {}).get("lots") or {}
+    for lot_number, lot in lots.items():
+        compounds: dict[str, tuple[float, str | None]] = {}
+        bv = lot.get("brewingValues") or {}
+        for field, (compound, unit) in _YAKIMA_LOT_BREWING_VALUE_FIELDS.items():
+            v = bv.get(field)
+            if v is not None:
+                compounds[compound] = (v, unit)
+        oc = lot.get("oilComponents") or {}
+        for field, (compound, unit) in _YAKIMA_LOT_OIL_COMPONENT_FIELDS.items():
+            v = oc.get(field)
+            if v is not None:
+                compounds[compound] = (v, unit)
+        sv = lot.get("survivables") or {}
+        for field, compound in _YAKIMA_LOT_SURVIVABLE_FIELDS.items():
+            v = sv.get(field)
+            if v is not None:
+                compounds[compound] = (v, None)
+        farms = lot.get("farms") or []
+        out[lot_number] = {
+            "variety_name": lot.get("variety"),
+            "crop_year": lot.get("cropYear"),
+            "product_code": lot.get("productCode"),
+            "grown_by": farms[0].get("grownBy") if farms else None,
+            "compounds": compounds,
+        }
+    return out

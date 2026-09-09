@@ -980,3 +980,61 @@ def test_parse_hops_comptoir_our_hops_paths_excludes_resold_varieties():
 
 def test_parse_hops_comptoir_our_hops_paths_empty_without_the_nav_section():
     assert parsers.parse_hops_comptoir_our_hops_paths("<div>no nav here</div>") == []
+
+
+def _yakima_lot_fixture(name: str) -> dict:
+    with open(FIXTURES_DIR / name, encoding="utf-8") as f:
+        return json.load(f)
+
+def test_parse_yakima_lot_response_extracts_denormalized_fields():
+    # Fixture RÉELLE (capturée en direct 2026-09-09, lot 23-WA346-027).
+    data = _yakima_lot_fixture("yakima_lot_found.json")
+    parsed = parsers.parse_yakima_lot_response(data)
+    lot = parsed["23-WA346-027"]
+    assert lot["variety_name"] == "Citra® Brand"
+    assert lot["crop_year"] == 2023
+    assert lot["product_code"] == "CON02"
+    assert lot["grown_by"] == "Double R Ranches"
+
+def test_parse_yakima_lot_response_brewing_values_and_oil_components():
+    data = _yakima_lot_fixture("yakima_lot_found.json")
+    lot = parsers.parse_yakima_lot_response(data)["23-WA346-027"]
+    assert lot["compounds"]["uv_alpha"] == (13.9, "pct")
+    assert lot["compounds"]["hsi"] == (0.253, "ratio")
+    assert lot["compounds"]["total_oil"] == (2, "ml_100g")
+    assert lot["compounds"]["myrcene"] == (63.2, "pct_oil")
+    # Ce lot est en balle (CON02) -- pas de hplc*/lcvAlpha75 (pellet-only,
+    # vérifié en direct) : absents plutôt que fabriqués.
+    assert "hplc_alpha" not in lot["compounds"]
+
+def test_parse_yakima_lot_response_survivables_prefixed_and_unit_none():
+    data = _yakima_lot_fixture("yakima_lot_found.json")
+    lot = parsers.parse_yakima_lot_response(data)["23-WA346-027"]
+    # myrcene EXISTE dans oilComponents (63.2, pct_oil) ET dans survivables
+    # (9263.1, unité non déclarée) -- les deux clés doivent coexister SANS
+    # collision grâce au préfixe "survivable_".
+    assert lot["compounds"]["myrcene"] == (63.2, "pct_oil")
+    assert lot["compounds"]["survivable_myrcene"] == (9263.1, None)
+    assert lot["compounds"]["survivable_three_mercaptohexanol"] == (0.7, None)
+    assert lot["compounds"]["survivable_methyl_geranate"] == (346.1, None)
+
+def test_parse_yakima_lot_response_null_survivable_fields_absent():
+    # methylHexanoate/geranylAcetate/caryophylleneOxide/transBetaFarnesene
+    # sont `null` sur ce lot -- absents du dict, jamais un 0/None fabriqué.
+    data = _yakima_lot_fixture("yakima_lot_found.json")
+    lot = parsers.parse_yakima_lot_response(data)["23-WA346-027"]
+    assert "survivable_methyl_hexanoate" not in lot["compounds"]
+    assert "survivable_geranyl_acetate" not in lot["compounds"]
+
+def test_parse_yakima_lot_response_unknown_lot_absent_not_fabricated():
+    data = _yakima_lot_fixture("yakima_lot_not_found.json")
+    parsed = parsers.parse_yakima_lot_response(data)
+    assert parsed == {}
+
+def test_parse_yakima_lot_response_mixed_batch_only_valid_lots_present():
+    # Piège réel vérifié en direct : un lot invalide MÊLÉ à des lots
+    # valides dans la même requête n'apparaît NI dans errors NI dans lots
+    # -- seuls les 2 lots valides doivent ressortir ici, silencieusement.
+    data = _yakima_lot_fixture("yakima_lot_mixed_batch.json")
+    parsed = parsers.parse_yakima_lot_response(data)
+    assert set(parsed) == {"23-WA346-027", "P92-IUCIT3082"}
