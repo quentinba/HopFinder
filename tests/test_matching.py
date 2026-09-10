@@ -1653,6 +1653,96 @@ def test_molecular_scores_matches_naive_specificity_computation(db):
         else:
             assert h not in scores
 
+# --------------------------------------------------------------------------- #
+# Unités de composé et axe de scoring (bug B1 de AUDIT.md, 2026-09-10)
+#
+# Les fixtures `data/fixtures/` ne contiennent que barthhaas/yakima, donc AUCUN
+# test de ce fichier ne voyait jamais une unité étrangère au couple
+# pct_oil/ug_kg -- c'est structurellement ce qui a laissé passer le bug (une
+# 3e unité, `mg_100g`, introduite en base par T134/hops-comptoir pour
+# linalool/geraniol/farnesene). Les tests ci-dessous construisent donc leur
+# `comp` À LA MAIN avec des unités mélangées, plutôt que de dépendre des
+# fixtures.
+# --------------------------------------------------------------------------- #
+def test_amount_excludes_a_unit_that_cannot_share_the_oil_axis():
+    comp = {
+        "fr": {"geraniol": {"mid": 12.5, "unit": "mg_100g", "sources": ["hops-comptoir"]},
+               "total_oil": {"mid": 2.0, "unit": "ml_100g", "sources": ["hops-comptoir"]}},
+        "us": {"geraniol": {"mid": 1.8, "unit": "pct_oil", "sources": ["yakima"]},
+               "total_oil": {"mid": 1.725, "unit": "ml_100g", "sources": ["yakima"]}},
+        "bh": {"thiols": {"mid": 26.5, "unit": "ug_kg", "sources": ["barthhaas"]}},
+    }
+    # pct_oil -> quantité absolue ml/100g (comportement historique, inchangé).
+    assert matching.amount("us", "geraniol", comp) == pytest.approx(1.8 / 100 * 1.725)
+    # ug_kg -> déjà absolu, entre tel quel (thiols, comportement historique).
+    assert matching.amount("bh", "thiols", comp) == 26.5
+    # mg_100g -> mg PAR 100 g DE HOUBLON, pas une fraction de l'huile : aucune
+    # conversion vers ml/100g n'est possible sans une densité d'huile sourcée
+    # (aucune dans ce projet). Exclu du score plutôt que comparé à tort.
+    assert matching.amount("fr", "geraniol", comp) == 0.0
+
+def test_molecular_scores_foreign_unit_does_not_flatten_every_other_hop():
+    # LE bug : `molecular_scores` normalise chaque molécule par son maximum SUR
+    # TOUTE LA BASE (`a / max_amt[m]`). Une seule valeur dans une unité ~1000x
+    # plus grande devient ce maximum et écrase la contribution de TOUS les
+    # autres houblons, pas seulement celle du houblon fautif. Mesuré sur la base
+    # réelle avant correction : 232/258 notes avaient un houblon `mg_100g` en
+    # #1, et 240/258 changeaient de #1 une fois l'unité écartée.
+    comp = {
+        "fr": {"geraniol": {"mid": 12.5, "unit": "mg_100g", "sources": ["hops-comptoir"]},
+               "total_oil": {"mid": 2.0, "unit": "ml_100g", "sources": ["hops-comptoir"]}},
+        "us": {"geraniol": {"mid": 1.8, "unit": "pct_oil", "sources": ["yakima"]},
+               "total_oil": {"mid": 1.725, "unit": "ml_100g", "sources": ["yakima"]}},
+        "de": {"geraniol": {"mid": 0.9, "unit": "pct_oil", "sources": ["barthhaas"]},
+               "total_oil": {"mid": 1.5, "unit": "ml_100g", "sources": ["barthhaas"]}},
+    }
+    scores = matching.molecular_scores({"geraniol": 1.0}, comp)
+    # Le houblon mesuré dans une unité incomparable ne prend aucune place dans
+    # le classement...
+    assert "fr" not in scores
+    # ...et le vrai plus riche en géraniol garde une contribution PLEINE (il
+    # porte le maximum de l'axe), au lieu d'être écrasé à ~0.25% de sa valeur.
+    assert scores["us"][0] > scores["de"][0]
+    assert scores["us"][0] == pytest.approx(matching.specificity("geraniol", comp))
+
+def test_unit_excluded_measurements_names_what_was_left_out():
+    # Exclure sans le dire remplacerait un résultat faux par un silence : la
+    # mesure existe, elle est juste incomparable sur cet axe (décision
+    # utilisateur 2026-09-10). `amplify` remonte l'information pour que la GUI
+    # puisse la nommer.
+    comp = {
+        "fr": {"geraniol": {"mid": 12.5, "unit": "mg_100g", "sources": ["hops-comptoir"]},
+               "linalool": {"mid": 14.0, "unit": "mg_100g", "sources": ["hops-comptoir"]}},
+        "us": {"geraniol": {"mid": 1.8, "unit": "pct_oil", "sources": ["yakima"]}},
+    }
+    out = matching.unit_excluded_measurements({"geraniol": 1.0}, comp)
+    # Seules les molécules DE LA NOTE sont rapportées (linalool n'en fait pas
+    # partie ici), et seul le houblon réellement écarté apparaît.
+    assert out == {"fr": ["geraniol"]}
+    assert matching.unit_excluded_measurements({"thiols": 1.0}, comp) == {}
+
+def test_amplify_reports_measurements_excluded_by_unit(tmp_path):
+    # Bout en bout : une vraie base, `load()` -> `amplify()`, pour couvrir la
+    # réconciliation multi-sources en plus du calcul.
+    con = connect(str(tmp_path / "t.db"))
+    init_db(con)
+    con.executemany("INSERT INTO hops (variety, name, region, sources) VALUES (?,?,?,?)", [
+        ("fr", "Barbe Rouge", "France", "hops-comptoir"),
+        ("us", "Talus", "United States", "yakima"),
+    ])
+    con.executemany("INSERT INTO hop_composition VALUES (?,?,?,?,?,?,?,?)", [
+        ("fr", "geraniol", 10.0, 15.0, "mg_100g", "hops-comptoir", "ok", ""),
+        ("fr", "total_oil", 1.8, 2.2, "ml_100g", "hops-comptoir", "ok", ""),
+        ("us", "geraniol", 1.6, 2.0, "pct_oil", "yakima", "ok", ""),
+        ("us", "total_oil", 1.5, 2.0, "ml_100g", "yakima", "ok", ""),
+    ])
+    con.execute("INSERT INTO aroma_notes VALUES (?,?,?,?)", ("_geraniol", "geraniol", 1.0, "test"))
+    con.commit()
+    r = matching.amplify(con, "_geraniol")
+    assert [h["variety"] for h in r["ranked"]] == ["us"]
+    assert r["unit_excluded"] == {"fr": ["geraniol"]}
+    con.close()
+
 def test_contrast_flags_unmapped_descriptors_without_dropping_mapped_ones(db):
     # "citrus" a une entrée CONTRAST_AFFINITY, "nonexistent-descriptor" n'en a
     # aucune -> doit apparaître dans `unmapped` sans empêcher "citrus" de

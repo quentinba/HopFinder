@@ -239,6 +239,16 @@ _TOOL_SUMMARY_BY_MODE = {t["mode"]: t for t in _TOOL_SUMMARIES}
 # un `git log` en direct exigerait aussi que `.git` soit présent dans le
 # conteneur déployé, ce qui n'est pas garanti.
 _RECENT_UPDATES = [
+    ("2026-09-10", "Fixed a scoring bug that had skewed Amplify's molecular "
+                   "ranking since the French hops were added on 2026-09-08: "
+                   "their linalool/geraniol/farnesene are measured in mg per "
+                   "100g of hop, ~1000x the scale of the % of oil every other "
+                   "source reports, which pushed those two hops to the top and "
+                   "flattened every other hop to near zero. On the ingredients "
+                   "affected, the ranking was wrong for almost every one of "
+                   "them. Those measurements are now left out of the molecular "
+                   "score, with a chip naming which hops were left out and why "
+                   "— their raw values are unchanged on the Browse page."),
     ("2026-09-09", "Fixed Compare Hops' \"Detailed composition\" chart: "
                    "linalool/geraniol/farnesene for the 5 French hops-comptoir "
                    "varieties are measured in mg per 100g of hop (a different "
@@ -2097,6 +2107,30 @@ def _amplify(con):
         if r["orphan"]:
             chips.append((f"{len(r['orphan'])} orphan molecule(s)", "orange",
                          "Carried by the addition, not the hop: " + ", ".join(r["orphan"])))
+        # AUDIT.md §B1 (2026-09-10, décision utilisateur "exclue-les avec
+        # mention à l'écran") : certaines mesures réelles ne sont pas
+        # comparables sur l'axe du score (unité incompatible, ex. le mg/100g
+        # de houblon publié par hops-comptoir pour linalool/geraniol/
+        # farnesene, là où toutes les autres sources donnent un % de
+        # l'huile). Elles sont écartées du calcul par `matching.amount` --
+        # jamais converties au jugé -- mais NOMMÉES ici : les faire
+        # disparaître en silence donnerait un houblon injustement absent du
+        # classement sans que rien ne l'explique, exactement ce que les
+        # molécules orphelines ci-dessus évitent déjà pour l'autre sens.
+        if r.get("unit_excluded"):
+            excluded = r["unit_excluded"]
+            n_hops = len(excluded)
+            detail = "; ".join(f"{hops[v]['name']} ({', '.join(cs)})"
+                              for v, cs in excluded.items() if v in hops)
+            chips.append((
+                f"{n_hops} hop(s) not scorable here", "orange",
+                "These hops do have a measurement for this ingredient's "
+                "molecules, but in a unit that can't be compared with the "
+                "others (mg per 100g of hop, versus % of oil everywhere "
+                "else) — converting would take an oil density figure we "
+                "have no source for. They are left out of the molecular "
+                "score rather than ranked on a wrong scale; the raw value "
+                "is still on their Browse page. Excluded: " + detail))
     if r["total_matches"] > len(r["ranked"]):
         chips.append((
             f"Showing {len(r['ranked'])} of {r['total_matches']}", "orange",
@@ -3475,7 +3509,14 @@ def _compare_principal_values(hcomp: dict) -> dict[str, float | None]:
 # composé est simplement exclu de ce graphique pour cette variété (voir
 # `incompatible_unit` dans `app._compare`), la valeur mg/100g reste visible
 # ailleurs (tableaux de composition génériques, colonne "Unit").
-_COMPARE_DETAIL_ABSOLUTE_UNITS = {"ug_kg"}
+#
+# RÉEXPORT de `matching.SCORING_ABSOLUTE_UNITS` (2026-09-10, AUDIT.md §C2) et
+# plus une seconde liste écrite ici : c'est la MÊME règle métier ("quelles
+# unités peuvent partager l'axe de l'huile"), et les deux copies avaient déjà
+# divergé une fois -- l'affichage corrigé le 2026-09-09, le scoring
+# (`matching.amount`) resté buggé un jour de plus. Une seule définition, deux
+# consommateurs.
+_COMPARE_DETAIL_ABSOLUTE_UNITS = matching.SCORING_ABSOLUTE_UNITS
 
 
 def _compare_detail_value(hcomp: dict, compound: str, absolute: bool) -> float | None:

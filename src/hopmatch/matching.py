@@ -239,14 +239,76 @@ def oav_thresholds(con, molecules: list[str]) -> dict[str, float]:
     return out
 
 
+# Unités DÉJÀ ABSOLUES, admises telles quelles sur l'axe de scoring de
+# `amount()` (à côté de `pct_oil`, qui est converti en ml/100g juste en
+# dessous). Liste BLANCHE explicite : toute autre unité est EXCLUE du score
+# (`amount()` renvoie 0.0), jamais passée brute.
+#
+# ⚠ Bug réel, AUDIT.md §B1 (2026-09-10) -- avant ce garde-fou, `amount()`
+# finissait par `return rec["mid"]`, c'est-à-dire "toute unité qui n'est pas
+# pct_oil est déjà absolue". C'était vrai tant que `ug_kg` (thiols) était la
+# SEULE autre unité de la base ; T134 (2026-09-08, hops-comptoir) en a
+# introduit une deuxième, `mg_100g` (mg pour 100 g DE HOUBLON), sur des noms
+# de composés DÉJÀ mesurés en `pct_oil` ailleurs (linalool/geraniol/
+# farnesene). Ordres de grandeur : géraniol 12,5 (mg_100g, barbe-rouge) contre
+# 0,031 (ml/100g converti, talus -- le vrai maximum de la base), soit ~400x.
+# Comme `molecular_scores` normalise CHAQUE molécule par son maximum sur toute
+# la base (`a / max_amt[m]`), cette seule valeur devenait le maximum et
+# écrasait la contribution de TOUS les autres houblons à ~0,25 % de sa valeur
+# réelle -- pas seulement celle du houblon fautif. Mesuré sur la base réelle
+# avant correction : 232/258 notes avaient un houblon `mg_100g` en #1, et
+# 240/258 (93 %) changeaient de #1 une fois l'unité écartée.
+#
+# Aucune conversion n'est tentée pour `mg_100g` : passer de "mg par 100 g de
+# houblon" à "% de l'huile" exigerait une densité d'huile de houblon, qui
+# n'est sourcée nulle part dans ce projet (règle n°1 : jamais une valeur
+# fabriquée). La mesure existe et reste visible dans les tableaux de
+# composition (colonne "Unit") ; elle est seulement écartée de CET axe, et
+# `unit_excluded_measurements` la nomme explicitement à l'écran plutôt que de
+# la faire disparaître en silence (décision utilisateur, 2026-09-10).
+#
+# Même règle, même liste que l'affichage (`app._COMPARE_DETAIL_ABSOLUTE_UNITS`
+# réexporte CETTE constante) : la conversion d'unité ne doit exister qu'à un
+# seul endroit -- les deux implémentations avaient déjà divergé une fois
+# (l'affichage corrigé le 2026-09-09, le scoring resté buggé jusqu'ici).
+SCORING_ABSOLUTE_UNITS = {"ug_kg"}
+
+
 def amount(variety: str, molecule: str, comp) -> float:
+    """Quantité d'une molécule dans un houblon, sur un axe COMMUN à tous les
+    houblons (unité de fait : ml/100g pour les composés d'huile, µg/kg pour
+    les thiols). `pct_oil` (% de l'huile totale) est converti ; les unités de
+    `SCORING_ABSOLUTE_UNITS` entrent telles quelles ; toute AUTRE unité rend
+    0.0 -- voir le commentaire de cette constante."""
     rec = comp.get(variety, {}).get(hop_compound(molecule))
     if not rec or rec["mid"] is None:
         return 0.0
-    if rec["unit"] == "pct_oil":
+    unit = rec["unit"]
+    if unit == "pct_oil":
         oil = comp.get(variety, {}).get("total_oil")
         return (rec["mid"] / 100.0) * ((oil["mid"] if oil else 1.0) or 1.0)
-    return rec["mid"]
+    if unit in SCORING_ABSOLUTE_UNITS:
+        return rec["mid"]
+    return 0.0
+
+
+def unit_excluded_measurements(note_profile, comp) -> dict[str, list[str]]:
+    """{variety: [composés]} -- mesures RÉELLEMENT présentes en base pour les
+    molécules de CETTE note, mais écartées du score par `amount()` faute
+    d'unité comparable (voir `SCORING_ABSOLUTE_UNITS`). Sert à le DIRE à
+    l'écran : exclure sans le nommer remplacerait un résultat faux par un
+    silence, ce que ce projet s'interdit partout ailleurs (même principe que
+    les molécules orphelines de `coverage()`). Dict vide = rien d'écarté, le
+    cas normal."""
+    out: dict[str, set[str]] = {}
+    for m in note_profile:
+        c = hop_compound(m)
+        for v, cmap in comp.items():
+            rec = cmap.get(c)
+            if (rec and rec["mid"] is not None and rec["unit"] != "pct_oil"
+                    and rec["unit"] not in SCORING_ABSOLUTE_UNITS):
+                out.setdefault(v, set()).add(c)
+    return {v: sorted(cs) for v, cs in sorted(out.items())}
 
 
 def specificity(molecule: str, comp) -> float:
@@ -1097,6 +1159,7 @@ def amplify(con, note: str, w_mol: float = 0.5, w_desc: float = 0.5, use_oav=Fal
     return {"mode": "amplify", "note": note, "coverage": cov, "orphan": orphan,
            "use_oav": use_oav, "has_descriptors": has_descriptors,
            "oav_coverage": oav_cov, "oav_uncovered": oav_uncovered,
+           "unit_excluded": unit_excluded_measurements(profile, comp),
            "total_matches": len(ranked), "ranked": ranked[:top]}
 
 

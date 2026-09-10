@@ -329,6 +329,30 @@ existante).
   "Unit"), simplement absente de ce graphique. Étendre `matching.load()`
   lui-même pour vérifier l'unité avant de moyenner (le "bug latent" déjà
   documenté par T134) reste un ticket de suivi distinct.
+- **Le MÊME bug existait sur le chemin du SCORING, et bien pire — corrigé le
+  2026-09-10 (audit, `AUDIT.md` §B1).** `matching.amount()` finissait par
+  `return rec["mid"]` ("toute unité ≠ pct_oil est déjà absolue") : vrai tant
+  que `ug_kg` était la seule autre unité, faux depuis T134. Comme
+  `molecular_scores` normalise chaque molécule par son MAXIMUM SUR TOUTE LA
+  BASE, une seule valeur `mg_100g` devenait ce maximum et écrasait la
+  contribution de **tous** les autres houblons à ~0,25 % de leur valeur —
+  pas seulement celle du houblon fautif. Mesuré avant correction : **232/258
+  notes avaient un houblon français en #1, 240/258 (93 %) changeaient de #1**
+  une fois l'unité écartée (ex. `strawberry` renvoyait Barbe Rouge 100 /
+  Elixir 60 et tout le reste de la base à 0,2, au lieu de Talus). Corrigé par
+  `matching.SCORING_ABSOLUTE_UNITS` (liste blanche, `mg_100g` exclue →
+  `amount()` renvoie 0.0) + `matching.unit_excluded_measurements` qui NOMME à
+  l'écran les houblons écartés (chip "N hop(s) not scorable here" en Amplify)
+  — décision utilisateur explicite du 2026-09-10 : exclure, mais jamais en
+  silence. `app._COMPARE_DETAIL_ABSOLUTE_UNITS` réexporte désormais cette
+  constante au lieu d'en redéfinir une seconde : les deux copies avaient déjà
+  divergé d'un jour, ne plus jamais les dupliquer.
+  ⚠ **Cause profonde à retenir** : les fixtures de test (`data/fixtures/`) ne
+  contiennent que barthhaas/yakima, donc AUCUN des ~190 tests de
+  `test_matching.py` ne pouvait voir un conflit d'unités inter-sources. Tout
+  test touchant à une règle d'unité doit construire son `comp` à la main avec
+  des unités mélangées (voir les 4 tests ajoutés le 2026-09-10), jamais se
+  reposer sur les fixtures.
 - **Champs manquants différents d'une variété française à l'autre : PAS un
   bug, vérifié en direct sur les 5 variétés (utilisateur, 2026-09-10)** sur
   le HTML brut en cache (`data/cache/hops_comptoir/`, grep direct sur le
