@@ -329,6 +329,18 @@ existante).
   "Unit"), simplement absente de ce graphique. Étendre `matching.load()`
   lui-même pour vérifier l'unité avant de moyenner (le "bug latent" déjà
   documenté par T134) reste un ticket de suivi distinct.
+- **Champs manquants différents d'une variété française à l'autre : PAS un
+  bug, vérifié en direct (utilisateur, 2026-09-10)** sur le HTML brut en
+  cache (`data/cache/hops_comptoir/`) — Comptoir Agricole remplit chaque
+  fiche produit à la main, sans template uniforme, contrairement à
+  BarthHaas/Yakima. Barbe Rouge publie humulène mais jamais beta acid/
+  cohumulone (absents du HTML, pas juste non parsés) ; Elixir publie beta
+  acid/cohumulone mais jamais humulène/caryophyllène individuels (seulement
+  2 agrégats globaux "Monoterpene"/"Sesquiterpene" en mg/100g, jamais
+  ingérés faute de composé individuel correspondant à leur attribuer). Le
+  parseur extrait fidèlement ce qui est publié, rien de plus — si une
+  future page hops-comptoir semble avoir des trous "bizarres", vérifier le
+  HTML brut avant de soupçonner `parsers.parse_hops_comptoir_variety`.
 
 ### Licence
 Code MIT. FooDB/FlavorDB2 non commerciales. BeerMaverick sans licence de données
