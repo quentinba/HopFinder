@@ -239,10 +239,13 @@ _TOOL_SUMMARY_BY_MODE = {t["mode"]: t for t in _TOOL_SUMMARIES}
 # un `git log` en direct exigerait aussi que `.git` soit présent dans le
 # conteneur déployé, ce qui n'est pas garanti.
 _RECENT_UPDATES = [
-    ("2026-09-10", "Browse a hop now opens with an empty search field instead "
-                   "of a hop already picked for you — on a phone, that meant "
-                   "clearing the pre-filled name before typing your own every "
-                   "single time."),
+    ("2026-09-10", "Browse a hop and Amplify now open with an empty search "
+                   "field instead of something already picked for you — on a "
+                   "phone, that meant clearing the pre-filled value before "
+                   "typing your own every single time. Amplify in particular "
+                   "used to land on \"adobo\" (first alphabetically, and an "
+                   "ingredient with no suggested descriptors), which showed "
+                   "the tool at its least useful."),
     ("2026-09-10", "Fixed a scoring bug that had skewed Amplify's molecular "
                    "ranking since the French hops were added on 2026-09-08: "
                    "their linalool/geraniol/farnesene are measured in mg per "
@@ -1896,9 +1899,27 @@ def _amplify(con):
     # inchangés en interne (portée du renommage = label GUI uniquement,
     # même principe déjà appliqué au vocabulaire anglais de app.py).
     with note_col:
-        note = st.selectbox("Ingredient", notes,
+        # `index=None` (2026-09-10, même retour utilisateur que Browse, étendu
+        # ici à sa demande) : `st.selectbox` sélectionne la première option par
+        # défaut, donc la page s'ouvrait sur le premier ingrédient par ordre
+        # alphabétique -- "adobo", une marinade philippine, qui n'a en plus
+        # aucun descripteur suggéré (`INGREDIENT_DESCRIPTORS`) : le premier
+        # écran montrait donc l'outil dans son état le plus inutile, et il
+        # fallait effacer cette valeur avant de taper la sienne (le geste de
+        # trop sur mobile). Voir AUDIT.md §E1.
+        note = st.selectbox("Ingredient", notes, index=None,
+                            placeholder="Type an ingredient...",
                             help="The actual addition put in the beer recipe "
                                  "(a fruit, herb, spice...).")
+    if note is None:
+        # Rien de choisi : ni le sélecteur de mode de classement (`rank_mode_
+        # col`, rempli plus bas), ni les descripteurs, ni les résultats n'ont
+        # de sens -- tous dépendent de l'ingrédient. On sort avant, plutôt que
+        # d'afficher des contrôles qui ne piloteraient rien.
+        with _panel():
+            st.write(f"Pick an ingredient above — {len(notes)} in the database "
+                    "(fruits, herbs, spices...).")
+        return
 
     hops, comp, hop_desc, _ = matching.load(con)
     # T77 (2026-08-22, demande utilisateur explicite -- confusion vérifiée

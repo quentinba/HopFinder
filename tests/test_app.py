@@ -309,6 +309,10 @@ def test_amplify_shows_inline_hop_detail_expander_without_navigating(toy_cwd):
     at = _app()
     at.run()
     at.sidebar.radio[0].set_value("amplify").run()
+    # 2026-09-10 : plus aucun ingrédient présélectionné (voir
+    # test_amplify_starts_with_no_ingredient_selected) -- il faut donc en
+    # choisir un explicitement avant que quoi que ce soit ne se rende.
+    at.selectbox[0].set_value("mynote").run()
     # T76 (2026-08-22) : couche descripteurs devenue la couche principale,
     # couche moléculaire décochée par défaut -- ni "lownote" ni "mynote"
     # n'ont de suggestion auto-remplie (INGREDIENT_DESCRIPTORS ne couvre que
@@ -321,10 +325,36 @@ def test_amplify_shows_inline_hop_detail_expander_without_navigating(toy_cwd):
     assert any("Hopa" in e.label for e in at.expander)
     assert at.sidebar.radio[0].value == "amplify"  # toujours sur la même page
 
+def test_amplify_starts_with_no_ingredient_selected(toy_cwd):
+    # 2026-09-10, demande utilisateur (même retour que Browse, étendu ici) :
+    # `st.selectbox` sélectionnait le premier ingrédient par ordre
+    # alphabétique ("adobo" sur la vraie base, sans aucun descripteur
+    # suggéré), qu'il fallait effacer avant de taper le sien. Rien n'est
+    # présélectionné, et surtout AUCUN contrôle dépendant de l'ingrédient
+    # (mode de classement, descripteurs) n'est rendu tant que rien n'est
+    # choisi -- ils ne piloteraient rien.
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("amplify").run()
+    assert not at.exception
+    assert at.selectbox[0].value is None
+    assert any("Pick an ingredient above" in m.value for m in at.markdown)
+    assert len(at.segmented_control) == 0
+    assert len(at.dataframe) == 0
+    # ...et le chemin normal reprend dès qu'un ingrédient est choisi.
+    at.selectbox[0].set_value("mynote").run()
+    at.segmented_control[0].set_value("Both").run()
+    assert not at.exception
+    assert len(at.dataframe) >= 1
+
 def test_amplify_mode_renders_ranked_table(toy_cwd):
     at = _app()
     at.run()
     at.sidebar.radio[0].set_value("amplify").run()
+    # 2026-09-10 : plus aucun ingrédient présélectionné (voir
+    # test_amplify_starts_with_no_ingredient_selected) -- il faut donc en
+    # choisir un explicitement avant que quoi que ce soit ne se rende.
+    at.selectbox[0].set_value("mynote").run()
     at.segmented_control[0].set_value("Both").run()  # T76 3e addendum : segmented_control remplace les 2 cases
     assert not at.exception
     assert len(at.dataframe) >= 1
@@ -341,6 +371,10 @@ def test_amplify_results_table_includes_purpose_column(toy_cwd):
     at = _app()
     at.run()
     at.sidebar.radio[0].set_value("amplify").run()
+    # 2026-09-10 : plus aucun ingrédient présélectionné (voir
+    # test_amplify_starts_with_no_ingredient_selected) -- il faut donc en
+    # choisir un explicitement avant que quoi que ce soit ne se rende.
+    at.selectbox[0].set_value("mynote").run()
     at.segmented_control[0].set_value("Both").run()  # T76 3e addendum : segmented_control remplace les 2 cases
     assert not at.exception
     df = at.dataframe[0].value
@@ -356,6 +390,10 @@ def test_hop_detail_expander_includes_purpose_badge_and_aroma_wheel(toy_cwd):
     at = _app()
     at.run()
     at.sidebar.radio[0].set_value("amplify").run()
+    # 2026-09-10 : plus aucun ingrédient présélectionné (voir
+    # test_amplify_starts_with_no_ingredient_selected) -- il faut donc en
+    # choisir un explicitement avant que quoi que ce soit ne se rende.
+    at.selectbox[0].set_value("mynote").run()
     at.segmented_control[0].set_value("Both").run()  # T76 3e addendum : segmented_control remplace les 2 cases
     assert not at.exception
     assert any("-badge[" in m.value for m in at.markdown)
@@ -367,6 +405,10 @@ def test_amplify_blend_base_hop_selector_appears_with_descriptors(toy_cwd):
     at = _app()
     at.run()
     at.sidebar.radio[0].set_value("amplify").run()
+    # 2026-09-10 : plus aucun ingrédient présélectionné (voir
+    # test_amplify_starts_with_no_ingredient_selected) -- il faut donc en
+    # choisir un explicitement avant que quoi que ce soit ne se rende.
+    at.selectbox[0].set_value("mynote").run()
     at.multiselect[0].select("citrus").run()
     assert not at.exception
     base_select = at.selectbox(key="amplify_base_hop")
@@ -383,6 +425,10 @@ def test_amplify_blend_renders_each_size_in_its_own_container(toy_cwd):
     at = _app()
     at.run()
     at.sidebar.radio[0].set_value("amplify").run()
+    # 2026-09-10 : plus aucun ingrédient présélectionné (voir
+    # test_amplify_starts_with_no_ingredient_selected) -- il faut donc en
+    # choisir un explicitement avant que quoi que ce soit ne se rende.
+    at.selectbox[0].set_value("mynote").run()
     at.multiselect[0].select("citrus").run()
     assert not at.exception
     assert any("Size 1" in m.value for m in at.markdown)
