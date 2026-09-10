@@ -330,17 +330,29 @@ existante).
   lui-même pour vérifier l'unité avant de moyenner (le "bug latent" déjà
   documenté par T134) reste un ticket de suivi distinct.
 - **Champs manquants différents d'une variété française à l'autre : PAS un
-  bug, vérifié en direct (utilisateur, 2026-09-10)** sur le HTML brut en
-  cache (`data/cache/hops_comptoir/`) — Comptoir Agricole remplit chaque
-  fiche produit à la main, sans template uniforme, contrairement à
-  BarthHaas/Yakima. Barbe Rouge publie humulène mais jamais beta acid/
-  cohumulone (absents du HTML, pas juste non parsés) ; Elixir publie beta
-  acid/cohumulone mais jamais humulène/caryophyllène individuels (seulement
-  2 agrégats globaux "Monoterpene"/"Sesquiterpene" en mg/100g, jamais
-  ingérés faute de composé individuel correspondant à leur attribuer). Le
-  parseur extrait fidèlement ce qui est publié, rien de plus — si une
+  bug, vérifié en direct sur les 5 variétés (utilisateur, 2026-09-10)** sur
+  le HTML brut en cache (`data/cache/hops_comptoir/`, grep direct sur le
+  HTML entier, pas seulement le tableau parsé -- exclut une donnée présente
+  ailleurs sur la page et juste non extraite) — Comptoir Agricole remplit
+  chaque fiche produit à la main, sans template uniforme, contrairement à
+  BarthHaas/Yakima. Trous RÉELLEMENT différents d'une fiche à l'autre,
+  aucun recoupement parfait entre deux variétés :
+  - Cohumulone/beta acids : absents seulement chez Barbe Rouge.
+  - Humulène : absent seulement chez Elixir.
+  - Farnesene : absent chez Fuggle/Tradition (présent Mistral/Barbe Rouge/Elixir).
+  - Geraniol : absent chez Fuggle/Mistral/Tradition (présent Barbe Rouge/Elixir).
+  - Caryophyllène individuel : ABSENT PARTOUT, chez les 5 -- toujours noyé
+    dans un ratio texte "Humulène/Caryophyllène" (ex. "2.8-3.5"), jamais une
+    valeur absolue exploitable, jamais ingéré à raison.
+  - Agrégats "Monoterpene"/"Sesquiterpene" (Fuggle/Mistral/Tradition/Elixir,
+    pas Barbe Rouge) : jamais ingérés, aucun composé individuel de notre
+    schéma auquel les attribuer -- et unité incohérente même entre ces
+    4 fiches (% chez Fuggle/Mistral/Tradition, mg/100g chez Elixir), sans
+    impact pour nous puisqu'on ne les lit pas.
+  Le parseur extrait fidèlement ce qui est publié, rien de plus — si une
   future page hops-comptoir semble avoir des trous "bizarres", vérifier le
-  HTML brut avant de soupçonner `parsers.parse_hops_comptoir_variety`.
+  HTML brut (grep sur le fichier entier) avant de soupçonner
+  `parsers.parse_hops_comptoir_variety`.
 
 ### Licence
 Code MIT. FooDB/FlavorDB2 non commerciales. BeerMaverick sans licence de données
