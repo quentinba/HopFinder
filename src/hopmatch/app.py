@@ -239,6 +239,10 @@ _TOOL_SUMMARY_BY_MODE = {t["mode"]: t for t in _TOOL_SUMMARIES}
 # un `git log` en direct exigerait aussi que `.git` soit présent dans le
 # conteneur déployé, ce qui n'est pas garanti.
 _RECENT_UPDATES = [
+    ("2026-09-10", "Browse a hop now opens with an empty search field instead "
+                   "of a hop already picked for you — on a phone, that meant "
+                   "clearing the pre-filled name before typing your own every "
+                   "single time."),
     ("2026-09-10", "Fixed a scoring bug that had skewed Amplify's molecular "
                    "ranking since the French hops were added on 2026-09-08: "
                    "their linalool/geraniol/farnesene are measured in mg per "
@@ -2667,7 +2671,28 @@ def _browse(con):
             label += f" ({count:,} recipes)" if count is not None else " (no popularity data)"
         return label
 
-    selected = st.selectbox("Hop", varieties, format_func=_format_hop, key="browse_hop")
+    # `index=None` (2026-09-10, retour utilisateur direct : "c'est un peu
+    # chiant sur mobile de devoir supprimer le houblon avant de rentrer celui
+    # qu'on veut"). `st.selectbox` sélectionne la PREMIÈRE option par défaut,
+    # donc la page s'ouvrait toujours sur un houblon arbitraire -- celui en
+    # tête du tri courant (le plus populaire par défaut, l'ordre alphabétique
+    # sinon), jamais un choix de l'utilisateur. Sur mobile, la complétion du
+    # selectbox oblige alors à effacer cette valeur en place avant de pouvoir
+    # taper la sienne, un geste de plus à chaque consultation. Sans sélection
+    # initiale, le champ est directement en attente de frappe.
+    # Le `key` reste : une fois un houblon choisi, il persiste en session
+    # (aller sur un autre outil puis revenir ne perd pas le contexte) -- c'est
+    # seulement le PREMIER affichage qui est vide.
+    # Même défaut arbitraire sur le sélecteur "Ingredient" d'Amplify
+    # (AUDIT.md §E1, "adobo") -- volontairement pas touché ici, ce retour ne
+    # portait que sur Browse.
+    selected = st.selectbox("Hop", varieties, format_func=_format_hop, key="browse_hop",
+                            index=None, placeholder="Type a hop name...")
+    if selected is None:
+        with _panel():
+            st.write("Pick a hop above to see what we have on it — "
+                    f"{len(varieties)} in the database.")
+        return
     h = hops[selected]
     hcomp = comp.get(selected, {})
     # T-D04/T-D10 (2026-08-23, spec Claude Design) : ordre FIXE -- "purpose

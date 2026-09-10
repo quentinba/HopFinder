@@ -689,6 +689,26 @@ def test_by_descriptor_mode_hides_heatmap_for_single_hop(toy_cwd):
     assert not any("Other descriptors" in c.value for c in at.caption)
     assert len([n for n in at.main if isinstance(n, UnknownElement)]) == 1
 
+def test_browse_starts_with_no_hop_selected(toy_cwd):
+    # 2026-09-10, retour utilisateur direct : "c'est un peu chiant sur mobile
+    # de devoir supprimer le houblon avant de rentrer celui qu'on veut" --
+    # `st.selectbox` sélectionne la première option par défaut, la page
+    # s'ouvrait donc sur un houblon arbitraire (tête du tri courant). Aucune
+    # sélection au départ, et surtout aucun détail de houblon rendu tant que
+    # rien n'est choisi (sinon on aurait juste déplacé le problème).
+    at = _app()
+    at.run()
+    at.sidebar.radio[0].set_value("browse").run()
+    assert not at.exception
+    assert at.selectbox[0].value is None
+    assert any("Pick a hop above" in m.value for m in at.markdown)
+    assert not any("Hopa" in s.value for s in at.subheader)
+    # ...et le choix reste possible/fonctionnel juste après (non-régression du
+    # chemin normal).
+    at.selectbox[0].set_value("hopa").run()
+    assert not at.exception
+    assert any("Hopa" in s.value for s in at.subheader)
+
 def test_browse_mode_shows_hop_composition_and_descriptors(toy_cwd):
     # T5 backlog : consulter un houblon (composition + descripteurs) sans
     # passer par amplify/contrast/by-descriptor.
