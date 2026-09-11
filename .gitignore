@@ -24,3 +24,16 @@ data/._*
 # reste en local, continue d'être utilisé/mis à jour comme dossier de suivi
 BACKLOG.md
 docs/BACKLOG.md
+# Fichiers de TRAVAIL de docs/ (2026-09-11, décision utilisateur) : gardés en
+# local, hors du dépôt public. Même esprit que BACKLOG.md ci-dessus -- ce sont
+# des documents de préparation, pas de la documentation du projet.
+#   - OUTREACH_* : brouillons de messages à des tiers (mainteneurs de sources)
+#   - prompt-audit-* : prompts de travail
+#   - FEATURE_NOTES.md : notes internes (un fichier du même nom existe à la
+#     racine et reste, lui, versionné)
+# La documentation RÉELLE de docs/ reste versionnée et référencée par le
+# README : methodologie.md, DATA_SOURCES.md, ARCHITECTURE.md,
+# mapping_compounds.txt.
+docs/OUTREACH_*.md
+docs/prompt-audit-*.md
+docs/FEATURE_NOTES.md

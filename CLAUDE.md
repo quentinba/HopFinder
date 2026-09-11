@@ -250,7 +250,7 @@ affiché, ex. page `/styles/india-pale-ale/american-ipa/` mais charts sous
   résolus. Si un futur re-crawl (nouvelles données, pas juste une reprise)
   montre à nouveau un ralentissement soutenu, même précaution : arrêter
   plutôt que forcer, et considérer la prise de contact prévue (T89,
-  `docs/OUTREACH_beer-analytics.md`) avant de retenter.
+  `docs/OUTREACH_beer-analytics.md`, local, hors dépôt) avant de retenter.
 - **`style_id` (résolution BJCP) jamais fabriqué en ajoutant une ligne
   `beer_styles`.** beer-analytics a une granularité de style PARFOIS plus
   fine que BJCP (ex. 7 variantes de « Specialty IPA » — Black/White/Red IPA

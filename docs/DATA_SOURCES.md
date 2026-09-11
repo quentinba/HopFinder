@@ -424,7 +424,8 @@ Worldwide. » *BrewingScience* 77 (Nov/Dec 2024), pp. 135-141. https://doi.org/1
   résolus** vers BJCP (`data/mappings/beer_style_aliases.yaml`) — le reste garde son
   libellé brut beer-analytics sans équivalent BJCP curé, jamais omis.
 - **Prise de contact (T89, envoyée et RÉPONDUE 2026-08-29)** : message initial dans
-  `docs/OUTREACH_beer-analytics.md`. Le mainteneur a répondu aux
+  `docs/OUTREACH_beer-analytics.md` (brouillon gardé en local, hors dépôt).
+  Le mainteneur a répondu aux
   trois questions posées : (1) crawl des endpoints charts **explicitement
   autorisé**, cadence hebdomadaire/mensuelle largement suffisante (le site ne
   change qu'une fois par jour, quelques centaines de nouvelles recettes) — le

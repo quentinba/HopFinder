@@ -420,7 +420,8 @@ SCHEMA += HOP_THIOL_IMPACT_SCHEMA
 # déclare pas l'unité, et le 3MH (`survivable_three_mercaptohexanol`) y est
 # 20 à 50x au-dessus de l'agrégat `thiols` BarthHaas pour la même variété
 # (probable total lié aux précurseurs cystéine/glutathion, jamais élucidé --
-# voir docs/OUTREACH_yakima-chief.md, réponse jamais reçue). Tant que ce
+# voir docs/OUTREACH_yakima-chief.md -- brouillon local, hors dépôt --,
+# réponse jamais reçue). Tant que ce
 # point n'est pas élucidé, ces valeurs ne sont JAMAIS affichées à côté des
 # nôtres en GUI (le client peut écrire et lire cette table sans qu'aucune
 # page ne les montre) -- voir `app.py` (aucune référence à cette table pour

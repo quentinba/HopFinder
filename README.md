@@ -938,7 +938,8 @@ src/hopmatch/
 data/fixtures/   pages réelles (démo) : barthhaas/{citra,mosaic,saazer}, yakima/{citra,mosaic,simcoe}
 tools/           audit_foodb.py, foodb_impact_check.py
 tests/           parsers, ingest, validation, réconciliation, modes
-docs/            ARCHITECTURE.md, DATA_SOURCES.md, FEATURE_NOTES.md
+docs/            methodologie.md (formules + exemple chiffré), ARCHITECTURE.md,
+                 DATA_SOURCES.md, mapping_compounds.txt
 CLAUDE.md        contexte projet pour Claude Code
 ```
 
