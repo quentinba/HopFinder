@@ -264,7 +264,7 @@ def oav_thresholds(con, molecules: list[str]) -> dict[str, float]:
 # n'est sourcée nulle part dans ce projet (règle n°1 : jamais une valeur
 # fabriquée). La mesure existe et reste visible dans les tableaux de
 # composition (colonne "Unit") ; elle est seulement écartée de CET axe, et
-# `unit_excluded_measurements` la nomme explicitement à l'écran plutôt que de
+# `unscorable_measurements` la nomme explicitement à l'écran plutôt que de
 # la faire disparaître en silence (décision utilisateur, 2026-09-10).
 #
 # Même règle, même liste que l'affichage (`app._COMPARE_DETAIL_ABSOLUTE_UNITS`
@@ -274,39 +274,82 @@ def oav_thresholds(con, molecules: list[str]) -> dict[str, float]:
 SCORING_ABSOLUTE_UNITS = {"ug_kg"}
 
 
+def _total_oil(variety: str, comp) -> float | None:
+    """Huile totale exploitable d'un houblon (ml/100g), ou `None` -- seul
+    dénominateur admis pour convertir un `pct_oil` en quantité absolue.
+    `None` couvre les trois cas où la conversion est impossible : aucune ligne
+    `total_oil`, `mid` absent, ou huile totale de 0.0 (un houblon à 0 ml/100g
+    d'huile ne peut pas porter 40 % d'une huile inexistante -- c'est une
+    donnée dégénérée, pas une mesure).
+
+    ⚠ REMPLACE un repli à `1.0` (AUDIT.md §B4, corrigé le 2026-09-11) : la
+    conversion s'écrivait `(mid / 100) * ((oil["mid"] if oil else 1.0) or
+    1.0)`, c'est-à-dire "huile totale inconnue -> fais comme si le houblon
+    contenait 1,0 ml/100g". C'est une valeur FABRIQUÉE, en contradiction
+    frontale avec la règle n°1 du projet, et elle fausse d'un facteur égal à
+    la vraie huile totale (0,5 à 3,0 ml/100g sur la base réelle, donc
+    jusqu'à 3x). Vérifié avant de changer quoi que ce soit : sur la base
+    actuelle, **0 houblon sur 191** déclenche ce repli (tous ceux qui ont des
+    composés en `pct_oil` ont aussi une huile totale exploitable) -- c'était
+    donc un piège LATENT, pas un chiffre faux aujourd'hui. Exactement le
+    profil qu'avait le repli d'unité de `amount()` avant que hops-comptoir ne
+    l'active (§B1) : inoffensif jusqu'à la source suivante."""
+    oil = comp.get(variety, {}).get("total_oil")
+    mid = oil.get("mid") if oil else None
+    return mid if mid else None
+
+
 def amount(variety: str, molecule: str, comp) -> float:
     """Quantité d'une molécule dans un houblon, sur un axe COMMUN à tous les
     houblons (unité de fait : ml/100g pour les composés d'huile, µg/kg pour
     les thiols). `pct_oil` (% de l'huile totale) est converti ; les unités de
     `SCORING_ABSOLUTE_UNITS` entrent telles quelles ; toute AUTRE unité rend
-    0.0 -- voir le commentaire de cette constante."""
+    0.0 -- voir le commentaire de cette constante.
+
+    0.0 aussi pour un `pct_oil` dont l'huile totale est inconnue (voir
+    `_total_oil`) : le composé ne participe pas, plutôt que d'être noté sur
+    une huile totale inventée. Ces deux cas d'exclusion sont rapportés par
+    `unscorable_measurements`, jamais silencieux."""
     rec = comp.get(variety, {}).get(hop_compound(molecule))
     if not rec or rec["mid"] is None:
         return 0.0
     unit = rec["unit"]
     if unit == "pct_oil":
-        oil = comp.get(variety, {}).get("total_oil")
-        return (rec["mid"] / 100.0) * ((oil["mid"] if oil else 1.0) or 1.0)
+        oil = _total_oil(variety, comp)
+        return (rec["mid"] / 100.0) * oil if oil is not None else 0.0
     if unit in SCORING_ABSOLUTE_UNITS:
         return rec["mid"]
     return 0.0
 
 
-def unit_excluded_measurements(note_profile, comp) -> dict[str, list[str]]:
+def unscorable_measurements(note_profile, comp) -> dict[str, list[str]]:
     """{variety: [composés]} -- mesures RÉELLEMENT présentes en base pour les
-    molécules de CETTE note, mais écartées du score par `amount()` faute
-    d'unité comparable (voir `SCORING_ABSOLUTE_UNITS`). Sert à le DIRE à
-    l'écran : exclure sans le nommer remplacerait un résultat faux par un
-    silence, ce que ce projet s'interdit partout ailleurs (même principe que
-    les molécules orphelines de `coverage()`). Dict vide = rien d'écarté, le
-    cas normal."""
+    molécules de CETTE note, mais qu'`amount()` ne peut pas placer sur l'axe
+    de score. Deux causes, toutes deux traitées ici :
+
+    1. **unité incomparable** (ni `pct_oil`, ni dans `SCORING_ABSOLUTE_UNITS`
+       -- ex. le `mg_100g` de hops-comptoir, §B1) ;
+    2. **`pct_oil` sans huile totale exploitable** (§B4) : un % de l'huile
+       n'est convertible en quantité absolue que si l'on sait combien d'huile
+       le houblon porte.
+
+    Sert à le DIRE à l'écran : exclure sans le nommer remplacerait un
+    résultat faux par un silence, ce que ce projet s'interdit partout
+    ailleurs (même principe que les molécules orphelines de `coverage()`).
+    Dict vide = rien d'écarté, le cas normal -- et le cas de TOUTE la base
+    actuelle pour la cause 2, qui n'a aujourd'hui aucun houblon concerné."""
     out: dict[str, set[str]] = {}
     for m in note_profile:
         c = hop_compound(m)
         for v, cmap in comp.items():
             rec = cmap.get(c)
-            if (rec and rec["mid"] is not None and rec["unit"] != "pct_oil"
-                    and rec["unit"] not in SCORING_ABSOLUTE_UNITS):
+            if not rec or rec["mid"] is None:
+                continue
+            unit = rec["unit"]
+            if unit == "pct_oil":
+                if _total_oil(v, comp) is None:
+                    out.setdefault(v, set()).add(c)
+            elif unit not in SCORING_ABSOLUTE_UNITS:
                 out.setdefault(v, set()).add(c)
     return {v: sorted(cs) for v, cs in sorted(out.items())}
 
@@ -1181,7 +1224,7 @@ def amplify(con, note: str, w_mol: float = 0.5, w_desc: float = 0.5, use_oav=Fal
     return {"mode": "amplify", "note": note, "coverage": cov, "orphan": orphan,
            "use_oav": use_oav, "has_descriptors": has_descriptors,
            "oav_coverage": oav_cov, "oav_uncovered": oav_uncovered,
-           "unit_excluded": unit_excluded_measurements(profile, comp),
+           "unscorable": unscorable_measurements(profile, comp),
            "total_matches": len(ranked), "ranked": ranked[:top]}
 
 

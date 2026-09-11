@@ -233,6 +233,15 @@ desc, puis `variety` asc). `amplify` est le seul des trois à ne pas en avoir.
 
 ### B4 — [MINEUR] `amount()` fabrique une huile totale par défaut
 
+> ✅ **CORRIGÉ le 2026-09-11** (lot 5). `matching._total_oil` remplace le repli à `1.0` :
+> huile totale absente, `mid` nul ou **0.0** → le composé ne participe pas (0.0) au lieu
+> d'être noté sur une hypothèse. **Mesuré avant correction : 0 houblon sur 191** déclenchait
+> ce repli — c'était donc un piège LATENT, pas un chiffre faux, exactement le profil qu'avait
+> §B1 avant l'arrivée de hops-comptoir. Le classement réel est inchangé, vérifié.
+> Le cas est rapporté par `unscorable_measurements` (ex-`unit_excluded_measurements`,
+> élargie aux deux causes d'exclusion) et remonte dans le chip existant — pas de nouveau
+> chemin de perte silencieuse.
+
 **Fichier** : `matching.py:248` — `((oil["mid"] if oil else 1.0) or 1.0)`.
 
 Si `total_oil` est inconnu, la quantité est calculée **comme si** le houblon contenait
@@ -246,6 +255,9 @@ vraie huile totale (0,5 à 3,0 → jusqu'à 3×).
 couverture rapportée, plutôt que de le noter sur une hypothèse.
 
 ### B5 — [MINEUR] `_db_path()` lève sur un `--db` en fin d'arguments
+
+> ✅ **CORRIGÉ le 2026-09-11** (lot 5) : repli sur le chemin par défaut, l'argument sans
+> valeur est ignoré comme il l'est déjà quand il est absent.
 
 **Fichier** : `app.py:682-685` — `sys.argv[sys.argv.index("--db") + 1]`. `streamlit run
 app.py -- --db` (option sans valeur) lève `IndexError` avant tout rendu, donc page blanche
@@ -456,7 +468,7 @@ manque n'est pas l'honnêteté, c'est **l'interprétabilité du chiffre affiché
 | ~~**2**~~ | ~~**Tests multi-sources**~~ ✅ **fait le 2026-09-10** | Le bug B1 est désormais détectable par les tests | `tests/test_matching.py` (4 tests, `comp` à unités mélangées construit à la main plutôt que via les fixtures barthhaas/yakima) | Nul. Les 4 tests ont d'abord été vérifiés ROUGES sur le code buggé. |
 | ~~**3**~~ | ~~**B3 : départage déterministe d'`amplify`**~~ ✅ **fait le 2026-09-10** | Top-N stable et reproductible ; même tri que ses deux jumelles | `matching.py` (`amplify`), `tests/test_matching.py` (2 tests) | Effectué : l'ordre affiché à égalité change, c'était le but. |
 | ~~**4**~~ | ~~**D2/D3/D5 + `help=` sur Score** (E2)~~ ✅ **fait le 2026-09-10** | Provenance complète (4 sources manquantes ajoutées), chiffres du README à jour, score enfin interprétable | `README.md`, `app.py` (`_render_hop_rows` accepte un `help=` par colonne, popover Database), `tests/test_app.py` | Nul. Similar hops laissé tel quel : sa légende sous le tableau explique déjà la métrique. |
-| **5** | **B4 (huile totale fabriquée) + B5 (`--db`)** | Supprime la dernière valeur inventée du moteur | `matching.py:248`, `app.py:682` | Faible : quelques houblons sortent du classement — c'est l'effet recherché. |
+| ~~**5**~~ | ~~**B4 + B5**~~ ✅ **fait le 2026-09-11** | Plus aucune valeur inventée dans le moteur ; plus de page blanche sur `--db` sans valeur | `matching.py` (`_total_oil`, `amount`, `unscorable_measurements`), `app.py` (`_db_path`, chip), tests | Nul en pratique : 0 houblon concerné sur la base actuelle, classement vérifié identique. |
 | **6** | **E1 (défaut « adobo ») + E4 (débordement)** | Première impression et lisibilité | `app.py` | Nul. |
 | **7** | **C2 : unifier les deux conversions d'unité** | Empêche la prochaine divergence | `matching.py`, `app.py` | Faible si fait juste après le lot 1. |
 | **8** | **`docs/methodologie.md` + exemple chiffré** | Crédibilité scientifique, garde-fou anti-récidive | `docs/`, `README.md` | Nul. |

@@ -1739,7 +1739,7 @@ def test_molecular_scores_foreign_unit_does_not_flatten_every_other_hop():
     assert scores["us"][0] > scores["de"][0]
     assert scores["us"][0] == pytest.approx(matching.specificity("geraniol", comp))
 
-def test_unit_excluded_measurements_names_what_was_left_out():
+def test_unscorable_measurements_names_what_was_left_out():
     # Exclure sans le dire remplacerait un résultat faux par un silence : la
     # mesure existe, elle est juste incomparable sur cet axe (décision
     # utilisateur 2026-09-10). `amplify` remonte l'information pour que la GUI
@@ -1747,13 +1747,40 @@ def test_unit_excluded_measurements_names_what_was_left_out():
     comp = {
         "fr": {"geraniol": {"mid": 12.5, "unit": "mg_100g", "sources": ["hops-comptoir"]},
                "linalool": {"mid": 14.0, "unit": "mg_100g", "sources": ["hops-comptoir"]}},
-        "us": {"geraniol": {"mid": 1.8, "unit": "pct_oil", "sources": ["yakima"]}},
+        "us": {"geraniol": {"mid": 1.8, "unit": "pct_oil", "sources": ["yakima"]},
+               "total_oil": {"mid": 1.725, "unit": "ml_100g", "sources": ["yakima"]}},
     }
-    out = matching.unit_excluded_measurements({"geraniol": 1.0}, comp)
+    out = matching.unscorable_measurements({"geraniol": 1.0}, comp)
     # Seules les molécules DE LA NOTE sont rapportées (linalool n'en fait pas
     # partie ici), et seul le houblon réellement écarté apparaît.
     assert out == {"fr": ["geraniol"]}
-    assert matching.unit_excluded_measurements({"thiols": 1.0}, comp) == {}
+    assert matching.unscorable_measurements({"thiols": 1.0}, comp) == {}
+
+def test_amount_never_invents_a_total_oil_for_a_pct_oil_measurement():
+    # AUDIT.md §B4 (2026-09-11) : la conversion s'écrivait
+    # `(mid / 100) * ((oil["mid"] if oil else 1.0) or 1.0)` -- huile totale
+    # inconnue -> "fais comme si le houblon en contenait 1,0 ml/100g", une
+    # valeur FABRIQUÉE qui fausse d'un facteur égal à la vraie huile totale
+    # (0,5 à 3,0 sur la base réelle, donc jusqu'à 3x). Vérifié avant
+    # correction : 0 houblon sur 191 déclenchait ce repli -- un piège LATENT,
+    # comme l'était le repli d'unité avant l'arrivée de hops-comptoir (§B1).
+    # Les 3 formes de "pas d'huile totale exploitable" sont traitées
+    # pareil : absente, `mid` à None, et 0.0 (un houblon à 0 ml/100g d'huile
+    # ne peut pas porter 40 % d'une huile inexistante).
+    base = {"myrcene": {"mid": 40.0, "unit": "pct_oil", "sources": ["barthhaas"]}}
+    for label, oil_rec in [("absente", None),
+                           ("mid None", {"mid": None, "unit": "ml_100g", "sources": ["x"]}),
+                           ("zéro", {"mid": 0.0, "unit": "ml_100g", "sources": ["x"]})]:
+        cmap = dict(base)
+        if oil_rec is not None:
+            cmap["total_oil"] = oil_rec
+        comp = {"h": cmap}
+        assert matching.amount("h", "myrcene", comp) == 0.0, label
+        assert matching.unscorable_measurements({"myrcene": 1.0}, comp) == {"h": ["myrcene"]}, label
+    # huile totale connue -> conversion normale, inchangée.
+    comp = {"h": dict(base, total_oil={"mid": 2.0, "unit": "ml_100g", "sources": ["x"]})}
+    assert matching.amount("h", "myrcene", comp) == pytest.approx(0.8)
+    assert matching.unscorable_measurements({"myrcene": 1.0}, comp) == {}
 
 def test_amplify_reports_measurements_excluded_by_unit(tmp_path):
     # Bout en bout : une vraie base, `load()` -> `amplify()`, pour couvrir la
@@ -1774,7 +1801,7 @@ def test_amplify_reports_measurements_excluded_by_unit(tmp_path):
     con.commit()
     r = matching.amplify(con, "_geraniol")
     assert [h["variety"] for h in r["ranked"]] == ["us"]
-    assert r["unit_excluded"] == {"fr": ["geraniol"]}
+    assert r["unscorable"] == {"fr": ["geraniol"]}
     con.close()
 
 def test_contrast_flags_unmapped_descriptors_without_dropping_mapped_ones(db):
