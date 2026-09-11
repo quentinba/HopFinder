@@ -239,6 +239,13 @@ _TOOL_SUMMARY_BY_MODE = {t["mode"]: t for t in _TOOL_SUMMARIES}
 # un `git log` en direct exigerait aussi que `.git` soit présent dans le
 # conteneur déployé, ce qui n'est pas garanti.
 _RECENT_UPDATES = [
+    ("2026-09-11", "Amplify now tells you when the hops it shows are simply "
+                   "tied. In Descriptors mode the score is the share of your "
+                   "selected descriptors a hop carries, so it only takes a "
+                   "few distinct values and dozens of hops often land on the "
+                   "same one — a \"Top N all tied\" chip now says so instead "
+                   "of letting a progress bar imply a finer ranking than "
+                   "exists."),
     ("2026-09-11", "From descriptors: the two heatmaps now say what decides "
                    "which one a descriptor lands in. They are split by "
                    "vocabulary — the first holds the aroma-wheel categories, "
@@ -2220,6 +2227,31 @@ def _amplify(con):
                 "the molecular score rather than ranked on a wrong scale; "
                 "the raw value is still on their Browse page. Excluded: "
                 + detail))
+    # AUDIT.md §E3 (2026-09-11) : en mode Descriptors, le score est un simple
+    # RAPPEL sur les descripteurs cochés -- avec 3 descripteurs il ne peut
+    # prendre que 4 valeurs, donc les ex æquo massifs sont la norme et pas
+    # l'exception (mesuré : "strawberry" donne 11 houblons à 66.7 et 46 à
+    # 33.3). La barre de progression à une décimale suggère pourtant un
+    # classement fin. Le tri les départage désormais de façon déterministe
+    # (§B3), mais ça ne dit toujours pas à l'utilisateur que les N premiers
+    # sont À ÉGALITÉ : nommer l'égalité est la seule façon honnête de
+    # présenter un top-8 découpé dans un paquet de 11 équivalents.
+    # Chip affiché SEULEMENT quand l'égalité de tête dépasse ce qui est
+    # montré -- sinon l'information est déjà lisible dans le tableau.
+    if r["ranked"]:
+        top_score = r["ranked"][0]["score"]
+        n_tied = sum(1 for h in r["ranked"] if h["score"] == top_score)
+        if n_tied == len(r["ranked"]) and r["total_matches"] > len(r["ranked"]):
+            chips.append((
+                f"Top {n_tied} all tied at {top_score:g}", "orange",
+                "Every hop shown here has exactly the same score, and more hops "
+                "outside this table share it. That is expected when the score "
+                "comes from descriptors: it is the share of your selected "
+                "descriptors that a hop carries, so it only takes a handful of "
+                "distinct values. Which ones appear first is decided by total "
+                "oil, then name — not by a finer match. Add a descriptor to "
+                "separate them, or raise \"Number of results\" to see the rest "
+                "of the tie."))
     if r["total_matches"] > len(r["ranked"]):
         chips.append((
             f"Showing {len(r['ranked'])} of {r['total_matches']}", "orange",

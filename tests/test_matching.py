@@ -1286,6 +1286,21 @@ def test_amplify_breaks_score_ties_by_total_oil_deterministically(db):
     # la clé de tri interne ne fuit jamais dans le résultat rendu.
     assert all("_rank" not in h for h in r["ranked"])
 
+def test_amplify_descriptor_scores_collapse_into_few_tiers(db):
+    # AUDIT.md §E3 : la couche descripteurs est un simple RAPPEL, donc avec n
+    # descripteurs le score ne peut prendre que n+1 valeurs -- les ex æquo
+    # massifs sont la norme, pas l'exception. Ce test fige cette propriété
+    # (c'est elle qui justifie le chip "Top N all tied at X" côté GUI, et le
+    # départage déterministe de §B3) : si un jour le score descripteurs
+    # devenait continu, les deux deviendraient inutiles et ce test le dirait.
+    r = matching.amplify(db, "_citrus", w_mol=0.0, w_desc=1.0,
+                         descriptors=["citrus", "floral"], top=999)
+    tiers = {h["score"] for h in r["ranked"]}
+    # 2 descripteurs -> au plus 2 paliers NON NULS possibles (1/2, 2/2) ;
+    # les houblons à 0 ne sont pas classés du tout.
+    assert tiers <= {50.0, 100.0}
+    assert len(r["ranked"]) > len(tiers)  # plus de houblons que de paliers
+
 def test_amplify_tie_break_never_reorders_genuinely_different_scores(db):
     # Le départage porte sur le score BRUT, pas sur sa version arrondie au
     # dixième pour l'affichage : deux scores réellement différents qui
