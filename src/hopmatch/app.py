@@ -239,6 +239,11 @@ _TOOL_SUMMARY_BY_MODE = {t["mode"]: t for t in _TOOL_SUMMARIES}
 # un `git log` en direct exigerait aussi que `.git` soit présent dans le
 # conteneur déployé, ce qui n'est pas garanti.
 _RECENT_UPDATES = [
+    ("2026-09-11", "Contrast's two filter blocks (\"Complementary notes to "
+                   "target\" and \"Purpose\") each get their own full-width "
+                   "row instead of sharing one — the ten target pills were "
+                   "being squeezed into half the width and forced scrolling, "
+                   "while the two Purpose pills left the other half empty."),
     ("2026-09-10", "Hovering a results table's \"Score\" header now explains "
                    "what the number actually means — Amplify's is a ranking "
                    "within that one search (the best hop always sits at 100, "
@@ -707,8 +712,15 @@ def _home(con) -> None:
 
 
 def _db_path() -> str:
+    # `--db` en DERNIER argument (`streamlit run app.py -- --db`, une option
+    # sans valeur) levait `IndexError` avant tout rendu -- page blanche sans
+    # message, au lieu du message "Database not found" déjà prévu par `main`
+    # (AUDIT.md §B5). Repli sur le chemin par défaut : l'argument est ignoré
+    # comme il l'est déjà quand il est absent.
     if "--db" in sys.argv:
-        return sys.argv[sys.argv.index("--db") + 1]
+        i = sys.argv.index("--db") + 1
+        if i < len(sys.argv):
+            return sys.argv[i]
     return DEFAULT_DB
 
 
@@ -2157,30 +2169,34 @@ def _amplify(con):
         if r["orphan"]:
             chips.append((f"{len(r['orphan'])} orphan molecule(s)", "orange",
                          "Carried by the addition, not the hop: " + ", ".join(r["orphan"])))
-        # AUDIT.md §B1 (2026-09-10, décision utilisateur "exclue-les avec
-        # mention à l'écran") : certaines mesures réelles ne sont pas
-        # comparables sur l'axe du score (unité incompatible, ex. le mg/100g
-        # de houblon publié par hops-comptoir pour linalool/geraniol/
-        # farnesene, là où toutes les autres sources donnent un % de
-        # l'huile). Elles sont écartées du calcul par `matching.amount` --
-        # jamais converties au jugé -- mais NOMMÉES ici : les faire
-        # disparaître en silence donnerait un houblon injustement absent du
-        # classement sans que rien ne l'explique, exactement ce que les
-        # molécules orphelines ci-dessus évitent déjà pour l'autre sens.
-        if r.get("unit_excluded"):
-            excluded = r["unit_excluded"]
+        # AUDIT.md §B1 puis §B4 (2026-09-10/11, décision utilisateur "exclue-
+        # les avec mention à l'écran") : certaines mesures réelles ne peuvent
+        # pas être placées sur l'axe du score, pour DEUX raisons distinctes --
+        # unité incomparable (le mg/100g de hops-comptoir face au % d'huile de
+        # toutes les autres sources), ou % d'huile sans huile totale connue
+        # (rien pour convertir en quantité absolue). Dans les deux cas
+        # `matching.amount` les écarte plutôt que de les convertir au jugé,
+        # et elles sont NOMMÉES ici : les faire disparaître en silence
+        # donnerait un houblon injustement absent du classement sans que rien
+        # ne l'explique, exactement ce que les molécules orphelines ci-dessus
+        # évitent déjà pour l'autre sens.
+        if r.get("unscorable"):
+            excluded = r["unscorable"]
             n_hops = len(excluded)
             detail = "; ".join(f"{hops[v]['name']} ({', '.join(cs)})"
                               for v, cs in excluded.items() if v in hops)
             chips.append((
                 f"{n_hops} hop(s) not scorable here", "orange",
                 "These hops do have a measurement for this ingredient's "
-                "molecules, but in a unit that can't be compared with the "
-                "others (mg per 100g of hop, versus % of oil everywhere "
-                "else) — converting would take an oil density figure we "
-                "have no source for. They are left out of the molecular "
-                "score rather than ranked on a wrong scale; the raw value "
-                "is still on their Browse page. Excluded: " + detail))
+                "molecules, but it can't be placed on the same scale as the "
+                "others — either it uses a different unit (mg per 100g of "
+                "hop, versus % of oil everywhere else, and converting would "
+                "take an oil density figure we have no source for), or it's "
+                "a % of oil for a hop whose total oil we don't know, which "
+                "leaves nothing to convert it against. They are left out of "
+                "the molecular score rather than ranked on a wrong scale; "
+                "the raw value is still on their Browse page. Excluded: "
+                + detail))
     if r["total_matches"] > len(r["ranked"]):
         chips.append((
             f"Showing {len(r['ranked'])} of {r['total_matches']}", "orange",
@@ -2395,12 +2411,20 @@ def _contrast(con):
     target_selected = sorted(proposed_target)
     purposes_selected = ["aromatic", "bittering"]
     if selected:
-        # T-D14 (2026-08-23, spec Claude Design §5) : les deux jeux de pills
-        # côte à côte -- les seuls deux "filtres" de la carte d'inputs, une
-        # paire naturelle.
+        # REVIREMENT sur T-D14 (2026-08-23, spec Claude Design §5, "group each
+        # tool's controls into columns inside the inputs card") : les deux
+        # jeux de pills étaient côte à côte en `st.columns(2)`, comme "les
+        # seuls deux filtres de la carte d'inputs, une paire naturelle".
+        # Signalé en direct par l'utilisateur (2026-09-11) : le résultat est
+        # très mauvais à l'écran, et pour une raison structurelle -- les deux
+        # jeux n'ont RIEN de comparable en taille. "Complementary notes to
+        # target" propose les 10 catégories cœur de `CONTRAST_AFFINITY` (plus
+        # une longue légende), "Purpose" en propose 2. Dans une demi-largeur,
+        # les 10 pills s'empilent sur plusieurs rangs et obligent à scroller,
+        # pendant que la colonne voisine reste quasi vide. Chacun sur sa
+        # propre ligne, pleine largeur : les pills se répartissent sur bien
+        # moins de rangs et rien n'est comprimé pour rien.
         with panel_a:
-            target_col, purpose_col = st.columns(2)
-        with target_col:
             st.caption("Complementary notes to target (pre-selected from the affinity map — "
                       "untick to exclude, or add more)")
             target_selected = st.pills(
@@ -2408,6 +2432,7 @@ def _contrast(con):
                 selection_mode="multi",
                 default=sorted(proposed_target), label_visibility="collapsed",
                 key=f"contrast_target_pills_{tuple(sorted(selected))}") or []
+
 
         # Filtre par purpose (T61, 2026-08-19, demande utilisateur explicite :
         # "add another menu for purpose, it would be pre-selecting both
@@ -2420,7 +2445,7 @@ def _contrast(con):
         # Un purpose totalement inconnu (ni réel ni inférable depuis l'acide
         # alpha) est exclu dès qu'un filtre est actif, quel qu'il soit --
         # jamais inclus par défaut faute de donnée.
-        with purpose_col:
+        with panel_a:
             st.caption("Purpose (pre-selected on both — untick to keep only one)")
             purposes_selected = st.pills(
                 "Purpose", ["aromatic", "bittering"], selection_mode="multi",
