@@ -1143,17 +1143,39 @@ def amplify(con, note: str, w_mol: float = 0.5, w_desc: float = 0.5, use_oav=Fal
     mol = molecular_scores(profile, comp, use_oav=use_oav, thresholds=oav_thr)
     mmax = max((s for s, _ in mol.values()), default=1.0) or 1.0
 
+    # Tri à trois niveaux, IDENTIQUE à celui de `contrast`/`by_descriptor`
+    # (2026-09-10, AUDIT.md §B3). `amplify` était la seule des trois fonctions
+    # de classement à trier sur le score SEUL (`sort(key=lambda r:
+    # -r["score"])`) : le tri Python étant stable, l'ordre à l'intérieur d'une
+    # égalité retombait sur celui de `hops`, c'est-à-dire `SELECT * FROM hops`
+    # SANS `ORDER BY` -- l'ordre d'insertion du crawl. Ce n'est pas un cas
+    # marginal : la couche descripteurs est un simple RAPPEL (fraction des
+    # descripteurs de la note présents dans le houblon), donc avec 3
+    # descripteurs le score ne peut prendre que 4 valeurs. Mesuré sur la base
+    # réelle, "strawberry" en mode Descriptors : 11 houblons exactement à
+    # 66.7 et 46 à 33.3 -- on en affichait 8, les 3 exclus l'étaient sans
+    # aucun critère, et un re-crawl dans un autre ordre aurait changé le
+    # top-8 affiché sans qu'aucune donnée n'ait bougé.
+    # Départage : huile totale réconciliée desc (même proxy d'intensité
+    # aromatique que les deux autres fonctions), puis `variety` asc
+    # (déterminisme total). Trié sur le score BRUT, jamais sur sa version
+    # arrondie à l'affichage : deux scores réellement différents qui
+    # s'arrondissent au même dixième gardent leur ordre réel.
     ranked = []
     for h in hops:
         ms = (mol.get(h, (0, []))[0] / mmax)
         ds = descriptor_overlap(ndesc, hop_desc.get(h, set()))
         score = w_mol * ms + w_desc * ds
         if score > 0:
+            total_oil = (comp.get(h, {}).get("total_oil") or {}).get("mid") or 0.0
             ranked.append({"variety": h, "name": hops[h]["name"], "score": round(100 * score, 1),
                            "mol": round(ms, 2), "desc": round(ds, 2),
                            "why": mol.get(h, (0, []))[1][:4], "sources": hops[h]["sources"],
-                           "purpose": hops[h].get("purpose")})
-    ranked.sort(key=lambda r: -r["score"])
+                           "purpose": hops[h].get("purpose"),
+                           "_rank": (-score, -total_oil, h)})
+    ranked.sort(key=lambda r: r["_rank"])
+    for r in ranked:
+        del r["_rank"]
     _, orphan, cov = coverage(profile, comp)
     oav_cov, oav_uncovered = oav_coverage(profile, comp, oav_thr) if use_oav else (None, [])
     return {"mode": "amplify", "note": note, "coverage": cov, "orphan": orphan,

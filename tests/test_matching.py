@@ -1261,6 +1261,40 @@ def test_contrast_blend_propagates_target_descriptors_override(db):
                                 max_hops=1)
     assert r["affinity_target"] == ["woody"]
 
+def test_amplify_breaks_score_ties_by_total_oil_deterministically(db):
+    # AUDIT.md §B3 (2026-09-10) : `amplify` était la SEULE des trois fonctions
+    # de classement sans départage d'égalité -- le tri Python étant stable,
+    # l'ordre à l'intérieur d'une égalité retombait sur celui de `SELECT * FROM
+    # hops` (aucun ORDER BY), donc l'ordre d'insertion du crawl. Ce n'est pas
+    # marginal : la couche descripteurs est un simple rappel, donc sur 2
+    # descripteurs le score ne prend que 3 valeurs -- sur la base réelle,
+    # "strawberry" donnait 11 houblons exactement à 66.7 dont on n'affichait
+    # que 8, les 3 exclus sans aucun critère.
+    # Ici : les 4 houblons de la fixture recoupent EXACTEMENT 1 des 2
+    # descripteurs demandés (citra/mosaic/simcoe via "citrus", saazer via
+    # "floral"), donc tous à 50.0 -- départagés par total_oil desc (fixtures :
+    # simcoe 1.75 > citra 1.7 > mosaic 1.625 > saazer 0.6), exactement comme
+    # `contrast` ci-dessous.
+    r = matching.amplify(db, "_citrus", w_mol=0.0, w_desc=1.0,
+                         descriptors=["citrus", "floral"], top=999)
+    tied = [h["variety"] for h in r["ranked"] if h["score"] == 50.0]
+    assert tied == ["simcoe", "citra", "mosaic", "saazer"]
+    # déterminisme : deux appels donnent EXACTEMENT le même ordre.
+    r2 = matching.amplify(db, "_citrus", w_mol=0.0, w_desc=1.0,
+                          descriptors=["citrus", "floral"], top=999)
+    assert [h["variety"] for h in r["ranked"]] == [h["variety"] for h in r2["ranked"]]
+    # la clé de tri interne ne fuit jamais dans le résultat rendu.
+    assert all("_rank" not in h for h in r["ranked"])
+
+def test_amplify_tie_break_never_reorders_genuinely_different_scores(db):
+    # Le départage porte sur le score BRUT, pas sur sa version arrondie au
+    # dixième pour l'affichage : deux scores réellement différents qui
+    # s'arrondissent au même nombre gardent leur ordre réel (le tri par huile
+    # totale ne doit jamais écraser un vrai écart de score, si petit soit-il).
+    r = matching.amplify(db, "_citrus", top=999)
+    scores = [h["score"] for h in r["ranked"]]
+    assert scores == sorted(scores, reverse=True)
+
 def test_contrast_breaks_score_ties_by_total_oil_deterministically(db):
     # Signalé par l'utilisateur (2026-08-19) : Saaz n'apparaissait jamais
     # pour "tropical"/"mango" même en augmentant `top` -- root cause : sur
