@@ -12,11 +12,28 @@ license = {text = "MIT"}
 authors = [{name = "Quentin", email = "quentin4313@gmail.com"}]
 dependencies = []
 
+# Bornes HAUTES ajoutées le 2026-09-11 (AUDIT.md §C5). Il n'y avait que des
+# bornes basses, or le conteneur Streamlit Community Cloud réinstalle les
+# dépendances À CHAQUE redéploiement : une version majeure publiée en amont
+# pouvait casser la prod sans qu'aucun commit n'ait eu lieu dans ce dépôt,
+# et sans rien à quoi revenir. Le risque n'est pas théorique ici -- la GUI
+# s'appuie sur des comportements pointus de l'API (`light-dark()`,
+# `column_config`, `st.segmented_control`, `theme=None` sur des specs
+# Vega-Lite précises, `mark_line(interpolate="linear-closed")`), c'est-à-dire
+# exactement ce qui bouge à une majeure.
+#
+# Plafond sur la MAJEURE SUIVANTE, pas d'épinglage exact (`==`) : un `==`
+# bloquerait aussi les correctifs de sécurité, et rien n'indique qu'une
+# mineure ait jamais cassé ce projet. Les bornes BASSES sont laissées telles
+# quelles -- les relever affirmerait une incompatibilité que je n'ai pas
+# vérifiée. Versions réellement installées au moment de poser ces bornes :
+# streamlit 1.60, altair 6.2.2, pillow 12.3, requests 2.34, bs4 4.15,
+# pyyaml 6.0.3, pandas 3.0.5, pytest 9.1.1 -- toutes dans les plages ci-dessous.
 [project.optional-dependencies]
-crawl = ["requests>=2.31", "beautifulsoup4>=4.12", "pyyaml>=6.0"]
-foodb = ["pandas>=2.0"]
-ui = ["streamlit>=1.50", "altair>=5.0", "pillow>=10.0"]
-dev = ["pytest>=7"]
+crawl = ["requests>=2.31,<3", "beautifulsoup4>=4.12,<5", "pyyaml>=6.0,<7"]
+foodb = ["pandas>=2.0,<4"]
+ui = ["streamlit>=1.50,<2", "altair>=5.0,<7", "pillow>=10.0,<14"]
+dev = ["pytest>=7,<10"]
 
 [project.scripts]
 hopmatch = "hopmatch.cli:main"
