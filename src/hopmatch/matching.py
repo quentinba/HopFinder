@@ -274,7 +274,7 @@ def oav_thresholds(con, molecules: list[str]) -> dict[str, float]:
 SCORING_ABSOLUTE_UNITS = {"ug_kg"}
 
 
-def _total_oil(variety: str, comp) -> float | None:
+def usable_total_oil(hcomp: dict) -> float | None:
     """Huile totale exploitable d'un houblon (ml/100g), ou `None` -- seul
     dénominateur admis pour convertir un `pct_oil` en quantité absolue.
     `None` couvre les trois cas où la conversion est impossible : aucune ligne
@@ -294,32 +294,62 @@ def _total_oil(variety: str, comp) -> float | None:
     donc un piège LATENT, pas un chiffre faux aujourd'hui. Exactement le
     profil qu'avait le repli d'unité de `amount()` avant que hops-comptoir ne
     l'active (§B1) : inoffensif jusqu'à la source suivante."""
-    oil = comp.get(variety, {}).get("total_oil")
+    oil = hcomp.get("total_oil")
     mid = oil.get("mid") if oil else None
     return mid if mid else None
+
+
+def compound_quantity(rec: dict | None, total_oil: float | None,
+                      absolute: bool = True) -> float | None:
+    """LA règle d'unité du projet, en UN SEUL endroit : peut-on placer CETTE
+    mesure de composé sur l'axe de l'huile, et sous quelle forme ?
+
+    - `pct_oil` : converti en quantité absolue ml/100g (`% × huile / 100`) si
+      `absolute`, sinon rendu tel quel (le % de l'huile, pour un affichage qui
+      assume cette unité) ; `None` si `absolute` et que l'huile totale est
+      inconnue -- rien pour convertir, et jamais d'huile inventée (§B4).
+    - unités de `SCORING_ABSOLUTE_UNITS` (thiols, µg/kg) : déjà absolues,
+      rendues telles quelles quel que soit `absolute`.
+    - toute AUTRE unité (ex. `mg_100g`) : `None`, jamais placée sur cet axe
+      (§B1).
+
+    `None` = « cette mesure existe mais n'est pas plaçable ici », à distinguer
+    d'une mesure absente. Les appelants décident quoi en faire : `amount()`
+    renvoie 0.0 (le composé ne contribue pas au score),
+    `app._compare_detail_value` renvoie `None` (aucune barre tracée), et
+    `unscorable_measurements` la NOMME à l'écran dans les deux cas.
+
+    Factorisé ici le 2026-09-11 (AUDIT.md §C2) : cette règle existait en DEUX
+    implémentations parallèles -- `matching.amount` (scoring) et
+    `app._compare_detail_value` (affichage) -- qui avaient déjà divergé une
+    fois, l'affichage corrigé le 2026-09-09 et le scoring resté buggé un jour
+    de plus. Une seule définition, deux consommateurs."""
+    if not rec or rec.get("mid") is None:
+        return None
+    unit = rec.get("unit")
+    if unit == "pct_oil":
+        if not absolute:
+            return rec["mid"]
+        if total_oil is None:
+            return None
+        return rec["mid"] * total_oil / 100.0
+    if unit in SCORING_ABSOLUTE_UNITS:
+        return rec["mid"]
+    return None
 
 
 def amount(variety: str, molecule: str, comp) -> float:
     """Quantité d'une molécule dans un houblon, sur un axe COMMUN à tous les
     houblons (unité de fait : ml/100g pour les composés d'huile, µg/kg pour
-    les thiols). `pct_oil` (% de l'huile totale) est converti ; les unités de
-    `SCORING_ABSOLUTE_UNITS` entrent telles quelles ; toute AUTRE unité rend
-    0.0 -- voir le commentaire de cette constante.
+    les thiols) -- voir `compound_quantity` pour la règle elle-même.
 
-    0.0 aussi pour un `pct_oil` dont l'huile totale est inconnue (voir
-    `_total_oil`) : le composé ne participe pas, plutôt que d'être noté sur
-    une huile totale inventée. Ces deux cas d'exclusion sont rapportés par
-    `unscorable_measurements`, jamais silencieux."""
-    rec = comp.get(variety, {}).get(hop_compound(molecule))
-    if not rec or rec["mid"] is None:
-        return 0.0
-    unit = rec["unit"]
-    if unit == "pct_oil":
-        oil = _total_oil(variety, comp)
-        return (rec["mid"] / 100.0) * oil if oil is not None else 0.0
-    if unit in SCORING_ABSOLUTE_UNITS:
-        return rec["mid"]
-    return 0.0
+    0.0 aussi bien pour une mesure ABSENTE que pour une mesure présente mais
+    non plaçable sur cet axe : dans les deux cas le composé ne contribue pas
+    au score. Le second cas est rapporté par `unscorable_measurements`,
+    jamais silencieux."""
+    hcomp = comp.get(variety, {})
+    q = compound_quantity(hcomp.get(hop_compound(molecule)), usable_total_oil(hcomp))
+    return q if q is not None else 0.0
 
 
 def unscorable_measurements(note_profile, comp) -> dict[str, list[str]]:
@@ -337,19 +367,20 @@ def unscorable_measurements(note_profile, comp) -> dict[str, list[str]]:
     résultat faux par un silence, ce que ce projet s'interdit partout
     ailleurs (même principe que les molécules orphelines de `coverage()`).
     Dict vide = rien d'écarté, le cas normal -- et le cas de TOUTE la base
-    actuelle pour la cause 2, qui n'a aujourd'hui aucun houblon concerné."""
+    actuelle pour la cause 2, qui n'a aujourd'hui aucun houblon concerné.
+
+    N'énumère PAS les causes lui-même : une mesure est "non plaçable" quand
+    `compound_quantity` renvoie `None` alors que la mesure existe. Ajouter une
+    3e cause d'exclusion là-bas la fera donc remonter ici automatiquement,
+    sans risque d'oublier de mettre ce rapport à jour -- c'est exactement ce
+    qui s'est produit entre §B1 et §B4."""
     out: dict[str, set[str]] = {}
     for m in note_profile:
         c = hop_compound(m)
         for v, cmap in comp.items():
             rec = cmap.get(c)
-            if not rec or rec["mid"] is None:
-                continue
-            unit = rec["unit"]
-            if unit == "pct_oil":
-                if _total_oil(v, comp) is None:
-                    out.setdefault(v, set()).add(c)
-            elif unit not in SCORING_ABSOLUTE_UNITS:
+            if (rec and rec.get("mid") is not None
+                    and compound_quantity(rec, usable_total_oil(cmap)) is None):
                 out.setdefault(v, set()).add(c)
     return {v: sorted(cs) for v, cs in sorted(out.items())}
 
