@@ -240,6 +240,11 @@ _TOOL_SUMMARY_BY_MODE = {t["mode"]: t for t in _TOOL_SUMMARIES}
 # un `git log` en direct exigerait aussi que `.git` soit présent dans le
 # conteneur déployé, ce qui n'est pas garanti.
 _RECENT_UPDATES = [
+    ("2026-09-11", "Beer styles: each vital statistic's title and range now "
+                   "sit above its chart instead of beside it, giving the "
+                   "distribution histogram the full width — it was squeezed "
+                   "into three fifths of the card since the observed-recipe "
+                   "data was added."),
     ("2026-09-11", "Descriptor pills are now coloured by aroma family — "
                    "citrus words yellow, berry words pink, resinous words "
                    "green, and so on across the 16 families. A hop's "
@@ -1048,6 +1053,22 @@ div[class*="st-key-panel_"], details[class*="st-key-panel_"] {
        le navigateur corrige de la mise à l'échelle CSS -- ce ne serait PAS
        vrai avec le moteur canvas, qui calcule ses coordonnées à la main). */
     max-width: 100%;
+    height: auto;
+}
+/* EXEMPTION à la règle ci-dessus (2026-09-11, régression signalée en direct :
+   "le plot survivables est illisible maintenant, revert la modification de
+   largeur sur ce plot"). Le classement Survivables est DÉLIBÉRÉMENT plus
+   large que la page -- 26 px par houblon, jusqu'à ~4 400 px pour ~170
+   houblons -- pour que chaque barre et chaque nom d'axe gardent leur place
+   (voir `labelOverlap=False` dans `_survivables`, exigence utilisateur
+   antérieure : "afficher TOUS LES NOMS DES HOUBLONS SUR L'AXE X"). Le
+   défilement horizontal y est le mode de lecture voulu, pas un défaut : le
+   réduire à la largeur de la carte écrase ~170 barres dans ~900 px.
+   La règle générale reste bonne pour tous les AUTRES graphiques, dont la
+   largeur fixe est une taille de conception et non une échelle porteuse
+   d'information. */
+div[class*="st-key-hf_wide_chart"] [data-testid="stVegaLiteChart"] svg {
+    max-width: none;
     height: auto;
 }
 /* T-D14b (2026-08-24, spec Claude Design, lockup "1d — Stacked") : la
@@ -6154,17 +6175,26 @@ def _vital_stat_row(row, use_ebc: bool, use_plato: bool, observed: dict[str, lis
                     b["bin_high"] = _sg_to_plato(b["bin_high"])
             else:
                 label = f"{label} (SG)"
-        label_col, bar_col = st.columns([2, 3], vertical_alignment="center")
-        with label_col:
-            st.metric(label, f"{fmt(vmin)}–{fmt(vmax)}" if vmin is not None else "—")
-        with bar_col:
-            if vmin is not None and vmax is not None:
-                if bins:
-                    st.altair_chart(_style_observed_vs_official_chart(
-                        bins, vmin, vmax, domain, label), width="stretch")
-                else:
-                    st.html(_range_bar_html(vmin, vmax, domain, fmt(vmin), fmt(vmax),
-                                            color=_srm_color(srm_mid) if srm_mid is not None else None))
+        # Titre AU-DESSUS du graphique, pleine largeur (2026-09-11, retour
+        # utilisateur en direct : "les graphs sont trop tassés en l'état").
+        # REVIREMENT sur la disposition du 2026-08-27 (`st.columns([2, 3])`,
+        # titre+valeur à gauche / barre à droite) : elle réglait un AUTRE
+        # problème -- 5 critères côte à côte tronquaient les fourchettes
+        # ("2.8%…") -- en passant à une ligne par critère, ce qui reste acquis
+        # ici. Mais elle ne laissait que 3/5 de la largeur au graphique, et
+        # depuis T105 cette place n'accueille plus une simple barre de range :
+        # c'est un histogramme complet (distribution observée superposée à la
+        # fourchette BJCP), qui a besoin de toute la largeur pour être
+        # lisible. Empilé : le titre garde sa place, le graphique gagne 40 %
+        # de largeur.
+        st.metric(label, f"{fmt(vmin)}–{fmt(vmax)}" if vmin is not None else "—")
+        if vmin is not None and vmax is not None:
+            if bins:
+                st.altair_chart(_style_observed_vs_official_chart(
+                    bins, vmin, vmax, domain, label), width="stretch")
+            else:
+                st.html(_range_bar_html(vmin, vmax, domain, fmt(vmin), fmt(vmax),
+                                        color=_srm_color(srm_mid) if srm_mid is not None else None))
     if not has_vitals:
         st.caption(
             "This style has no vital statistics of its own — it inherits them "
@@ -6824,7 +6854,25 @@ def _survivables(con) -> None:
     chart = (bars + flags).resolve_scale(color="independent", shape="independent").properties(
         width=chart_width, height=440)
     with _panel():
-        st.altair_chart(chart, width="content")
+        # `hf-wide-chart` (2026-09-11, régression signalée en direct : "le plot
+        # survivables est illisible maintenant") : EXEMPTE ce graphique de la
+        # règle `max-width:100%` posée pour le mobile (AUDIT.md §E6, voir
+        # `_TYPOGRAPHY_STYLE`). Cette règle réduit proportionnellement tout
+        # graphique plus large que son conteneur -- exactement ce qu'il faut
+        # pour les 5 graphiques de Compare Hops, exactement ce qu'il ne faut
+        # PAS ici : celui-ci est DÉLIBÉRÉMENT surdimensionné
+        # (`chart_width = 26 px x nb de houblons`, jusqu'à ~4 400 px pour ~170
+        # houblons) précisément pour que chaque barre et chaque nom d'axe
+        # gardent leur place, quitte à défiler. Le réduire à la largeur de la
+        # carte écrase ~170 barres dans ~900 px : illisible.
+        # Défiler EST le mode de lecture voulu ici, pas un défaut.
+        # Conteneur NOMMÉ (`st.container(key=...)` -> classe
+        # `st-key-hf_wide_chart`) plutôt qu'un marqueur + sélecteur de
+        # voisinage : c'est le patron déjà utilisé partout ici pour cibler un
+        # bloc précis en CSS (`st-key-panel_*`, `st-key-hf_vital_stats`), et
+        # il ne dépend d'aucune hypothèse sur l'imbrication du DOM Streamlit.
+        with st.container(key="hf_wide_chart"):
+            st.altair_chart(chart, width="content")
         st.caption(
             "Marker above each bar = purpose: circle = aromatic (includes dual-"
             "purpose hops — usually run for aroma in practice), triangle = "
