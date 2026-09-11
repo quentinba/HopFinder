@@ -239,6 +239,12 @@ _TOOL_SUMMARY_BY_MODE = {t["mode"]: t for t in _TOOL_SUMMARIES}
 # un `git log` en direct exigerait aussi que `.git` soit présent dans le
 # conteneur déployé, ce qui n'est pas garanti.
 _RECENT_UPDATES = [
+    ("2026-09-11", "Charts now shrink to fit narrow screens instead of "
+                   "running past the edge. Every chart had a fixed pixel "
+                   "width, so on a phone you had to scroll inside each one to "
+                   "see its right half — and even on a laptop two of Compare "
+                   "hops' charts already overflowed. They keep their full size "
+                   "wherever there is room."),
     ("2026-09-11", "Amplify now tells you when the hops it shows are simply "
                    "tied. In Descriptors mode the score is the share of your "
                    "selected descriptors a hop carries, so it only takes a "
@@ -1006,6 +1012,28 @@ div[class*="st-key-panel_"], details[class*="st-key-panel_"] {
    `theme.type`. */
 [data-testid="stVegaLiteChart"] svg {
     background-color: light-dark(#ebddc5, #2e2b25) !important;
+    /* AUDIT.md §E6 (2026-09-11) -- lisibilité sur petit écran. Tous les
+       graphiques ont une largeur en PIXELS FIXES (`_COMPARE_CHART_WIDTH` 700,
+       `_COMPARE_RADAR_SIZE` 500, `alt.Step(45)` par houblon pour la heatmap),
+       héritée d'un historique de réglages au pixel près -- 4 tailles
+       successives essayées pour le seul radar, CLAUDE.md interdit d'en
+       reproposer une 5e sans retour explicite. Mesuré en direct : même à
+       1512 px de large, 2 des 5 graphiques de Compare Hops débordaient déjà
+       leur conteneur (SVG 700 px dans 672 px) ; sur un téléphone (~360 px
+       utiles) il aurait fallu faire défiler l'intérieur du cadre pour voir
+       la moitié droite de chaque graphique.
+       Ces 2 lignes règlent le cas SANS toucher à aucune de ces valeurs :
+       Vega-Lite émet un `viewBox` sur chaque SVG (vérifié en direct sur les
+       5), donc `max-width` le fait se réduire PROPORTIONNELLEMENT quand le
+       conteneur est plus étroit, et ne fait rien du tout quand il est assez
+       large -- la taille de conception reste 500/700, elle n'est plus un
+       plancher qui déborde. Vérifié en direct après coup : à 360 px les 5
+       graphiques tiennent, ratio préservé, et les tooltips fonctionnent
+       toujours (le moteur SVG de Vega utilise le hit-testing DOM natif, que
+       le navigateur corrige de la mise à l'échelle CSS -- ce ne serait PAS
+       vrai avec le moteur canvas, qui calcule ses coordonnées à la main). */
+    max-width: 100%;
+    height: auto;
 }
 /* T-D14b (2026-08-24, spec Claude Design, lockup "1d — Stacked") : la
    marque (`.hf-logo-mark`) est un `mask-image` (voir `_logo_mask_data_uri`/
