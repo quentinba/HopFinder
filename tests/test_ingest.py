@@ -247,6 +247,73 @@ def test_merge_hop_varieties_migrates_beer_analytics_tables(tmp_path):
         "SELECT variety FROM hop_typical_styles WHERE hop_name='Dolcita'"
     ).fetchone()["variety"] == "dolcita-hops"
 
+def test_merge_hop_varieties_covers_every_table_carrying_a_variety(tmp_path):
+    # GARDE-FOU STRUCTUREL (2026-09-11, audit §I1) : l'oubli ci-dessus (4
+    # tables T85-T88 non migrées) S'EST REPRODUIT à l'identique -- T96
+    # (hop_thiol_impact), T126 (hop_addition_timing) et T116
+    # (hop_lot_analysis) ont été ajoutées ensuite sans être branchées, et
+    # rien ne le signalait. Deux fois le même bug = il faut un test qui
+    # tienne tout seul, pas une 3e relecture attentive.
+    #
+    # Vérifie le SCHÉMA, pas un cas particulier : toute table déclarant une
+    # colonne `variety` doit être citée dans le corps de `merge_hop_varieties`.
+    # Un test par table laisserait passer la table SUIVANTE ; celui-ci échoue
+    # dès qu'on ajoute une table sans la brancher.
+    import inspect, re
+    from hopmatch import schema
+    body = inspect.getsource(ingest.merge_hop_varieties)
+    declarees = {m.group(1) for m in
+                 re.finditer(r"CREATE TABLE (?:IF NOT EXISTS )?(\w+)\s*\((.*?)\n\);",
+                             schema.SCHEMA, re.S)
+                 if re.search(r"\bvariety\s+TEXT", m.group(2))}
+    assert declarees, "aucune table à `variety` trouvée -- le parseur du schéma a cassé"
+    oubliees = sorted(t for t in declarees if not re.search(rf"\b{t}\b", body))
+    assert not oubliees, (
+        f"tables portant une colonne `variety` mais absentes de merge_hop_varieties : "
+        f"{oubliees}. Une fusion y laisserait des lignes orphelines pointant sur une "
+        f"variety supprimée, et le houblon conservé perdrait ces données en silence.")
+
+def test_merge_hop_varieties_migrates_thiol_impact_and_addition_timing(tmp_path):
+    # Le pendant COMPORTEMENTAL du garde-fou ci-dessus, sur les 2 tables
+    # réellement peuplées en production (60 variétés ont un impact thiol,
+    # 122 un timing d'addition -- c'était l'exposition du bug latent).
+    con = connect(str(tmp_path / "t.db"))
+    init_db(con)
+    ingest._ingest_variety(con, "keep-me", "Twin", "Germany", {}, [], "barthhaas")
+    ingest._ingest_variety(con, "drop-me", "Twin", "Germany", {}, [], "yakima")
+    con.execute("INSERT INTO hop_thiol_impact VALUES (?,?,?,?)",
+               ("drop-me", "high", "hopsteiner-thiol-2024", "2026"))
+    con.executemany("INSERT INTO hop_addition_timing VALUES (?,?,?,?,?,?,?)", [
+        ("drop-me", "Dry hop", 12, 20, 8, "mmum", "2026"),
+        ("drop-me", "Whirlpool", 8, 20, 8, "mmum", "2026"),
+    ])
+    con.commit()
+    ingest.merge_hop_varieties(con, keep="keep-me", drop="drop-me")
+    assert con.execute("SELECT 1 FROM hops WHERE variety='drop-me'").fetchone() is None
+    # migrées vers le houblon conservé...
+    assert con.execute(
+        "SELECT category FROM hop_thiol_impact WHERE variety='keep-me'").fetchone()["category"] == "high"
+    assert {r["bin"] for r in
+            con.execute("SELECT bin FROM hop_addition_timing WHERE variety='keep-me'")} == {
+        "Dry hop", "Whirlpool"}
+    # ...et AUCUNE orpheline laissée derrière.
+    for table in ("hop_thiol_impact", "hop_addition_timing"):
+        assert con.execute(f"SELECT 1 FROM {table} WHERE variety='drop-me'").fetchone() is None
+
+def test_merge_hop_varieties_survives_an_absent_optional_table(tmp_path):
+    # `hop_lot_analysis` est créée à la demande et RÉELLEMENT absente de la
+    # base de production (aucun lot jamais ingéré, T128). La traiter sans
+    # garde ferait échouer toute fusion sur ces bases-là -- d'où
+    # `ingest._table_exists`.
+    con = connect(str(tmp_path / "t.db"))
+    init_db(con)
+    con.execute("DROP TABLE IF EXISTS hop_lot_analysis")
+    ingest._ingest_variety(con, "keep-me", "Twin", "Germany", {}, [], "barthhaas")
+    ingest._ingest_variety(con, "drop-me", "Twin", "Germany", {}, [], "yakima")
+    con.commit()
+    ingest.merge_hop_varieties(con, keep="keep-me", drop="drop-me")  # ne doit pas lever
+    assert con.execute("SELECT 1 FROM hops WHERE variety='drop-me'").fetchone() is None
+
 def test_merge_hop_varieties_idempotent_when_already_merged(tmp_path):
     con = connect(str(tmp_path / "t.db"))
     init_db(con)

@@ -145,6 +145,16 @@ def _normalize_region_for_merge(region: str | None) -> str | None:
     return _REGION_ALIASES_FOR_MERGE.get(r, r)
 
 
+def _table_exists(con, table: str) -> bool:
+    """Une table créée à la demande (`schema.ensure_table`) peut manquer d'une
+    base à l'autre selon les ingestions réellement lancées -- ex.
+    `hop_lot_analysis` est absente de la base de production (aucun lot jamais
+    ingéré). Utilisé par `merge_hop_varieties` pour ne pas faire échouer une
+    fusion entière sur une table optionnelle."""
+    return con.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone() is not None
+
+
 def _find_variety_by_name_region(con, name: str | None, region: str | None) -> str | None:
     """Résout un doublon cross-source (BarthHaas <-> Yakima) pour la MÊME
     variété dans la MÊME région, quand les deux sources utilisent des slugs
@@ -265,6 +275,38 @@ def merge_hop_varieties(con, keep: str, drop: str) -> None:
     # T131 : même schéma UPDATE que style_hop_usage/style_hop_pairings
     # ci-dessus (`variety` hors clé primaire, PK sur hop_name/style_label).
     con.execute("UPDATE OR IGNORE hop_typical_styles SET variety=? WHERE variety=?", (keep, drop))
+    # T96/T126/T116 (2026-09-11, audit §I1) : MÊME OUBLI QUE T85-T88 ci-dessus,
+    # répété. Ces 3 tables portent une colonne `variety` et n'étaient traitées
+    # nulle part ici -- une fusion laissait donc leurs lignes pointer sur une
+    # variety SUPPRIMÉE (orphelines, invisibles), et le houblon conservé
+    # perdait silencieusement son badge "Thiol impact" et son graphique
+    # "Hop addition timing". Aucune orpheline en base aujourd'hui (les 7
+    # fusions réelles sont antérieures au peuplement de ces tables), mais
+    # l'exposition est là : 60 variétés ont un impact thiol, 122 un timing
+    # d'addition. Bug LATENT, qui se déclencherait à la prochaine fusion.
+    # `_table_exists` : contrairement aux tables ci-dessus, celles-ci sont
+    # créées à la demande (`ensure_table`) et peuvent manquer d'une base à
+    # l'autre -- `hop_lot_analysis` est RÉELLEMENT absente de la base de
+    # production actuelle (aucun lot jamais ingéré, décision T128). Les
+    # traiter sans garde ferait échouer toute fusion sur ces bases-là.
+    if _table_exists(con, "hop_thiol_impact"):
+        con.execute(
+            "INSERT OR IGNORE INTO hop_thiol_impact SELECT ?, category, source, fetched_at "
+            "FROM hop_thiol_impact WHERE variety=?", (keep, drop))
+        con.execute("DELETE FROM hop_thiol_impact WHERE variety=?", (drop,))
+    if _table_exists(con, "hop_addition_timing"):
+        con.execute(
+            "INSERT OR IGNORE INTO hop_addition_timing SELECT ?, bin, count, "
+            "total_additions, total_recipes, source, computed_at "
+            "FROM hop_addition_timing WHERE variety=?", (keep, drop))
+        con.execute("DELETE FROM hop_addition_timing WHERE variety=?", (drop,))
+    if _table_exists(con, "hop_lot_analysis"):
+        # `variety` HORS clé primaire (PK = lot_number, compound) -> simple
+        # UPDATE, comme style_hop_usage. Une mesure de LOT n'est jamais
+        # fusionnée/dédupliquée : elle reste attachée à son lot, seul son
+        # rattachement à une variété est réétiqueté.
+        con.execute("UPDATE OR IGNORE hop_lot_analysis SET variety=? WHERE variety=?",
+                   (keep, drop))
 
     srcs = sorted(set(keep_row["sources"].split(",")) | set(drop_row["sources"].split(",")))
     purpose = keep_row["purpose"] if keep_row["purpose"] is not None else drop_row["purpose"]

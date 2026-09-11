@@ -466,14 +466,14 @@ manque n'est pas l'honnêteté, c'est **l'interprétabilité du chiffre affiché
    fréquences de pairing. La chimie n'entre dans un blend que par ce classement : corriger la
    règle d'unité à un seul endroit suffit donc à corriger les blends, et il n'existe pas de
    second chemin à surveiller.
-4. **Le biais D4 est-il un défaut ?** Un houblon mieux documenté *mérite* peut-être de mieux
-   ressortir. Je le signale comme non documenté, pas comme certainement à corriger.
+4. ~~**Le biais D4 est-il un défaut ?**~~ **TRANCHÉ le 2026-09-11 (décision utilisateur) :
+   laissé tel quel.** « S'il est mieux documenté il mérite de passer 1er, car on a une
+   certitude sur ses notes. » Le biais reste décrit dans `docs/methodologie.md` §4 pour que
+   le lecteur sache ce que le classement reflète.
 5. **Reproductibilité au-delà de l'ordre SQL** : je n'ai trouvé aucune graine aléatoire ni
    `set`/`dict` non ordonné influençant un classement, hors B3. Je n'ai pas testé un rebuild
    complet de la base pour le confirmer de bout en bout.
-6. Je n'ai pas audité en profondeur `ingest.py` (3 480 lignes, 11 sources) ni `reference.py`
-   (1 811 lignes de priors curés). L'audit a priorisé le moteur, la GUI et les données
-   réellement servies.
+6. ~~`ingest.py` / `reference.py` non audités~~ ✅ **FAIT le 2026-09-11 — voir §9 ci-dessous.**
 
 ---
 
@@ -499,3 +499,76 @@ Le lot 2 avant le lot 1 : sans fixture multi-sources, on corrige le moteur à l'
 
 *Fin de la phase 1. Aucune modification de code n'a été faite. J'attends ta validation, et
 en particulier ta décision sur la question 1 du §7, avant d'attaquer le lot 1.*
+
+---
+
+## 9. Audit de `ingest.py` et `reference.py` (2026-09-11)
+
+Les deux fichiers laissés de côté en phase 1 (5 291 lignes). Méthode : vérifications
+**automatisables** d'abord (elles trouvent vite et ne dépendent pas de mon attention sur
+5 000 lignes), lecture ciblée ensuite sur ce qu'elles désignent.
+
+### I1 — [IMPORTANT] `merge_hop_varieties` oublie 3 tables — *la même faute, une 2e fois*
+
+**Fichier** : `src/hopmatch/ingest.py`, `merge_hop_varieties`.
+
+Cette fonction fusionne deux entrées `hops` en double : elle recopie les lignes de `drop`
+vers `keep` dans chaque table, puis supprime `drop`. Elle traitait **12 des 15** tables
+d'`aromahops.db` portant une colonne `variety`. Manquaient :
+
+| Table | Ticket | Conséquence d'une fusion |
+|---|---|---|
+| `hop_thiol_impact` | T96 | badge « Thiol impact » perdu, ligne orpheline |
+| `hop_addition_timing` | T126 | graphique « Hop addition timing » perdu, lignes orphelines |
+| `hop_lot_analysis` | T116 | rattachement à la variété perdu |
+
+**C'est exactement le bug déjà corrigé le 2026-08-29** — CLAUDE.md le documente : les 4
+tables T85-T88 « n'existaient pas au premier passage ; les laisser de côté aurait
+silencieusement perdu des lignes référençant la `variety` supprimée ». Quatre tables ont été
+ajoutées depuis, sans être branchées, et rien ne le signalait.
+
+**Latent, pas actif** : 0 ligne orpheline en base aujourd'hui (les 7 fusions réelles sont
+antérieures au peuplement de ces tables), et 0 paire de doublons restante. Mais l'exposition
+est réelle — **60 variétés** ont un impact thiol, **122** un timing d'addition : la prochaine
+fusion touchant l'une d'elles perdrait ces données en silence.
+
+✅ **Corrigé le 2026-09-11**, avec `_table_exists` en garde (`hop_lot_analysis` est réellement
+absente de la base de production — la traiter sans garde ferait échouer toute fusion).
+Surtout : **un garde-fou structurel** (`test_merge_hop_varieties_covers_every_table_carrying_a_variety`)
+lit le schéma et échoue dès qu'une table à colonne `variety` n'est pas citée dans la fonction.
+Deux fois la même faute justifiait un test qui tienne seul, pas une 3e relecture attentive —
+vérifié en réintroduisant le bug : le test échoue bien.
+
+### I2 — [POUR INFO] `CONTRAST_AFFINITY` ne couvre que 104 des 138 descripteurs
+
+34 descripteurs réels (`basil`, `cognac`, `butter`, `chilli`, `cranberry`…), portés par
+**67 houblons**, n'ont aucune cible de contraste. Un utilisateur qui en choisit un n'obtient
+rien de Contrast. Ce n'est **pas un bug** : `contrast()` les remonte dans `unmapped` et la GUI
+affiche « No affinity mapping for: … » — jamais un silence. C'est une limite de couverture,
+signalée ici parce qu'elle est invisible tant qu'on ne tombe pas dessus.
+
+### Ce que ces vérifications ont trouvé **propre** (dit brièvement)
+
+- **Aucune clé dupliquée** dans les dicts littéraux de `reference.py` (1 811 lignes de
+  curation manuelle), `parsers.py` ni `ingest.py` — une clé répétée écraserait la première en
+  silence, c'était le défaut le plus probable sur un fichier curé à la main.
+- **Aucun écart `?`/valeurs** sur les `INSERT` d'`ingest.py` (vérifié par AST sur chaque appel
+  `execute`/`executemany`).
+- **`reference.py` est cohérent avec la base sur tous les axes croisés** : les 138 clés de
+  `DESCRIPTOR_FAMILIES`, les 104 de `CONTRAST_AFFINITY`, les 506 d'`INGREDIENT_DESCRIPTORS`,
+  les 16 d'`AROMA_WHEEL_DEFINITIONS` existent **toutes** dans le vocabulaire réel ; les
+  96 descripteurs cités par `INGREDIENT_DESCRIPTORS` et les 10 cibles de `CONTRAST_AFFINITY`
+  aussi ; aucune chaîne d'alias (`DESCRIPTOR_ALIASES` ne pointe jamais vers une autre clé).
+- **`PROCESS_SURVIVAL` et `PROCESS_STAGE_SURVIVAL` portent exactement les mêmes 14 composés**,
+  vocabulaire d'états et de stades fermé, aucun composé à stades incomplets.
+- **Vocabulaire d'unités clos** : 5 unités, cohérentes entre `parsers.py` (les labels de
+  chaque source) et les `INSERT` d'`ingest.py`. Aucune unité écrite en base qui ne vienne d'un
+  parseur.
+
+### Limite de cet audit
+
+Les vérifications ci-dessus sont **structurelles** (schéma, AST, cohérence croisée des
+vocabulaires). Elles ne disent rien de la **justesse d'un parseur face au HTML réel** d'une
+source — ça, seul un re-crawl comparé à la page d'origine le montrerait, et les fixtures
+figées ne peuvent pas l'attraper (c'est de cette famille qu'était le bug de colonne CAS
+décalée de FooDB, trouvé jadis en lisant les données, pas le code).
