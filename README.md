@@ -232,7 +232,7 @@ et *ce qu'elle vaut*.
 |---|---|---|---|---|---|
 | **BarthHaas** | houblon | composition (dont thiols) | HTML servi | propre, producteur ; pas de descripteurs fiables | données producteur |
 | **Yakima Chief** | houblon | β-pinène, sélinène, roue d'arôme (catégorique et quantitative), variétés similaires, purpose | API Algolia (checkpoint devant le HTML) | propre, labo ASBC | données producteur |
-| **BeerMaverick** | houblon↔houblon + descripteurs | pairings/substitutions, roue d'arôme (104 termes), purpose | HTML statique | agrégateur, pas une mesure de labo | non publiée |
+| **BeerMaverick** | houblon↔houblon + descripteurs | pairings/substitutions, roue d'arôme (138 termes au total, toutes sources), purpose | HTML statique | agrégateur, pas une mesure de labo | non publiée |
 | **FooDB** | ingrédient→molécule | composition + concentration | dump bulk | lacunaire, bruitée, figée 2020 | **non commerciale** |
 | **Flavornet** | molécule | whitelist odeur-active | HTML statique | curée mais petite/ancienne | académique |
 | **FlavorDB2** | molécule | seuils olfactifs | scrape HTML (fiche par CID) | seuils utiles, texte libre, présence seule | **CC BY-NC-SA** |
@@ -259,7 +259,10 @@ et *ce qu'elle vaut*.
   bruit (« typical aroma profile », un millésime de récolte comme « 2023 »). BarthHaas reste la
   source de composition ; les descripteurs viennent de Yakima et BeerMaverick (voir plus bas —
   BeerMaverick s'est révélé le vocabulaire le plus riche des deux, signalé en direct par
-  l'utilisateur : "dank" n'était tagué que sur 1/203 houblons côté Yakima).
+  l'utilisateur : "dank" n'était tagué que sur 1/203 houblons côté Yakima — le catalogue
+  comptait 203 houblons au moment de cette mesure, 192 aujourd'hui après fusion des doublons
+  cross-source ; les dénominateurs « /203 » de ce document sont des mesures datées, gardées
+  telles quelles plutôt que réécrites après coup).
 - **Descripteurs qualitatifs et roue d'arôme quantitative RÉELS trouvés (T79, 2026-08-22).**
   Le constat ci-dessus ("Aroma Profile" = prose, jamais une liste exploitable) reste vrai, mais
   n'était pas la seule donnée d'arôme structurée présente sur ces pages. Deux blocs distincts,
@@ -517,11 +520,12 @@ résultat, si un poids vient d'une vraie source ou d'une estimation maison.
   réserve partout où c'est montré), comble ce manque : associations fréquentes en recette
   (`hop_pairings`), substitutions suggérées (`hop_substitutions`), un vocabulaire de
   descripteurs bien plus riche et sélectif que Yakima seul (104 termes au total une fois
-  fusionné, ex. "dank" correctement présent sur 6 houblons contre 1 seul côté Yakima), et le
+  fusionné — 138 aujourd'hui, après les 34 termes nets apportés ensuite par BarthHaas en T79 ;
+  ex. "dank" correctement présent sur 6 houblons contre 1 seul côté Yakima), et le
   **purpose** (aromatic/bittering/both — la seule des sources à classer un houblon par usage).
 - **Comment.** HTML statique servi normalement par chaque page `beermaverick.com/hop/{slug}/`
   (`robots.txt` ouvert, sitemap public). Réconciliation par nom normalisé
-  (`ingest._resolve_hop_variety`, tolère ®/™/« Brand »/« NZ Hops »...) : 143/203 variétés du
+  (`ingest._resolve_hop_variety`, tolère ®/™/« Brand »/« NZ Hops »...) : 143/192 variétés du
   catalogue ont une page BeerMaverick correspondante.
 - **Purpose inféré en repli.** Pour les variétés sans purpose BeerMaverick réel, l'acide alpha
   moyen sert de repli (`matching.infer_purpose_from_alpha_acid`) : seuil de 7,0% **mesuré**
@@ -643,7 +647,8 @@ composés communs.
 `hopmatch contrast --descriptors citrus,floral` → cible earthy/herbal/resinous/woody/spicy →
 les houblons noble/herbacés ressortent.
 
-**Vocabulaire de descripteurs élargi (38 → 104 termes).** Signalé en direct par l'utilisateur :
+**Vocabulaire de descripteurs élargi (38 → 104 termes ; 138 aujourd'hui après T79).** Signalé
+en direct par l'utilisateur :
 `contrast --descriptors tropical` ciblait "dank" (via `CONTRAST_AFFINITY`) mais quasiment aucun
 houblon ne le couvrait. Vérifié en direct sur l'API Algolia Yakima : "Dank" n'y est tagué que
 sur 1/203 houblons de toute la base (CTZ), alors même que Chinook/Columbus (classiquement
@@ -688,7 +693,7 @@ croissance se restreint aux houblons aromatiques ; à chaque taille >1, le houbl
 mélange **pertinence ET fréquence RÉELLE de pairing** (BeerMaverick, `hop_pairings`, restreint
 au top-10 des partenaires d'un houblon déjà dans le blend) — jamais l'un puis l'autre en
 cascade. Repli explicite sur la pertinence/couverture pure quand aucune fréquence réelle
-n'existe (36/203 houblons seulement ont une donnée BeerMaverick, mesuré) — jamais un blend plus
+n'existe (36/192 houblons seulement ont une donnée BeerMaverick, mesuré) — jamais un blend plus
 petit que possible par manque de données, mais chaque houblon signale sa provenance (`via`).
 Ne s'arrête pas dès couverture complète (voir un blend à 5 reste utile même quand 1 houblon
 couvre déjà toute la cible). Toujours pas de NNLS (le contraste reste non-moléculaire par

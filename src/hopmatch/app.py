@@ -239,6 +239,16 @@ _TOOL_SUMMARY_BY_MODE = {t["mode"]: t for t in _TOOL_SUMMARIES}
 # un `git log` en direct exigerait aussi que `.git` soit présent dans le
 # conteneur déployé, ce qui n'est pas garanti.
 _RECENT_UPDATES = [
+    ("2026-09-10", "Hovering a results table's \"Score\" header now explains "
+                   "what the number actually means — Amplify's is a ranking "
+                   "within that one search (the best hop always sits at 100, "
+                   "so two searches can't be compared), while Contrast's is "
+                   "an absolute share of the affinity target. Amplify also "
+                   "breaks score ties in a stable, explainable order (total "
+                   "oil, then name) instead of whatever order the database "
+                   "happened to return. The sidebar's \"Database\" panel now "
+                   "lists all the sources behind the app, not just seven of "
+                   "them."),
     ("2026-09-10", "Browse a hop and Amplify now open with an empty search "
                    "field instead of something already picked for you — on a "
                    "phone, that meant clearing the pre-filled value before "
@@ -1401,7 +1411,20 @@ def _render_hop_rows(rows: list[dict], columns: list[tuple]) -> None:
     {"score", "fraction", "list", "purpose"} pour un rendu typé -- "purpose"
     résout la clé en texte via `_purpose_label` (utilise aussi
     "purpose_inferred" si présent, voir `_row_with_purpose`), les autres
-    passent la valeur telle quelle à `column_config`."""
+    passent la valeur telle quelle à `column_config`.
+
+    4e élément OPTIONNEL : le texte d'aide de la colonne (`help=`, infobulle
+    au survol de l'en-tête). Ajouté le 2026-09-10 (AUDIT.md §E2) : une colonne
+    "Score" rendue en `ProgressColumn` 0-100 sans aucune échelle de référence
+    n'est pas interprétable -- et pour `amplify` elle est carrément trompeuse,
+    puisque le score y est renormalisé par le meilleur houblon de CETTE
+    requête (le premier fait donc TOUJOURS 100, quelle que soit la qualité
+    réelle de l'accord, et deux requêtes ne sont pas comparables entre elles).
+    Le texte est passé PAR APPELANT et non écrit ici : le même en-tête "Score"
+    recouvre trois grandeurs différentes selon l'outil (rang relatif pour
+    amplify, fraction de la cible d'affinité réellement couverte pour
+    contrast, similarité cosinus pour similar-hops) -- une aide générique
+    serait fausse pour au moins deux des trois."""
     column_config: dict = {"Hop": st.column_config.TextColumn(pinned=True)}
     table_rows = []
     for row in rows:
@@ -1409,18 +1432,20 @@ def _render_hop_rows(rows: list[dict], columns: list[tuple]) -> None:
         for col in columns:
             header, field = col[0], col[1]
             kind = col[2] if len(col) > 2 else "text"
+            col_help = col[3] if len(col) > 3 else None
             if kind == "purpose":
                 entry[header] = _purpose_label(row.get("purpose"), row.get("purpose_inferred", False))
-                column_config[header] = st.column_config.TextColumn(width="small")
+                column_config[header] = st.column_config.TextColumn(width="small", help=col_help)
             else:
                 entry[header] = row.get(field, "")
                 if kind == "score":
                     column_config[header] = st.column_config.ProgressColumn(
-                        format="%.1f", min_value=0, max_value=100)
+                        format="%.1f", min_value=0, max_value=100, help=col_help)
                 elif kind == "fraction":
-                    column_config[header] = st.column_config.NumberColumn(format="percent")
+                    column_config[header] = st.column_config.NumberColumn(
+                        format="percent", help=col_help)
                 elif kind == "list":
-                    column_config[header] = st.column_config.ListColumn()
+                    column_config[header] = st.column_config.ListColumn(help=col_help)
         table_rows.append(entry)
     st.dataframe(table_rows, width="stretch", hide_index=True, column_config=column_config)
 
@@ -2193,7 +2218,19 @@ def _amplify(con):
     # T-D07 (spec Claude Design §7) : "score" -> ProgressColumn 0-100,
     # "fraction" -> NumberColumn percent (0-1), "list" -> ListColumn (vraies
     # listes Python, plus de `", ".join(...)` tronqué à l'affichage).
-    _columns = [("Score", "score", "score")]
+    # AUDIT.md §E2 : le score d'amplify est un RANG RELATIF, pas une qualité
+    # d'accord absolue -- la couche moléculaire est divisée par le meilleur
+    # houblon de cette requête (`mmax`, voir `matching.amplify`), donc le
+    # premier fait toujours 100. Le dire explicitement plutôt que de laisser
+    # une barre de progression 0-100 suggérer une échelle absolue.
+    _SCORE_HELP = (
+        "A ranking within this search, not an absolute match quality. The "
+        "molecular layer is rescaled so the best hop for this ingredient "
+        "always sits at 100, so scores from two different ingredients can't "
+        "be compared with each other — only the order and the gaps within "
+        "this table mean something. Weighted mix of the two layers below "
+        "(\"Mol.\" and \"Desc.\"), per the \"How to rank hops?\" choice above.")
+    _columns = [("Score", "score", "score", _SCORE_HELP)]
     if show_mol_col:
         _columns.append(("Mol.", "mol", "fraction"))
     if show_desc_col:
@@ -2444,9 +2481,19 @@ def _contrast(con):
 
     # T-D07 (spec Claude Design §7) : listes Python typées ("list") au lieu
     # de chaînes pré-jointes -- voir `_render_hop_rows`.
+    # AUDIT.md §E2 : contrairement à celui d'Amplify, CE score est absolu
+    # (une fraction, pas un rang renormalisé) -- l'aide le dit tel quel plutôt
+    # que de réutiliser le texte de l'autre outil, qui serait faux ici.
     _render_hop_rows(
         [_contrast_row(h) for h in r["ranked"]],
-        [("Score", "score", "score"), ("Purpose", "purpose", "purpose"),
+        [("Score", "score", "score",
+         "Share of the affinity target this hop actually covers — 100 means "
+         "it carries every descriptor in the target above, 50 means half of "
+         "them. Unlike Amplify's score this one is absolute, so it is "
+         "comparable from one search to another. Many hops tie here (the "
+         "target only has a handful of descriptors); ties are broken by total "
+         "oil, then by name."),
+        ("Purpose", "purpose", "purpose"),
         ("Contrasts via", "contrast_via", "list"),
         ("Descriptor sources", "desc_src", "list"), ("Composition sources", "sources_list", "list")])
 
@@ -6930,12 +6977,27 @@ def main():
         # le fichier local (`aromahops.db`), aucune des sources externes
         # réellement utilisées pour le construire -- voir CLAUDE.md, section
         # "Réalité des données", pour le détail complet de chacune.
+        # Liste COMPLÉTÉE le 2026-09-10 (AUDIT.md §D5) : elle en nommait 7 et
+        # en oubliait 4 réellement présentes en base et réellement affichées
+        # (hops-comptoir alimente 5 variétés françaises et la source de
+        # composition la plus récente ; Hopsteiner porte le badge "Thiol
+        # impact" de Browse ; beer-analytics fait tourner Beer styles/Hops
+        # for a style/la popularité de Browse ; MMuM alimente les
+        # combinaisons de houblons et le timing d'ajout). C'est le seul écran
+        # qui prétend inventorier les sources -- en oublier quatre sur un
+        # projet dont la règle n°1 est de toujours rapporter la provenance
+        # était le pire endroit possible pour une omission.
         st.caption(
             "Built from: **BarthHaas** & **Yakima Chief** (hop composition, "
-            "aroma wheels) · **BeerMaverick** (pairings, substitutions, "
-            "purpose, descriptor tags) · **FooDB** (ingredient molecules) · "
-            "**Flavornet** & **FlavorDB2** (odor-active compounds, "
-            "thresholds) · **PubChem** (compound identity).")
+            "aroma wheels) · **hops-comptoir.com** (Comptoir Agricole, French "
+            "varieties) · **BeerMaverick** (pairings, substitutions, purpose, "
+            "descriptor tags) · **Hopsteiner 2024** (thiol impact) · "
+            "**beer-analytics.com** (recipe statistics: style ranges, hop "
+            "usage & popularity) · **MMuM** (recipe corpus: hop combinations, "
+            "addition timing) · **BJCP 2021** (style guidelines) · **FooDB** "
+            "(ingredient molecules) · **Flavornet** & **FlavorDB2** "
+            "(odor-active compounds, thresholds) · **PubChem** (compound "
+            "identity).")
 
     st.sidebar.caption(
         "Code MIT · [data licenses](https://github.com/quentinba/HopFinder"

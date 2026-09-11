@@ -325,6 +325,34 @@ def test_amplify_shows_inline_hop_detail_expander_without_navigating(toy_cwd):
     assert any("Hopa" in e.label for e in at.expander)
     assert at.sidebar.radio[0].value == "amplify"  # toujours sur la même page
 
+def test_render_hop_rows_passes_the_column_help_through(monkeypatch):
+    # AUDIT.md §E2 (2026-09-10) : la colonne "Score" est rendue en
+    # `ProgressColumn` 0-100, ce qui suggère une échelle absolue alors que le
+    # score d'Amplify est renormalisé par le meilleur houblon de la requête
+    # (le premier fait toujours 100). L'explication passe par le `help=` de la
+    # colonne, fourni PAR APPELANT (le même en-tête "Score" recouvre trois
+    # grandeurs différentes selon l'outil). Ce test vérifie le câblage, pas le
+    # texte : sans lui, retirer le 4e élément d'un tuple de colonne ferait
+    # disparaître l'infobulle en silence.
+    from hopmatch import app
+    captured = {}
+
+    def _spy(data, **kwargs):
+        captured.update(kwargs.get("column_config") or {})
+
+    monkeypatch.setattr(app.st, "dataframe", _spy)
+    app._render_hop_rows(
+        [{"name": "Talus", "score": 100.0, "purpose": "aromatic", "why": ["geraniol"]}],
+        [("Score", "score", "score", "SCORE-HELP"),
+         ("Purpose", "purpose", "purpose"),
+         ("Molecular contributors", "why", "list", "LIST-HELP")])
+    # `st.column_config.*` renvoie un dict, pas un objet (vérifié en direct) :
+    # l'infobulle se lit sous la clé "help".
+    assert captured["Score"]["help"] == "SCORE-HELP"
+    assert captured["Molecular contributors"]["help"] == "LIST-HELP"
+    # colonne sans 4e élément -> pas d'infobulle fabriquée.
+    assert captured["Purpose"]["help"] is None
+
 def test_amplify_starts_with_no_ingredient_selected(toy_cwd):
     # 2026-09-10, demande utilisateur (même retour que Browse, étendu ici) :
     # `st.selectbox` sélectionnait le premier ingrédient par ordre

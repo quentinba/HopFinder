@@ -210,6 +210,11 @@ place — c'est `matching.amount()` qui ne l'a jamais reçu.
 
 ### B3 — [IMPORTANT] `amplify` : égalités départagées par l'ordre des lignes SQLite
 
+> ✅ **CORRIGÉ le 2026-09-10** (lot 3). `amplify` utilise désormais le même tuple `_rank`
+> que `contrast`/`by_descriptor` : score BRUT desc (jamais l'arrondi d'affichage, pour ne
+> pas réordonner deux scores réellement différents), puis huile totale desc, puis `variety`
+> asc. Les 11 ex æquo de `strawberry` sont maintenant ordonnés et reproductibles. 2 tests.
+
 **Fichier** : `matching.py:1094` — `ranked.sort(key=lambda r: -r["score"])`, sans clé
 secondaire. Le tri Python est stable → l'ordre retombe sur celui de `hops`, c'est-à-dire
 `SELECT * FROM hops` **sans `ORDER BY`** (`matching.py:81`), donc l'ordre d'insertion du
@@ -449,8 +454,8 @@ manque n'est pas l'honnêteté, c'est **l'interprétabilité du chiffre affiché
 |---|---|---|---|---|
 | ~~**1**~~ | ~~**Corriger B1 + B2**~~ ✅ **fait le 2026-09-10** | Le classement moléculaire est redevenu juste : 0/258 notes avec un houblon `mg_100g` en #1 (était 232/258) | `matching.py` (`SCORING_ABSOLUTE_UNITS`, `amount`, `unit_excluded_measurements`, `amplify`), `app.py` (chip + réexport de la constante, C2 traité au passage) | Effectué : 608 tests verts, vérifié en direct dans l'app. |
 | ~~**2**~~ | ~~**Tests multi-sources**~~ ✅ **fait le 2026-09-10** | Le bug B1 est désormais détectable par les tests | `tests/test_matching.py` (4 tests, `comp` à unités mélangées construit à la main plutôt que via les fixtures barthhaas/yakima) | Nul. Les 4 tests ont d'abord été vérifiés ROUGES sur le code buggé. |
-| **3** | **B3 : départage déterministe d'`amplify`** | Top-N stable et reproductible | `matching.py:1094` | Faible, mais change l'ordre affiché à égalité. |
-| **4** | **D2/D3/D5 + `help=` sur Score** (E2) | Provenance et chiffres justes, score interprétable | `README.md`, `app.py:1401,6847` | Nul. |
+| ~~**3**~~ | ~~**B3 : départage déterministe d'`amplify`**~~ ✅ **fait le 2026-09-10** | Top-N stable et reproductible ; même tri que ses deux jumelles | `matching.py` (`amplify`), `tests/test_matching.py` (2 tests) | Effectué : l'ordre affiché à égalité change, c'était le but. |
+| ~~**4**~~ | ~~**D2/D3/D5 + `help=` sur Score** (E2)~~ ✅ **fait le 2026-09-10** | Provenance complète (4 sources manquantes ajoutées), chiffres du README à jour, score enfin interprétable | `README.md`, `app.py` (`_render_hop_rows` accepte un `help=` par colonne, popover Database), `tests/test_app.py` | Nul. Similar hops laissé tel quel : sa légende sous le tableau explique déjà la métrique. |
 | **5** | **B4 (huile totale fabriquée) + B5 (`--db`)** | Supprime la dernière valeur inventée du moteur | `matching.py:248`, `app.py:682` | Faible : quelques houblons sortent du classement — c'est l'effet recherché. |
 | **6** | **E1 (défaut « adobo ») + E4 (débordement)** | Première impression et lisibilité | `app.py` | Nul. |
 | **7** | **C2 : unifier les deux conversions d'unité** | Empêche la prochaine divergence | `matching.py`, `app.py` | Faible si fait juste après le lot 1. |
