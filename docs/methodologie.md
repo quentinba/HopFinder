@@ -16,6 +16,24 @@ de **reproduire un résultat à la main** sans lire le code.
 
 ---
 
+## 0 bis. Un même objet, plusieurs noms (AUDIT.md §C4)
+
+Trois mots désignent **exactement la même chose** selon l'endroit où on les lit. C'est
+historique, assumé, et il vaut mieux le savoir que le deviner :
+
+| Mot | Où | Pourquoi |
+|---|---|---|
+| **note** | code, base (`aroma_notes`), CLI (`hopmatch amplify <note>`) | nom d'origine, gardé partout en interne |
+| **Ingredient** | libellé du champ en GUI | « note » ne parlait pas au brasseur — renommage **d'affichage seulement** (T76), jamais propagé au code ni à la base |
+| **addition** | prose de la GUI (« Extend an addition ») | c'est ce que le mot décrit : ce qu'on met réellement dans la recette |
+
+De même, **descripteur** (le mot d'arôme, ex. « dank ») et **catégorie de roue** (les 15
+axes qui peuvent porter une intensité mesurée) ne sont pas synonymes : toute catégorie de
+roue est un descripteur, l'inverse est faux — c'est ce qui sépare les deux heatmaps de
+« From descriptors » (§4).
+
+---
+
 ## 0. La règle d'unité (à lire en premier)
 
 C'est le point qui a produit le bug le plus coûteux du projet (AUDIT.md §B1), et la seule

@@ -290,7 +290,8 @@ plutôt que message. Coût du correctif : 2 lignes.
 datées, séparation `parsers` (pur) / `ingest` (I/O) / `matching` (calcul) / `app` (rendu)
 respectée sans fuite, moteur utilisable hors GUI.
 
-**C1 — Trois fonctions de classement, trois politiques de tri différentes.** `amplify` sans
+**C1 — Trois fonctions de classement, trois politiques de tri différentes.** ✅ **RÉSOLU le 2026-09-10** par le lot 3 : `amplify` a désormais le même tuple `_rank` que ses deux jumelles.
+ `amplify` sans
 départage (B3), `contrast` et `by_descriptor` avec un `_rank` explicite. Même famille de
 sortie, même écran, règles divergentes.
 
@@ -300,14 +301,16 @@ même travail. La seconde a été corrigée le 2026-09-09, la première non — 
 risque de divergence subtile que le brief vise. **Un seul helper devrait porter cette règle**,
 importé par les deux (par ex. `matching.compound_quantity(rec, total_oil, allowed_units)`).
 
-**C3 — `hops.purpose` : « Inferred: » exposé jusque dans les tableaux de résultats.** Le
+**C3 — `hops.purpose` : « Inferred: » exposé jusque dans les tableaux de résultats.** ✅ **CORRIGÉ le 2026-09-11** : colonne passée en `width="medium"` (les libellés vont jusqu'à 20 caractères et étaient tronqués en « Inferred: Bit » ; le cap `small` du lot 6 avait figé cette troncature) + `help` par défaut expliquant ce que « Inferred: » signifie, puisque le tableau perd la couleur du badge qui portait la distinction ailleurs.
+ Le
 projet interdit explicitement d'utiliser `infer_purpose_from_alpha_acid` pour structurer les
 blends (78,2 % d'accord seulement), mais l'affiche dans la colonne « Purpose » d'Amplify
 (visible à l'écran : « Inferred: Bit… », tronqué). Le libellé est correct sur le fond ; il est
 tronqué en pratique par la largeur de colonne, ce qui affiche « Inferred: Bit » — pire qu'une
 absence.
 
-**C4 — Terminologie flottante côté utilisateur.** « Ingredient » (label du champ), « note »
+**C4 — Terminologie flottante côté utilisateur.** ✅ **TRAITÉ le 2026-09-11, par la documentation et non par un renommage** : vérifié, le vocabulaire VU par l'utilisateur ne porte que deux synonymes vivants (« Ingredient » le champ, « addition » la prose) -- les « note » sont du vocabulaire interne, un choix explicite et documenté (T76 : renommage d'affichage seulement). Renommer aurait été du churn ; la correspondance est désormais écrite dans `docs/methodologie.md` §0 bis.
+ « Ingredient » (label du champ), « note »
 (vocabulaire du code et de la base, `aroma_notes`), « addition » (texte des taglines),
 « aroma note » (README) désignent tous la même chose. Idem « descriptor » / « flavor » /
 « aroma descriptor » / « wheel category ». Le brief demandait de vérifier ce point
@@ -321,7 +324,8 @@ s'appuie déjà sur des comportements pointus de l'API (`light-dark()`, `column_
 `st.segmented_control`, `theme=None` sur des specs Vega-Lite précises) — c'est-à-dire
 exactement le genre de code qui casse sur une montée de version.
 
-**C6 — Entrée morte assumée.** `schema.DROP_COMPOUNDS = {"polyphenols"}:504` est documentée
+**C6 — Entrée morte assumée.** ✅ **CORRIGÉ le 2026-09-11** : `DROP_COMPOUNDS` supprimé entièrement (constante + ses 2 usages), pas seulement vidé -- vérifié qu'aucun parseur ne produit « polyphenols » et que la base n'en contient 0 ligne, donc le filtre était un no-op exécuté à chaque ingestion.
+ `schema.DROP_COMPOUNDS = {"polyphenols"}:504` est documentée
 comme « dead entry, inoffensif ». Correct, mais autant la supprimer.
 
 ---

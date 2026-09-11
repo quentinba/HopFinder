@@ -342,8 +342,10 @@ def test_render_hop_rows_passes_the_column_help_through(monkeypatch):
 
     monkeypatch.setattr(app.st, "dataframe", _spy)
     app._render_hop_rows(
-        [{"name": "Talus", "score": 100.0, "purpose": "aromatic", "why": ["geraniol"]}],
+        [{"name": "Talus", "score": 100.0, "mol": 0.9, "purpose": "aromatic",
+          "why": ["geraniol"]}],
         [("Score", "score", "score", "SCORE-HELP"),
+         ("Mol.", "mol", "fraction"),
          ("Purpose", "purpose", "purpose"),
          ("Molecular contributors", "why", "list", "LIST-HELP")])
     # `st.column_config.*` renvoie un dict, pas un objet (vérifié en direct) :
@@ -351,7 +353,15 @@ def test_render_hop_rows_passes_the_column_help_through(monkeypatch):
     assert captured["Score"]["help"] == "SCORE-HELP"
     assert captured["Molecular contributors"]["help"] == "LIST-HELP"
     # colonne sans 4e élément -> pas d'infobulle fabriquée.
-    assert captured["Purpose"]["help"] is None
+    assert captured["Mol."]["help"] is None
+    # ...SAUF "purpose", seul type à porter une explication PAR DÉFAUT
+    # (2026-09-11, AUDIT.md §C3) : dans un tableau le libellé perd la couleur
+    # du badge qui portait la distinction ailleurs, donc le préfixe
+    # "Inferred:" devient le seul signal que la valeur est estimée -- et rien
+    # ne disait ce qu'il signifiait. Un `help` explicite passé par l'appelant
+    # reste prioritaire sur ce défaut.
+    assert "Inferred:" in captured["Purpose"]["help"]
+    assert captured["Purpose"]["width"] == "medium"  # 20 caractères max, cf. §C3
 
 def test_amplify_starts_with_no_ingredient_selected(toy_cwd):
     # 2026-09-10, demande utilisateur (même retour que Browse, étendu ici) :

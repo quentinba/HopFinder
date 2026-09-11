@@ -239,6 +239,11 @@ _TOOL_SUMMARY_BY_MODE = {t["mode"]: t for t in _TOOL_SUMMARIES}
 # un `git log` en direct exigerait aussi que `.git` soit présent dans le
 # conteneur déployé, ce qui n'est pas garanti.
 _RECENT_UPDATES = [
+    ("2026-09-11", "The \"Purpose\" column no longer cuts its own labels off "
+                   "— \"Inferred: Bittering\" was showing as \"Inferred: Bit\". "
+                   "Hovering the column header now also explains what the "
+                   "\"Inferred:\" prefix means: the hop isn't in BeerMaverick, "
+                   "so the role was estimated from its alpha acid."),
     ("2026-09-11", "Charts now shrink to fit narrow screens instead of "
                    "running past the edge. Every chart had a fixed pixel "
                    "width, so on a phone you had to scroll inside each one to "
@@ -1505,7 +1510,27 @@ def _render_hop_rows(rows: list[dict], columns: list[tuple]) -> None:
             col_help = col[3] if len(col) > 3 else None
             if kind == "purpose":
                 entry[header] = _purpose_label(row.get("purpose"), row.get("purpose_inferred", False))
-                column_config[header] = st.column_config.TextColumn(width="small", help=col_help)
+                # "medium" et PAS "small" (2026-09-11, AUDIT.md §C3) : les
+                # libellés vont jusqu'à 20 caractères ("Aromatic + Bittering",
+                # "Inferred: Bittering") et étaient tronqués en "Inferred:
+                # Bit" -- pire qu'une absence, puisque le lecteur voit un
+                # préfixe de mot sans savoir lequel. Le cap "small" posé au
+                # lot 6 (§E4) visait les colonnes RÉELLEMENT étroites (un
+                # nombre, un pourcentage) ; celle-ci ne l'est pas, et la
+                # borner figeait la troncature.
+                # `help` : dans un tableau, `_purpose_label` perd la couleur du
+                # badge qui portait la distinction ailleurs dans la GUI -- le
+                # préfixe "Inferred:" est alors le SEUL signal que la valeur
+                # est estimée, et rien ne disait ce qu'il voulait dire.
+                column_config[header] = st.column_config.TextColumn(
+                    width="medium",
+                    help=col_help or (
+                        "Aromatic, bittering, or both — sourced from BeerMaverick. "
+                        "\"Inferred:\" means BeerMaverick doesn't cover this hop and "
+                        "the role was estimated from its alpha acid instead (agrees "
+                        "with BeerMaverick on 78% of the hops where both are known, "
+                        "so treat it as a hint). Inferred values are never used to "
+                        "build the blends."))
             else:
                 entry[header] = row.get(field, "")
                 if kind == "score":
@@ -1588,9 +1613,11 @@ def _render_key_stats(hcomp: dict) -> None:
     composés d'arôme comme les autres, ce sont les stats qu'un brasseur
     regarde en premier. Ces 3(4) valeurs étaient auparavant absentes de LA
     BASE ELLE-MÊME (pas juste filtrées à l'affichage) : `alpha_acid`/
-    `beta_acid` étaient dans `schema.DROP_COMPOUNDS` ("non aromatiques",
-    hors du scoring moléculaire) -- retirées de ce filtre au même moment
-    (voir CLAUDE.md), elles sont maintenant réellement stockées.
+    `beta_acid` étaient dans un filtre d'ingestion `schema.DROP_COMPOUNDS`
+    ("non aromatiques", hors du scoring moléculaire) -- retirées de ce filtre
+    au même moment (voir CLAUDE.md), elles sont maintenant réellement
+    stockées. (Ce filtre lui-même a été supprimé le 2026-09-11, AUDIT.md §C6 :
+    il ne contenait plus qu'une entrée morte.)
     Co-humulone (`co_h` côté API Algolia YCH) : Yakima UNIQUEMENT, absent du
     HTML BarthHaas (vérifié en direct) -- "—" si non disponible pour cette
     variété, jamais une valeur inventée."""

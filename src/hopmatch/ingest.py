@@ -44,7 +44,7 @@ import re
 import sqlite3
 
 from . import parsers, reference
-from .schema import (init_db, validate_and_repair, DROP_COMPOUNDS, ensure_table, ensure_columns,
+from .schema import (init_db, validate_and_repair, ensure_table, ensure_columns,
                      BEER_STYLES_SCHEMA, HOP_BEER_STYLES_SCHEMA, HOP_IDENTITY_COLUMNS,
                      HOP_DESCRIPTION_COLUMNS, STYLE_RECIPE_STATS_SCHEMA, STYLE_HOP_USAGE_SCHEMA,
                      STYLE_HOP_PAIRINGS_SCHEMA, HOP_USAGE_STATS_SCHEMA)
@@ -79,7 +79,6 @@ def seed_reference(con: sqlite3.Connection) -> None:
 # --------------------------------------------------------------------------- #
 def _ingest_variety(con, variety, name, region, comp, descriptors, source, repair=True,
                     aroma_intensity=None):
-    comp = {c: v for c, v in comp.items() if c not in DROP_COMPOUNDS}
     comp, confidence, notes = validate_and_repair(comp, repair=repair)
 
     row = con.execute("SELECT sources, name FROM hops WHERE variety=?", (variety,)).fetchone()
@@ -1124,7 +1123,7 @@ _CAS_RE = re.compile(r"^\d{2,7}-\d{2}-\d$")
 _GREEK_PREFIX_RE = re.compile(r"^(?:alpha|beta|gamma|delta|α|β|γ|δ)[-\s]*", re.I)
 _KNOWN_HOP_COMPOUNDS = ({c for c, _ in parsers.BARTHHAAS_LABELS.values()} |
                         {c for c, _ in parsers.YAKIMA_LABELS.values()} |
-                        set(reference.MOLECULES) | set(reference.ALIASES.values())) - DROP_COMPOUNDS
+                        set(reference.MOLECULES) | set(reference.ALIASES.values()))
 
 
 def _hop_cid_map() -> dict[int, str]:

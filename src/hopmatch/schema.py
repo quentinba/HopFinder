@@ -496,12 +496,15 @@ def init_recipes_db(con: sqlite3.Connection) -> None:
     con.executescript(RECIPES_SCHEMA)
 
 
-# alpha_acid/beta_acid retirés de ce filtre (2026-08-19, demande utilisateur) :
-# non-aromatiques (jamais utilisés dans le scoring moléculaire, qui n'itère
-# que sur les molécules de la NOTE -- aucune note FooDB ne référence jamais
-# ces clés spécifiques au houblon), mais des stats clé attendues à l'affichage
-# (browse + détail par houblon), voir CLAUDE.md/app._render_key_stats.
-DROP_COMPOUNDS = {"polyphenols"}  # jamais produit par un parseur (dead entry, inoffensif)
+# `DROP_COMPOUNDS` RETIRÉ le 2026-09-11 (AUDIT.md §C6). C'était un filtre de
+# composés à écarter à l'ingestion, vidé de son sens en deux temps :
+# alpha_acid/beta_acid en avaient été sortis le 2026-08-19 (non-aromatiques,
+# mais des stats clé attendues à l'affichage -- voir app._render_key_stats),
+# ne laissant que "polyphenols", que sa propre note décrivait déjà comme une
+# "dead entry" jamais produite par un parseur. Vérifié avant retrait : aucune
+# occurrence de "polyphenol" nulle part dans parsers/reference/les mappings,
+# et 0 ligne en base. Le filtre était donc devenu un no-op appliqué à chaque
+# ingestion, et sa soustraction dans `_KNOWN_HOP_COMPOUNDS` ne retirait rien.
 
 
 def connect(path: str) -> sqlite3.Connection:
