@@ -1,6 +1,19 @@
 # AUDIT — HopFinder (hopmatch)
 
-Audit en lecture seule, 2026-09-10. Aucun fichier de code modifié.
+Audit en lecture seule, 2026-09-10. Aucun fichier de code modifié *à la rédaction*.
+
+> ## ÉTAT AU 2026-09-11 — audit clos
+> **Les 5 constats de la synthèse ci-dessous sont corrigés**, ainsi que les 2 bugs mineurs,
+> les 4 points de cohérence et les 6 d'ergonomie (sauf E5, laissé tel quel sur décision
+> utilisateur). Les 10 lots du plan d'action sont faits, plus l'audit de `ingest.py`/
+> `reference.py` ajouté ensuite (§9). Chaque constat porte son propre encadré ✅ avec ce qui
+> a été vérifié ; le diagnostic d'origine est conservé tel qu'écrit en phase 1.
+>
+> **Restent ouverts, volontairement** : §I2 (couverture de `CONTRAST_AFFINITY`, informatif),
+> §7 n°5 (reproductibilité au-delà de l'ordre SQL), et un test intermittent
+> (`test_styles_mode_shows_observed_distribution_legend_when_beer_analytics_covers_style`,
+> vu échouer une fois puis repasser 6 fois — piste du cache Streamlit à clé relative non
+> confirmée, donc non corrigée).
 
 > ⚠ **Trois prémisses du brief d'audit sont fausses** — vérifié avant de commencer,
 > parce qu'elles orientaient une partie des questions vers du code qui n'existe pas :
@@ -449,7 +462,7 @@ manque n'est pas l'honnêteté, c'est **l'interprétabilité du chiffre affiché
    houblons et composés écartés). Les options (b) conversion par densité d'huile sourcée
    et (c) demander à Comptoir Agricole la base de leurs pourcentages restent ouvertes si
    on veut un jour réintégrer ces mesures plutôt que les écarter.
-2. **`hop_lot_analysis` n'existe pas dans `aromahops.db`** alors que le schéma et le client
+2. ~~**`hop_lot_analysis` n'existe pas dans `aromahops.db`**~~ **TRANCHÉ le 2026-09-11 (décision utilisateur) : sans objet — « on s'en fout des numéros de lot ».** L'absence de la table est donc le comportement attendu, pas un oubli. (La table reste néanmoins traitée par `merge_hop_varieties` depuis §I1, sous garde d'existence.) Contexte d'origine : alors que le schéma et le client
    T116 sont écrits. Attendu (aucun lot ingéré, `ensure_table` la créera) ou oubli ?
 3. ~~**Impact de B1 sur les blends**~~ ✅ **MESURÉ ET CLOS le 2026-09-11.** Oui, les blends
    étaient touchés, et largement. Mesuré sur **120 ingrédients réels** (ceux ayant à la fois
