@@ -27,9 +27,15 @@ peut pas faire (molécules orphelines, données manquantes) — jamais un score 
 son contexte de fiabilité.
 
 Les données viennent de sources réelles tracées à la source (BarthHaas, Yakima Chief,
-BeerMaverick, FooDB, Flavornet, FlavorDB2, PubChem) — jamais d'une base inventée à la
-main. Le détail de chacune, et le raisonnement derrière chaque choix de conception, est
-dans la [partie méthodologie](#méthodologie--sources-de-données) plus bas.
+hops-comptoir, BeerMaverick, Hopsteiner, beer-analytics.com, MMuM, BJCP, FooDB, Flavornet,
+FlavorDB2, PubChem) — jamais d'une base inventée à la main. Le détail de chacune, et le
+raisonnement derrière chaque choix de conception, est dans la
+[partie méthodologie](#méthodologie--sources-de-données) plus bas.
+
+> 📐 **Les formules exactes, avec leurs unités, et un exemple chiffré reproductible à la
+> main** sont dans **[docs/methodologie.md](docs/methodologie.md)** — la référence à lire pour
+> savoir d'où vient précisément chaque chiffre affiché, ce qu'il veut dire, et ce que l'outil
+> ne prétend pas faire. Ce README-ci explique surtout *pourquoi* chaque choix a été fait.
 
 **Pour essayer tout de suite** : [Installation & usage](#installation--usage) juste en
 dessous suffit à construire une base et lancer l'outil. Le reste de ce document est une
@@ -539,12 +545,22 @@ résultat, si un poids vient d'une vraie source ou d'une estimation maison.
 
 ### Méthode de score moléculaire (TF-IDF)
 
+> Version formelle (notation mathématique, unités, exemple chiffré pas à pas) :
+> [docs/methodologie.md §2](docs/methodologie.md). La description ci-dessous en donne
+> l'intuition.
+
 Brique commune à plusieurs modes. Le piège naïf : sommer les molécules partagées. Problème —
 le **myrcène est présent à ~50 % dans presque tous les houblons**, donc il écrase le classement
 et ne fait remonter que « les houblons les plus huileux ». La solution (analogue TF-IDF) :
 
 1. **Quantité** d'une molécule dans un houblon = `(% d'huile / 100) × huile totale`
-   (ou valeur brute pour les thiols en µg/kg).
+   (ou valeur brute pour une mesure déjà absolue, aujourd'hui les seuls thiols en µg/kg).
+   ⚠ Une mesure dans **toute autre unité** — ou un % d'huile sur un houblon dont l'huile
+   totale est inconnue — est **écartée du calcul et signalée à l'écran**, jamais convertie
+   au jugé : voir [docs/methodologie.md §0](docs/methodologie.md). Cette phrase énonçait
+   auparavant « ou valeur brute pour les thiols », c'est-à-dire l'invariant « les thiols sont
+   la seule unité étrangère » — devenu faux quand hops-comptoir a introduit le `mg_100g`, et
+   c'est précisément cet écart doc/code qui a produit le bug de scoring du 2026-09-10.
 2. **Normalisation par composé** (term frequency) : chaque molécule est ramenée à [0,1] par son
    maximum à travers les houblons. Ainsi « le plus riche en linalol » pèse autant que « le plus
    riche en myrcène ».
