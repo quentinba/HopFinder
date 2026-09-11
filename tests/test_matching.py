@@ -1,4 +1,4 @@
-import os, tempfile
+import os, re, tempfile
 import pytest
 from hopmatch import ingest, matching, reference
 from hopmatch.schema import connect, init_db
@@ -1920,6 +1920,20 @@ def test_ingredient_descriptors_keys_and_terms_match_real_vocabulary(db):
         for ingredient, terms in reference.INGREDIENT_DESCRIPTORS.items():
             for t in terms:
                 assert t in real_desc_prod, (ingredient, t)
+
+def test_descriptor_family_colors_cover_every_family():
+    # 2026-09-11 : les couleurs de la maquette T129 pilotent désormais les
+    # pastilles de descripteur (`app._descriptor_chips`). Une famille sans
+    # couleur retomberait silencieusement sur la pastille sage neutre -- donc
+    # visuellement indistinguable d'un mot hors vocabulaire, ce que ce repli
+    # est justement censé signaler. Couverture EXACTE dans les deux sens.
+    familles = set(reference.DESCRIPTOR_FAMILIES.values())
+    couleurs = set(reference.DESCRIPTOR_FAMILY_COLORS)
+    assert familles == couleurs
+    # hex valides : la couleur part en CSS inline, une valeur malformée
+    # casserait la pastille sans erreur Python.
+    assert all(re.fullmatch(r"#[0-9a-f]{6}", c)
+               for c in reference.DESCRIPTOR_FAMILY_COLORS.values())
 
 def test_descriptor_families_keys_match_real_vocabulary(db):
     # T129 (2026-08-29) : garde-fou explicitement demandé par le ticket --

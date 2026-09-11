@@ -21,7 +21,7 @@ import pytest
 st_testing = pytest.importorskip("streamlit.testing.v1")
 AppTest = st_testing.AppTest
 
-from hopmatch import matching
+from hopmatch import matching, reference
 from hopmatch.schema import connect, init_db
 
 APP_PATH = os.path.join(os.path.dirname(__file__), "..", "src", "hopmatch", "app.py")
@@ -597,10 +597,18 @@ def test_contrast_unticking_a_pill_narrows_results_to_that_note_only(toy_cwd):
     assert any("Hopc" in e.label for e in at.expander)  # avant : hopc matche via "resinous"
     at.pills[0].set_value(["woody", "herbal"]).run()
     assert not at.exception
-    # T-D06 (spec Claude Design) : la cible d'affinité est désormais rendue
-    # en pills sage (`app._descriptor_chips`, directives Markdown
-    # `:green-badge[...]`) plutôt qu'une liste "a, b" en texte brut.
-    assert any(":green-badge[herbal]" in c.value and ":green-badge[woody]" in c.value
+    # T-D06 (spec Claude Design) : la cible d'affinité est rendue en pills
+    # (`app._descriptor_chips`) plutôt qu'une liste "a, b" en texte brut.
+    # 2026-09-11 : ces pills sont passées des directives Markdown
+    # `:green-badge[...]` à du HTML coloré PAR FAMILLE OLFACTIVE -- "herbal"
+    # et "woody" sont deux familles différentes (Herbal, Resinous / woody),
+    # donc deux teintes différentes, ce que ce test vérifie aussi : une
+    # couleur unique pour les deux signalerait une régression du mapping.
+    herbal_color = reference.DESCRIPTOR_FAMILY_COLORS[reference.DESCRIPTOR_FAMILIES["herbal"]]
+    woody_color = reference.DESCRIPTOR_FAMILY_COLORS[reference.DESCRIPTOR_FAMILIES["woody"]]
+    assert herbal_color != woody_color
+    assert any(f"--chip:{herbal_color};" in c.value and ">herbal</span>" in c.value
+              and f"--chip:{woody_color};" in c.value and ">woody</span>" in c.value
               for c in at.caption)
     assert any("Hopa" in e.label for e in at.expander)
     assert not any("Hopc" in e.label for e in at.expander)  # exclu : ne matchait que "resinous"
@@ -1374,7 +1382,15 @@ def test_styles_mode_renders_vital_stats_tags_and_examples_for_complete_style(to
     assert metrics["OG (°P)"] == "11.0–13.8"
     assert metrics["FG (°P)"] == "2.1–3.3"
     assert metrics["EBC"] == "6–12"  # 3.0/6.0 SRM x 1.97, arrondi à l'entier
-    assert any("-badge[crisp]" in m.value for m in at.markdown)
+    # 2026-09-11 : pills passées des directives Markdown au HTML de
+    # `_descriptor_chips`. "crisp" (tag de style BJCP) et "Example One" (nom
+    # de bière) ne sont PAS des descripteurs de houblon -> aucune famille ->
+    # repli sur la pastille sage neutre, jamais une couleur attribuée au
+    # hasard. C'est exactement le garde-fou que ce repli doit offrir.
+    assert any('class="hf-chip hf-chip-plain">crisp</span>' in m.value for m in at.markdown)
+    # "Example One" passe par `_source_chips` (pills grises de provenance),
+    # PAS par `_descriptor_chips` -- inchangé par ce ticket, et c'est voulu :
+    # un nom de bière commerciale n'est pas un descripteur d'arôme.
     assert any("-badge[Example One]" in m.value for m in at.markdown)
     # "Aroma"/"Flavor" présents dans la fixture -> expanders rendus ;
     # "Appearance"/"Mouthfeel" (None) -> jamais un expander vide.

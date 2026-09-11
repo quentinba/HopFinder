@@ -16,6 +16,7 @@ Lancer : streamlit run src/hopmatch/app.py [-- --db chemin/vers/aromahops.db]
 from __future__ import annotations
 import base64
 import bisect
+import html
 import io
 import itertools
 import json
@@ -239,6 +240,15 @@ _TOOL_SUMMARY_BY_MODE = {t["mode"]: t for t in _TOOL_SUMMARIES}
 # un `git log` en direct exigerait aussi que `.git` soit présent dans le
 # conteneur déployé, ce qui n'est pas garanti.
 _RECENT_UPDATES = [
+    ("2026-09-11", "Descriptor pills are now coloured by aroma family — "
+                   "citrus words yellow, berry words pink, resinous words "
+                   "green, and so on across the 16 families. A hop's "
+                   "descriptor list used to be 15 identically sage pills you "
+                   "had to read word by word; the shape of its aroma is now "
+                   "visible at a glance. Hover a pill to see its family. "
+                   "Words outside the 138 sorted descriptors — and hop names, "
+                   "which share the same pill — keep the neutral sage, so a "
+                   "colour always means \"this belongs to that family\"."),
     ("2026-09-11", "The \"Purpose\" column no longer cuts its own labels off "
                    "— \"Inferred: Bittering\" was showing as \"Inferred: Bit\". "
                    "Hovering the column header now also explains what the "
@@ -1070,6 +1080,47 @@ div[class*="st-key-panel_"], details[class*="st-key-panel_"] {
    `st.metric` à gauche) réserve la place au-dessus de la piste pour ces 2
    étiquettes -- `padding-top` plutôt qu'une hauteur fixe, la piste garde sa
    position naturelle en dessous. */
+/* Pastilles de descripteur colorées par famille olfactive (2026-09-11, voir
+   `_descriptor_chips`). `--chip` est posée en inline par pastille depuis
+   `reference.DESCRIPTOR_FAMILY_COLORS` ; tout le reste est DÉRIVÉ d'elle par
+   `color-mix`, pour ne pas avoir à inventer 16 hex supplémentaires (fond,
+   bordure, et surtout les deux variantes de thème) qu'aucune maquette ne
+   couvre.
+   ⚠ La teinte BRUTE n'est utilisable comme couleur de TEXTE dans aucun des
+   deux thèmes -- la maquette T129 s'en servait en filet latéral de carte,
+   jamais en texte. Mesuré au ratio de contraste WCAG sur les 16 familles :
+   brutes sur le panneau clair, le pire cas tombe à 1,57 (Citrus #e0a91f,
+   illisible) ; sur le panneau sombre, les familles foncées ("Vinous / wine"
+   #6e2340) disparaissent de la même façon. Les deux variantes sont donc
+   assombries/éclaircies par `color-mix`, aux taux les plus FAIBLES qui
+   passent 4,5:1 sur les 16 familles (calculé, pas tâtonné) : 55 % vers le
+   noir en clair (pire cas 4,55), 45 % vers le blanc en sombre (pire cas
+   5,72). Garder le taux minimal préserve au maximum la distinction entre
+   familles. Re-mesuré à l'écran après application.
+   `display:inline-block` + `white-space:nowrap` : les pastilles s'enroulent
+   sur la largeur disponible sans jamais couper un descripteur en deux
+   ("stone fruit", "lily of the valley"). */
+.hf-chip {
+    display: inline-block;
+    white-space: nowrap;
+    padding: 0.05rem 0.55rem;
+    margin: 0.1rem 0.05rem;
+    border-radius: 99px;
+    font-size: 0.875em;
+    line-height: 1.5;
+    color: light-dark(color-mix(in srgb, var(--chip) 55%, black),
+                      color-mix(in srgb, var(--chip) 45%, white));
+    background: light-dark(color-mix(in srgb, var(--chip) 14%, transparent),
+                           color-mix(in srgb, var(--chip) 22%, transparent));
+    border: 1px solid light-dark(color-mix(in srgb, var(--chip) 32%, transparent),
+                                  color-mix(in srgb, var(--chip) 40%, transparent));
+}
+/* Repli pour un libellé hors des 138 descripteurs triés (nom de houblon,
+   mot d'un futur crawl) : garde la sage d'origine (T-D06), jamais une
+   couleur de famille attribuée au hasard. */
+.hf-chip-plain {
+    --chip: light-dark(#56633f, #aebf92);
+}
 .hf-range-wrap {
     position: relative;
     padding-top: 18px;
@@ -1377,13 +1428,42 @@ def _descriptors_grouped_by_source(desc_by_source: dict[str, set[str]]) -> dict[
 
 
 def _descriptor_chips(labels: list[str]) -> str:
-    """Pills de descripteur (T-D06, spec Claude Design §7) -- "sage pill,
-    used for every descriptor everywhere". `st.badge` est documenté comme un
-    simple raccourci pour la directive Markdown `:color-badge[texte]` (voir
-    sa docstring) : on l'utilise directement en chaîne plutôt qu'un appel
-    `st.badge` par mot, pour pouvoir aligner N chips sur une seule ligne
-    `st.markdown`/`st.caption` sans conteneur horizontal séparé."""
-    return " ".join(f":green-badge[{label}]" for label in labels)
+    """Pills de descripteur, COLORÉES PAR FAMILLE OLFACTIVE (2026-09-11,
+    demande utilisateur : déployer le mapping famille->couleur de la maquette
+    T129, resté inutilisé depuis son écriture -- seul le REGROUPEMENT avait
+    été câblé, au filtre "Family" de `by-descriptor`).
+
+    Remplace la pastille sage uniforme de T-D06 ("sage pill, used for every
+    descriptor everywhere") : 138 mots tous de la même couleur ne portaient
+    aucune information, alors que la famille est précisément ce qu'un
+    brasseur lit en premier dans une liste de 15 descripteurs. Les 16 teintes
+    viennent de `reference.DESCRIPTOR_FAMILY_COLORS`.
+
+    **Repli sage pour un libellé SANS famille** : cette fonction est aussi
+    appelée avec des choses qui ne sont pas des descripteurs -- des NOMS DE
+    HOUBLON (`_similar_hops_section`) et des mots hors des 138 termes triés
+    à la main. Les colorier au hasard serait pire que de ne rien colorier ;
+    ils gardent donc l'apparence d'origine, et la couleur reste un signal
+    fiable ("cette pastille est colorée => elle appartient à cette famille").
+
+    HTML plutôt que la directive Markdown `:color-badge[...]` : celle-ci ne
+    connaît que les 7 couleurs nommées de Streamlit (et le projet s'interdit
+    le rouge), impossible d'y exprimer 16 familles. Les libellés viennent de
+    pages crawlées -> `html.escape` sur CHAQUE libellé, jamais interpolés
+    bruts (`unsafe_allow_html` n'était jusqu'ici utilisé que pour les blocs
+    `<style>` du projet, jamais pour du contenu : c'est la première fois que
+    de la donnée externe passe par ce chemin)."""
+    out = []
+    for label in labels:
+        family = reference.DESCRIPTOR_FAMILIES.get(label)
+        color = reference.DESCRIPTOR_FAMILY_COLORS.get(family) if family else None
+        safe = html.escape(str(label))
+        if color is None:
+            out.append(f'<span class="hf-chip hf-chip-plain">{safe}</span>')
+        else:
+            out.append(f'<span class="hf-chip" style="--chip:{color};" '
+                      f'title="{html.escape(family)}">{safe}</span>')
+    return " ".join(out)
 
 
 def _source_chips(labels: list[str]) -> str:
@@ -1818,7 +1898,8 @@ def _hop_detail_expanders(con, hops: dict, comp: dict, hop_desc: dict, rows: lis
                 # the name of the source, not the notes themselves").
                 desc_by_source = _descriptors_grouped_by_source(desc_src.get(v, {}))
                 st.markdown("**Descriptors**  \n" + "  \n".join(
-                    f"**{s}:** " + _descriptor_chips(ds) for s, ds in desc_by_source.items()))
+                    f"**{s}:** " + _descriptor_chips(ds) for s, ds in desc_by_source.items()),
+                    unsafe_allow_html=True)
             else:
                 st.write("**Descriptors:** none recorded")
             hcomp = comp.get(v, {})
@@ -2587,7 +2668,8 @@ def _contrast(con):
         # T-D06 (spec Claude Design §7) : "descriptor chip -- ... used for
         # every descriptor everywhere (..., contrast targets)".
         st.caption("Affinity target: "
-                  + (_descriptor_chips(sorted(r["affinity_target"])) or "(none selected)"))
+                  + (_descriptor_chips(sorted(r["affinity_target"])) or "(none selected)"),
+                  unsafe_allow_html=True)
         if r["unmapped"]:
             st.caption(":material/info: No affinity mapping for: "
                       + ", ".join(r["unmapped"]) + " (ignored, no effect on the target).")
@@ -2971,7 +3053,8 @@ def _browse(con):
             # annotation `mot (source)` répétée à chaque descripteur.
             by_source = _descriptors_grouped_by_source(desc_src.get(selected, {}))
             st.markdown("**Descriptors**  \n" + "  \n".join(
-                f"**{s}:** " + _descriptor_chips(ds) for s, ds in by_source.items()))
+                f"**{s}:** " + _descriptor_chips(ds) for s, ds in by_source.items()),
+                unsafe_allow_html=True)
         else:
             st.write("**Descriptors:** none recorded")
 
@@ -3127,7 +3210,8 @@ def _hop_associations(con, hops: dict, selected: str) -> None:
         # as in Descriptors") -- même pilule sage que les descripteurs,
         # cohérence visuelle sur toute la carte "Database similarity and
         # substitution" plutôt qu'un mélange texte brut/chips.
-        st.markdown(_descriptor_chips([hops[v]["name"] for v in similar if v in hops]))
+        st.markdown(_descriptor_chips([hops[v]["name"] for v in similar if v in hops]),
+                    unsafe_allow_html=True)
     else:
         st.caption("No Yakima suggestion for this variety.")
 
@@ -3157,7 +3241,8 @@ def _hop_associations(con, hops: dict, selected: str) -> None:
             label = hops[s["variety"]]["name"] if s["variety"] in hops else s["name"]
             subs_by_source.setdefault(_SUB_SOURCE_LABELS.get(s["source"], s["source"]), []).append(label)
         st.markdown("  \n".join(f"**{src}:** " + _descriptor_chips(labels)
-                                for src, labels in subs_by_source.items()))
+                                for src, labels in subs_by_source.items()),
+                    unsafe_allow_html=True)
         # Bonus du ticket (T109) : convergence des TROIS sources éditoriales
         # (Yakima `hop_similar` + BeerMaverick + beer-analytics, PAS notre
         # calcul chimique `similar_hops` -- signal différent, jamais mélangé
@@ -3189,7 +3274,8 @@ def _hop_associations(con, hops: dict, selected: str) -> None:
             label = f"{s['label']} ({s['style_id']})" if s["style_id"] else s["label"]
             by_source.setdefault(_SOURCE_LABELS.get(s["source"], s["source"]), []).append(label)
         st.markdown("  \n".join(f"**{src}:** " + _descriptor_chips(labels)
-                                for src, labels in by_source.items()))
+                                for src, labels in by_source.items()),
+                    unsafe_allow_html=True)
     else:
         st.caption("No editorial style suggestion for this variety.")
 
@@ -3560,7 +3646,8 @@ def _by_descriptor(con):
             desc_by_source = _descriptors_grouped_by_source(
                 {d: desc_src.get(h["variety"], {}).get(d, set()) for d in h["all_descriptors"]})
             st.caption("**All descriptors**  \n" + "  \n".join(
-                f"**{s}:** " + _descriptor_chips(ds) for s, ds in desc_by_source.items()))
+                f"**{s}:** " + _descriptor_chips(ds) for s, ds in desc_by_source.items()),
+                unsafe_allow_html=True)
             if h["compounds"]:
                 st.dataframe(
                     [{"Compound": c["compound"], "Value": round(c["mid"], 2),
@@ -6243,7 +6330,7 @@ def _styles(con) -> None:
             # -- UNE chaîne markdown avec toutes les pills, rendue en un
             # seul `st.markdown`, qui s'enroule naturellement sur la largeur
             # disponible au lieu d'empiler une ligne par tag.
-            st.markdown(_descriptor_chips(tags))
+            st.markdown(_descriptor_chips(tags), unsafe_allow_html=True)
 
     with _panel():
         st.write("**Vital statistics**")

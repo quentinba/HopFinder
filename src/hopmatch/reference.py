@@ -314,6 +314,42 @@ DESCRIPTOR_FAMILIES: dict[str, str] = {
     "fruity": "Generic", "sweet aromatic": "Generic",
 }
 
+# Couleur par famille (2026-09-11) -- reprise TELLE QUELLE de la maquette
+# T129 qui a servi à trancher le regroupement ci-dessus (artifact "Aroma
+# Families", bande de couleur à gauche de chaque carte de famille). Elle y
+# dormait inutilisée : le regroupement avait été câblé au filtre "Family" de
+# `by-descriptor`, jamais les couleurs. Demande utilisateur du 2026-09-11 de
+# les déployer sur les pastilles de descripteur.
+#
+# Ces valeurs sont un CHOIX DE DESIGN repris d'une maquette validée, pas une
+# donnée mesurée -- ne pas les "ajuster" sans une nouvelle maquette, c'est
+# exactement le genre de valeur qui dérive à force de retouches au jugé.
+#
+# Une seule teinte par famille, PAS deux (claire/sombre) : la variante de
+# thème est DÉRIVÉE en CSS (`color-mix`, voir `app._descriptor_chips`), pour
+# ne pas inventer 16 hex de plus qu'aucune maquette ne couvre.
+#
+# Clés = les valeurs de DESCRIPTOR_FAMILIES, garde-fou testé
+# (`test_descriptor_family_colors_cover_every_family`).
+DESCRIPTOR_FAMILY_COLORS: dict[str, str] = {
+    "Tropical": "#d9772e",
+    "Melon": "#a8b93f",
+    "Citrus": "#e0a91f",
+    "Berry": "#a83262",
+    "Stone fruit": "#d9713f",
+    "Pome fruit": "#8a9c3f",
+    "Floral": "#9a6bb0",
+    "Herbal": "#6f8f56",
+    "Green / vegetal": "#4f8a52",
+    "Spicy": "#b4482f",
+    "Resinous / woody": "#5a6b3a",
+    "Sweet / dessert": "#8a5a2e",
+    "Vinous / wine": "#6e2340",
+    "Alliaceous / sulfur": "#a68a5c",
+    "Dairy / creamy": "#c9b077",
+    "Generic": "#83886f",
+}
+
 # Définitions des 15 catégories (+1, "menthol", ajoutée en T79 -- voir plus
 # bas) de la roue d'arôme quantitative Yakima
 # (`hop_aroma_intensity`, T26) -- demande utilisateur explicite (2026-08-19) :
