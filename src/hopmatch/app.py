@@ -239,6 +239,18 @@ _TOOL_SUMMARY_BY_MODE = {t["mode"]: t for t in _TOOL_SUMMARIES}
 # un `git log` en direct exigerait aussi que `.git` soit présent dans le
 # conteneur déployé, ce qui n'est pas garanti.
 _RECENT_UPDATES = [
+    ("2026-09-11", "From descriptors: the two heatmaps now say what decides "
+                   "which one a descriptor lands in. They are split by "
+                   "vocabulary — the first holds the aroma-wheel categories, "
+                   "which *can* carry a measured intensity, the second holds "
+                   "words that never can (raspberry, mango, dank...). So a "
+                   "category stays in the first grid even when every cell is "
+                   "black, black meaning \"tagged, but nobody measured its "
+                   "intensity for this hop\"."),
+    ("2026-09-11", "Results tables no longer push their rightmost columns off "
+                   "screen: the narrow columns (score, percentages, purpose) "
+                   "are now capped, leaving the room to the contributor and "
+                   "source lists."),
     ("2026-09-11", "Contrast's two filter blocks (\"Complementary notes to "
                    "target\" and \"Purpose\") each get their own full-width "
                    "row instead of sharing one — the ten target pills were "
@@ -1437,7 +1449,18 @@ def _render_hop_rows(rows: list[dict], columns: list[tuple]) -> None:
     amplify, fraction de la cible d'affinité réellement couverte pour
     contrast, similarité cosinus pour similar-hops) -- une aide générique
     serait fausse pour au moins deux des trois."""
-    column_config: dict = {"Hop": st.column_config.TextColumn(pinned=True)}
+    # Largeurs EXPLICITES (2026-09-11, AUDIT.md §E4) : un tableau Amplify
+    # complet demande jusqu'à 9 colonnes (Hop, Score, Mol., Desc., Purpose,
+    # puis 4 colonnes de listes) et `st.dataframe` les répartissait à sa
+    # guise -- sur un écran de 1568 px, "Composition sources" était déjà
+    # tronquée à l'affichage, et sur mobile on n'atteignait presque jamais
+    # les colonnes de droite. Les colonnes ÉTROITES par nature (un nombre à
+    # une décimale, un pourcentage, un mot) sont donc bornées à "small",
+    # ce qui rend la place aux colonnes de LISTES, seules à avoir un contenu
+    # de longueur variable. Le défilement horizontal reste possible (c'est
+    # le comportement `st.dataframe` assumé depuis le passage au vrai
+    # tableau, voir ci-dessus) -- il devient juste rarement nécessaire.
+    column_config: dict = {"Hop": st.column_config.TextColumn(pinned=True, width="small")}
     table_rows = []
     for row in rows:
         entry = {"Hop": row["name"]}
@@ -1452,10 +1475,10 @@ def _render_hop_rows(rows: list[dict], columns: list[tuple]) -> None:
                 entry[header] = row.get(field, "")
                 if kind == "score":
                     column_config[header] = st.column_config.ProgressColumn(
-                        format="%.1f", min_value=0, max_value=100, help=col_help)
+                        format="%.1f", min_value=0, max_value=100, width="small", help=col_help)
                 elif kind == "fraction":
                     column_config[header] = st.column_config.NumberColumn(
-                        format="percent", help=col_help)
+                        format="percent", width="small", help=col_help)
                 elif kind == "list":
                     column_config[header] = st.column_config.ListColumn(help=col_help)
         table_rows.append(entry)
@@ -3353,16 +3376,32 @@ def _by_descriptor(con):
     if heatmap is not None:
         wheel_chart, other_chart, hidden = heatmap
         suffix = f" (first 12 of {len(ranked)})" if hidden else ""
+        # Les deux grilles sont séparées par VOCABULAIRE (ce mot peut-il
+        # porter une mesure de roue quelque part dans la base ?), pas par la
+        # donnée du houblon affiché. Dit explicitement depuis le 2026-09-11
+        # (question utilisateur en direct sur "raspberry" : "stone fruit ou
+        # earthy qui sont des cases noires n'apparaissent pas dans la 2eme
+        # heatmap qualitative... pas sûr de comprendre si c'est une erreur
+        # d'implémentation") -- les deux légendes disaient chacune "pas de
+        # donnée quantitative", donc une case noire de la grille 1 semblait
+        # devoir appartenir à la grille 2. Le critère de répartition, lui,
+        # n'était écrit nulle part.
         if wheel_chart is not None:
             with _panel():
-                st.caption("Aroma wheel descriptors — shaded by measured intensity (Yakima), "
-                          "black where a hop carries the descriptor but has no quantitative "
-                          "reading for it" + suffix)
+                st.caption("Aroma wheel categories — the vocabulary that *can* carry a "
+                          "measured intensity (Yakima/BarthHaas). Shaded by that intensity; "
+                          "**black = this hop is tagged with the category, but nobody "
+                          "measured its intensity for this hop**. Categories stay in this "
+                          "grid even when every cell is black — what puts them here is the "
+                          "vocabulary, not whether this particular hop has a reading"
+                          + suffix)
             st.altair_chart(wheel_chart, width="stretch")
         if other_chart is not None:
             with _panel():
-                st.caption("Other descriptors — categorical only, no quantitative intensity "
-                          "data exists for these (black = present)" + suffix)
+                st.caption("Descriptors outside that vocabulary (raspberry, mango, dank...) "
+                          "— **no hop can ever have a measured intensity for these**, which "
+                          "is why they are shown apart rather than as gaps above. Black = "
+                          "present" + suffix)
             st.altair_chart(other_chart, width="stretch")
 
     # T79 (2026-08-22) : `all_intensity` chargé une seule fois pour toute la
@@ -3609,62 +3648,34 @@ def _compare_principal_values(hcomp: dict) -> dict[str, float | None]:
            "Co-humulone\n(% of hop)": co_h_abs, "Total oil\n(ml/100g)": oil}
 
 
-# Unités reconnues par `_compare_detail_value`, hors `pct_oil` (converti/
-# affiché normalement) : chacune est déjà une quantité ABSOLUE, jamais
-# convertie quel que soit `absolute`, EXACTEMENT le même traitement que
-# les thiols avant l'introduction de ce garde-fou -- voir sa docstring.
-# `mg_100g` (T134, hops-comptoir : linalol/farnésène/géraniol de 5 variétés
-# françaises) N'EST PAS dedans -- bug réel signalé par l'utilisateur
-# (2026-09-09) : avant ce garde-fou, `_compare_detail_value` renvoyait ce
-# `mg_100g` brut tel quel dès que l'unité n'était pas `pct_oil`, exactement
-# comme pour les thiols -- sauf que `linalool`/`geraniol`/`farnesene` sont
-# dans `_COMPARE_DETAIL_OIL_COMPOUNDS` (axe "% d'huile"/"ml/100g" partagé
-# avec myrcène etc.), pas dans l'axe secondaire dédié des thiols. Un houblon
-# hops-comptoir affichait donc son linalol en mg/100g DE HOUBLON directement
-# sur le même axe que le % d'huile des autres sources -- ordres de grandeur
-# incomparables, axe entier écrasé. Pas de conversion tentée (pas de densité
-# d'huile sourcée pour transformer mg/100g de houblon en % d'huile) : ce
-# composé est simplement exclu de ce graphique pour cette variété (voir
-# `incompatible_unit` dans `app._compare`), la valeur mg/100g reste visible
-# ailleurs (tableaux de composition génériques, colonne "Unit").
-#
-# RÉEXPORT de `matching.SCORING_ABSOLUTE_UNITS` (2026-09-10, AUDIT.md §C2) et
-# plus une seconde liste écrite ici : c'est la MÊME règle métier ("quelles
-# unités peuvent partager l'axe de l'huile"), et les deux copies avaient déjà
-# divergé une fois -- l'affichage corrigé le 2026-09-09, le scoring
-# (`matching.amount`) resté buggé un jour de plus. Une seule définition, deux
-# consommateurs.
-_COMPARE_DETAIL_ABSOLUTE_UNITS = matching.SCORING_ABSOLUTE_UNITS
+# Règle d'unité de ce barplot : voir `matching.compound_quantity`, qui la
+# porte désormais SEULE (2026-09-11, AUDIT.md §C2 -- la constante locale
+# `_COMPARE_DETAIL_ABSOLUTE_UNITS` et la conversion écrite ici en double ont
+# été retirées après que les deux implémentations eurent divergé d'un jour).
+# Rappel du piège qui a mené là (bug signalé par l'utilisateur le
+# 2026-09-09) : `linalool`/`geraniol`/`farnesene` sont dans
+# `_COMPARE_DETAIL_OIL_COMPOUNDS` (axe "% d'huile"/"ml/100g" partagé avec
+# myrcène etc.), pas dans l'axe secondaire dédié des thiols -- un houblon
+# hops-comptoir y affichait donc son linalol en mg/100g DE HOUBLON sur le
+# même axe que le % d'huile des autres sources, ordres de grandeur
+# incomparables, axe entier écrasé.
 
 
 def _compare_detail_value(hcomp: dict, compound: str, absolute: bool) -> float | None:
     """Valeur d'UN composé du barplot 2 pour UN houblon, en % d'huile (par
     défaut) ou en quantité absolue ml/100g (`absolute=True`, bascule
-    2026-08-21, demande utilisateur explicite -- reprend une suggestion
-    lue telle quelle : convertir `% d'huile × huile_totale / 100`, EXACTEMENT
-    la même conversion que `matching.amount()` applique déjà pour l'unité
-    `pct_oil` côté scoring, réappliquée ici pour l'affichage). Composés en
-    dehors de `pct_oil` mais dans `_COMPARE_DETAIL_ABSOLUTE_UNITS` (thiols,
-    en µg/kg) ne sont JAMAIS convertis, quel que soit `absolute` -- déjà une
-    quantité absolue. `None` si le composé est absent, si `absolute=True` et
-    que `total_oil` de ce houblon est inconnu (aucune conversion possible),
-    OU si l'unité n'est reconnue dans AUCUN des deux cas ci-dessus (ex.
-    `mg_100g`, voir `_COMPARE_DETAIL_ABSOLUTE_UNITS`) -- jamais une valeur
-    d'une unité incompatible tracée sur cet axe."""
-    rec = hcomp.get(compound)
-    if not rec or rec.get("mid") is None:
-        return None
-    unit = rec.get("unit")
-    if unit == "pct_oil":
-        if not absolute:
-            return rec["mid"]
-        oil = hcomp.get("total_oil", {}).get("mid")
-        if oil is None:
-            return None
-        return rec["mid"] * oil / 100.0
-    if unit in _COMPARE_DETAIL_ABSOLUTE_UNITS:
-        return rec["mid"]
-    return None
+    2026-08-21, demande utilisateur explicite -- reprend une suggestion lue
+    telle quelle : convertir `% d'huile × huile_totale / 100`).
+
+    Délègue entièrement la règle d'unité à `matching.compound_quantity`
+    (2026-09-11, AUDIT.md §C2) : c'est LA même question que côté scoring
+    ("cette mesure est-elle plaçable sur l'axe de l'huile, et sous quelle
+    forme ?"), et les deux implémentations parallèles avaient déjà divergé
+    une fois. `None` = composé absent OU mesure non plaçable (unité
+    incomparable, ou % d'huile sans huile totale connue) -> aucune barre
+    tracée, et `app._compare` le signale par une caption dédiée."""
+    return matching.compound_quantity(
+        hcomp.get(compound), matching.usable_total_oil(hcomp), absolute=absolute)
 
 
 def _compare_field_db_values(comp: dict, field: str, absolute: bool) -> list[float]:
@@ -5482,8 +5493,10 @@ def _compare(con):
     # {nom houblon: {composés}} exclus de ce graphique parce que mesurés dans
     # une unité incompatible avec cet axe (ex. `mg_100g` hops-comptoir pour
     # linalool/geraniol/farnesene, T134) -- jamais silencieux, voir la
-    # docstring de `_compare_detail_value`/`_COMPARE_DETAIL_ABSOLUTE_UNITS`
-    # et la caption plus bas.
+    # docstring de `_compare_detail_value`/`matching.compound_quantity` et la
+    # caption plus bas. Distingué du cas "huile totale inconnue" juste en
+    # dessous : les deux empêchent de tracer une barre, mais pour des raisons
+    # différentes, et l'utilisateur a droit à la bonne.
     incompatible_unit: dict[str, set[str]] = {}
     for v in selected:
         name = hops[v]["name"]
@@ -5494,13 +5507,12 @@ def _compare(con):
             if val is not None:
                 detail_rows.append({"Hop": name, "Field": c, "Value": val})
             elif rec.get("mid") is not None:
-                unit = rec.get("unit")
-                if unit == "pct_oil":
+                if rec.get("unit") == "pct_oil":
                     # Composé mesuré (% d'huile) mais `total_oil` inconnu
                     # pour CE houblon -- pas de conversion possible, jamais
                     # une barre fabriquée à partir d'une huile totale devinée.
                     missing_oil.append(name)
-                elif unit not in _COMPARE_DETAIL_ABSOLUTE_UNITS:
+                else:
                     incompatible_unit.setdefault(name, set()).add(c)
         for tc in _COMPARE_THIOL_SPECIES_COMPOUNDS:
             thiols_val = _compare_detail_value(hcomp, tc, show_absolute)

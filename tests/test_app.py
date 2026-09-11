@@ -733,14 +733,25 @@ def test_by_descriptor_heatmap_separates_wheel_and_other_descriptor_sections(toy
     # dans hop_aroma_intensity de la fixture -> section roue) ET hopb
     # (floral, hors du vocabulaire roue de la fixture -> section "other").
     # Les deux captions/sections doivent apparaître séparément.
+    #
+    # Libellés réécrits le 2026-09-11 (question utilisateur en direct sur
+    # "raspberry" : "stone fruit ou earthy qui sont des cases noires
+    # n'apparaissent pas dans la 2eme heatmap qualitative... pas sûr de
+    # comprendre si c'est une erreur d'implémentation"). Les deux anciennes
+    # captions disaient chacune "pas de donnée quantitative", donc une case
+    # noire de la grille 1 semblait devoir appartenir à la grille 2 -- alors
+    # que la répartition se fait par VOCABULAIRE (ce mot peut-il porter une
+    # mesure quelque part dans la base ?), critère qui n'était écrit nulle
+    # part. Ce test vérifie donc désormais que chaque caption porte bien le
+    # critère de répartition, pas seulement un titre de section.
     from streamlit.testing.v1.element_tree import UnknownElement
     at = _app()
     at.run()
     at.sidebar.radio[0].set_value("by-descriptor").run()
     at.multiselect[0].select("citrus").select("floral").run()
     assert not at.exception
-    assert any("Aroma wheel descriptors" in c.value for c in at.caption)
-    assert any("Other descriptors" in c.value for c in at.caption)
+    assert any("Aroma wheel categories" in c.value for c in at.caption)
+    assert any("outside that vocabulary" in c.value for c in at.caption)
     # iframe de fond + 2 heatmaps (roue + other) au minimum.
     assert len([n for n in at.main if isinstance(n, UnknownElement)]) >= 3
 
