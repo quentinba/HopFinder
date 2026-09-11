@@ -353,6 +353,16 @@ existante).
   test touchant à une règle d'unité doit construire son `comp` à la main avec
   des unités mélangées (voir les 4 tests ajoutés le 2026-09-10), jamais se
   reposer sur les fixtures.
+  **Portée mesurée (2026-09-11)** : le bug touchait aussi les BLENDS, par
+  propagation du classement — sur 120 ingrédients réels, 60 % avaient une
+  composition de blend différente et 38 % un houblon de base différent.
+  Vérifié à cette occasion, et bon à savoir pour tout futur correctif de
+  chimie : **le chemin de blend n'accède JAMAIS à la composition**
+  (`_pairing_grown_blends`/`_grow_pick`/`_hop_pairing_frequencies`/
+  `_top_pairing_partners`/`_style_restricted_pool` : zéro référence à `comp`,
+  `amount()`, `total_oil`). Il ne consomme que l'ORDRE des candidats, les
+  descripteurs et les fréquences de pairing — donc corriger une règle de
+  chimie à un seul endroit suffit, il n'y a pas de second chemin à surveiller.
 - **Champs manquants différents d'une variété française à l'autre : PAS un
   bug, vérifié en direct sur les 5 variétés (utilisateur, 2026-09-10)** sur
   le HTML brut en cache (`data/cache/hops_comptoir/`, grep direct sur le

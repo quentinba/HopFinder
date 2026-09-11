@@ -451,8 +451,21 @@ manque n'est pas l'honnêteté, c'est **l'interprétabilité du chiffre affiché
    on veut un jour réintégrer ces mesures plutôt que les écarter.
 2. **`hop_lot_analysis` n'existe pas dans `aromahops.db`** alors que le schéma et le client
    T116 sont écrits. Attendu (aucun lot ingéré, `ensure_table` la créera) ou oubli ?
-3. **Impact de B1 sur les blends** : `amplify_blend` part du classement `amplify`. Je n'ai
-   pas mesuré la propagation aux blends, seulement au classement simple.
+3. ~~**Impact de B1 sur les blends**~~ ✅ **MESURÉ ET CLOS le 2026-09-11.** Oui, les blends
+   étaient touchés, et largement. Mesuré sur **120 ingrédients réels** (ceux ayant à la fois
+   une note et des descripteurs suggérés), en rejouant l'ancien `compound_quantity` :
+   **72/120 (60 %) avaient une composition de blend différente**, et **46/120 (38 %) un
+   HOUBLON DE BASE différent** — ex. mangue proposait Bravo au lieu de Talus, fraise Simcoe
+   au lieu de Superdelic. Le correctif de B1 les a donc corrigés aussi.
+
+   **Aucun risque résiduel**, vérifié par lecture ciblée : `_pairing_grown_blends`,
+   `_grow_pick`, `_hop_pairing_frequencies`, `_top_pairing_partners` et
+   `_style_restricted_pool` n'accèdent **jamais** à la composition — zéro référence à `comp`,
+   `amount()`, `compound_quantity`, `total_oil` ou `["mid"]`. Le blend ne consomme que
+   l'ORDRE des candidats (issu d'`amplify`/`contrast`), les ensembles de descripteurs et les
+   fréquences de pairing. La chimie n'entre dans un blend que par ce classement : corriger la
+   règle d'unité à un seul endroit suffit donc à corriger les blends, et il n'existe pas de
+   second chemin à surveiller.
 4. **Le biais D4 est-il un défaut ?** Un houblon mieux documenté *mérite* peut-être de mieux
    ressortir. Je le signale comme non documenté, pas comme certainement à corriger.
 5. **Reproductibilité au-delà de l'ordre SQL** : je n'ai trouvé aucune graine aléatoire ni
